@@ -5,7 +5,7 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/csemver-integration.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 cd "$tmp"
-git init -q -b main
+git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
 git config commit.gpgSign false
@@ -131,7 +131,7 @@ test -z "$(git status --porcelain)"
 
 mkdir "$tmp/first-release"
 cd "$tmp/first-release"
-git init -q -b main
+git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
 git config commit.gpgSign false
@@ -146,7 +146,7 @@ test "$(git cat-file -t refs/tags/v0.5.0)" = tag
 
 mkdir "$tmp/breaking-changes"
 cd "$tmp/breaking-changes"
-git init -q -b main
+git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
 git config commit.gpgSign false
@@ -188,7 +188,7 @@ grep -q 'callers must migrate to the new API' CHANGELOG.md
 
 mkdir "$tmp/prerelease-window"
 cd "$tmp/prerelease-window"
-git init -q -b main
+git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
 git config commit.gpgSign false
@@ -226,7 +226,7 @@ feature_count=$(grep -Fc '* add prerelease feature' CHANGELOG.md)
 test -z "$(git status --porcelain)"
 mkdir "$tmp/no-empty-bump"
 cd "$tmp/no-empty-bump"
-git init -q -b main
+git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
 printf '{\n  "name": "no-empty-bump",\n  "version": "1.0.0"\n}\n' > package.json
@@ -243,7 +243,7 @@ test -z "$(git tag --list 'v1.0.1')"
 test -z "$(git status --porcelain)"
 mkdir "$tmp/lifecycle"
 cd "$tmp/lifecycle"
-git init -q -b main
+git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
 git config commit.gpgSign false
@@ -275,7 +275,7 @@ test -z "$(git status --porcelain)"
 
 mkdir "$tmp/lerna-package"
 cd "$tmp/lerna-package"
-git init -q -b main
+git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
 printf '1.0.0\n' > VERSION

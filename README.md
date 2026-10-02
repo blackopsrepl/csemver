@@ -27,7 +27,7 @@ From a Git working tree with conventional commits:
 ```sh
 ./build/csemver --dry-run
 ./build/csemver
-git push --follow-tags origin main
+git push --follow-tags origin master
 ```
 
 The release command updates configured version files and the changelog, creates a release commit, then creates an annotated tag. It does **not** push; review the preview and push the branch and tag yourself. The first release can use `--first-release` to tag the version already in the package file without bumping it.
