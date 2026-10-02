@@ -29,7 +29,19 @@ git add seed-fix.txt
 git commit -qm 'fix: correct seed parsing'
 printf 'user work\n' > staged.txt
 git add staged.txt
-dry_run_output=$("$bin" --dry-run)
+utc_hour=$(date -u '+%H')
+if [ "$utc_hour" -lt 12 ]; then
+  release_timezone=Etc/GMT+12
+else
+  release_timezone=Pacific/Kiritimati
+fi
+expected_release_date=$(date -u '+%Y-%m-%d')
+dry_run_output=$(TZ="$release_timezone" "$bin" --dry-run)
+printf '%s\n' "$dry_run_output" | grep -Fq "($expected_release_date)" || {
+  printf 'release heading date must use UTC (%s):\n%s\n' \
+    "$expected_release_date" "$dry_run_output" >&2
+  exit 1
+}
 printf '%s\n' "$dry_run_output" | grep -q 'bumping version in VERSION from 1.0.0 to 1.1.0'
 printf '%s\n' "$dry_run_output" | grep -q '^## \[1.1.0\]'
 ! printf '%s\n' "$dry_run_output" | grep -q '^# Changelog'
@@ -313,5 +325,132 @@ printf '%s\n' "$lerna_prerelease_dry_run" | grep -q 'bumping version in VERSION 
     "$lerna_prerelease_dry_run" >&2
   exit 1
 }
+
+mkdir "$tmp/angular-preset"
+cd "$tmp/angular-preset"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "angular-preset",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize angular preset fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git remote add origin 'https://github.com/blackopsrepl/angular-preset-fixture.git'
+printf 'fast mode\n' > fast.txt
+git add fast.txt
+git commit -qm 'feat(api): add fast mode (#42)'
+angular_feature_hash=$(git rev-parse HEAD)
+git commit --allow-empty -qm 'fix(core): handle empty input (#52)'
+git commit --allow-empty -qm 'perf(parser): cache tokens'
+git commit --allow-empty -qm 'docs: explain the new mode'
+git commit --allow-empty -m 'feat(api): change the public contract' \
+  -m 'BREAKING CHANGE: callers must migrate'
+git commit --allow-empty -qm 'feat!: Angular does not parse bang headers'
+git revert --no-edit "$angular_feature_hash" > /dev/null
+"$bin" --preset angular --release-as 1.1.0 --skip commit --skip tag > /dev/null
+grep -q '^# \[1.1.0\]' CHANGELOG.md || {
+  printf 'angular preset version heading should be level one for a minor release\n' >&2
+  exit 1
+}
+if grep -q 'Angular does not parse bang headers' CHANGELOG.md; then
+  printf 'angular preset included a commit that its header parser rejects\n' >&2
+  exit 1
+fi
+if grep -q 'add fast mode' CHANGELOG.md; then
+  printf 'angular preset failed to suppress the reverted commit pair\n' >&2
+  exit 1
+fi
+for section in 'Bug Fixes' 'Features' 'Performance Improvements'; do
+  grep -q "^### $section$" CHANGELOG.md || {
+    printf 'angular preset omitted section: %s\n' "$section" >&2
+    exit 1
+  }
+done
+bug_line=$(grep -n '^### Bug Fixes$' CHANGELOG.md | cut -d: -f1)
+feature_line=$(grep -n '^### Features$' CHANGELOG.md | cut -d: -f1)
+perf_line=$(grep -n '^### Performance Improvements$' CHANGELOG.md | cut -d: -f1)
+breaking_line=$(grep -n '^### BREAKING CHANGES$' CHANGELOG.md | cut -d: -f1)
+test "$bug_line" -lt "$feature_line"
+test "$feature_line" -lt "$perf_line"
+test "$perf_line" -lt "$breaking_line"
+
+mkdir "$tmp/angular-revert-after-release"
+cd "$tmp/angular-revert-after-release"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "angular-revert-range",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize angular revert fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git remote add origin 'https://github.com/blackopsrepl/angular-revert-range-fixture.git'
+printf 'fast mode\n' > fast.txt
+git add fast.txt
+git commit -qm 'feat(api): add fast mode'
+angular_range_feature_hash=$(git rev-parse HEAD)
+printf '{\n  "name": "angular-revert-range",\n  "version": "1.1.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore(release): 1.1.0'
+git tag -a v1.1.0 -m 'chore(release): 1.1.0'
+git revert --no-edit "$angular_range_feature_hash" > /dev/null
+"$bin" --preset angular --release-as 1.1.1 --skip commit --skip tag > /dev/null
+grep -q '^### Reverts$' CHANGELOG.md || {
+  printf 'angular preset omitted a revert whose target is outside the changelog window\n' >&2
+  exit 1
+}
+grep -q 'Revert "feat(api): add fast mode"' CHANGELOG.md || {
+  printf 'angular preset changed the standard revert subject\n' >&2
+  exit 1
+}
+
+if "$bin" --preset csemver-unsupported --dry-run > "$tmp/unsupported-preset.out" 2>&1; then
+  printf 'unsupported changelog preset unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -q "unsupported changelog preset 'csemver-unsupported'" \
+  "$tmp/unsupported-preset.out"
+
+mkdir "$tmp/angular-bump"
+cd "$tmp/angular-bump"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "angular-bump",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize angular bump fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+printf 'types = [{ type = "chore", effect = "hidden" }]\n' > csemver.toml
+git add csemver.toml
+git commit -qm 'chore: restrict the configured conventional types'
+git commit --allow-empty -qm 'feat(core): add support for custom rules'
+angular_bump_preview=$("$bin" --preset angular --dry-run)
+printf '%s\n' "$angular_bump_preview" | \
+  grep -q 'bumping version in package.json from 1.0.0 to 1.1.0' || {
+    printf 'angular preset should ignore custom conventional types when bumping:\n%s\n' \
+      "$angular_bump_preview" >&2
+    exit 1
+  }
+
+mkdir "$tmp/cli-scripts"
+cd "$tmp/cli-scripts"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "cli-scripts",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize lifecycle script fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git commit --allow-empty -qm 'fix: exercise CLI lifecycle scripts'
+cli_script_marker="$tmp/cli-script.marker"
+"$bin" --release-as 1.0.1 --scripts.posttag="touch $cli_script_marker" > /dev/null
+test -f "$cli_script_marker"
+git commit --allow-empty -qm 'fix: exercise an unknown lifecycle key'
+unknown_script_marker="$tmp/unknown-script.marker"
+"$bin" --release-as 1.0.2 --scripts.unknown="touch $unknown_script_marker" > /dev/null
+test ! -e "$unknown_script_marker"
 
 printf '%s\n' 'release workflow tests passed'

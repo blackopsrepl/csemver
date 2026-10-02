@@ -47,7 +47,7 @@ bumpFiles = [{ filename = "VERSION", type = "plain-text" }]
 
 File lists may also contain strings (for recognized extensions) or tables with `filename` and `type`. Supported updater types are `json`, `python`, `toml`, `yaml`, `openapi`, and `plain-text`. JSON package-lock files update only the root package version surfaces. JSON files are reserialized with detected indentation and newline conventions and end with a newline, matching upstream behavior; the other text updaters preserve surrounding bytes, while plain-text replaces only the version token.
 
-Other supported keys include `infile`, `header`, `releaseAs`, `prerelease`, `releaseCount`, `tagPrefix`, `issuePrefixes`, `path`, `lernaPackage`, `preMajor`, `noBumpWhenEmptyChanges`, `releaseCommitMessageFormat`, `commitUrlFormat`, `compareUrlFormat`, `issueUrlFormat`, `userUrlFormat`, `packageFiles`, `bumpFiles`, `types`, `skip`, and `scripts`. A custom `types` array replaces the default types; each entry uses `type`, optional `section`, and either `hidden` or `effect = "hidden" | "changelog" | "bump"`.
+Other supported keys include `preset`, `infile`, `header`, `releaseAs`, `prerelease`, `releaseCount`, `tagPrefix`, `issuePrefixes`, `path`, `lernaPackage`, `preMajor`, `noBumpWhenEmptyChanges`, `releaseCommitMessageFormat`, `commitUrlFormat`, `compareUrlFormat`, `issueUrlFormat`, `userUrlFormat`, `packageFiles`, `bumpFiles`, `types`, `skip`, and `scripts`. A custom `types` array replaces the default types; each entry uses `type`, optional `section`, and either `hidden` or `effect = "hidden" | "changelog" | "bump"`. The built-in presets are `conventional-changelog-conventionalcommits` (default) and Angular (`angular` or `conventional-changelog-angular`).
 
 ```toml
 types = [
@@ -85,6 +85,7 @@ Lifecycle commands run through `/bin/sh -c`; only use scripts from a trusted con
     --packageFiles FILE... Override package version files
     --bumpFiles FILE...    Override version files to update
     --release-count N      Set regenerated sections; 0 rebuilds all history
+    --preset NAME           Select conventional or Angular changelog preset
     --sign                 Sign the release commit and tag
     --signoff              Add a DCO signoff to the commit
 -m, --message FORMAT       Deprecated; use the TOML release message format
@@ -94,6 +95,8 @@ Lifecycle commands run through `/bin/sh -c`; only use scripts from a trusted con
     --tag-force             Replace an existing tag
     --git-tag-fallback      Read version from a tag if no version file exists
     --noBumpWhenEmptyChanges Do not bump for commits with no release effect
+    --scripts.EVENT COMMAND Override one lifecycle script
+    --npmPublishHint TEXT   Customize the publishing hint
 -n, --no-verify            Bypass Git commit hooks
 -a, --commit-all           Include all staged and working files
     --silent               Suppress normal progress output
@@ -112,7 +115,7 @@ make clean all CSEMVER_VERSION=1.2.3
 
 ## Compatibility status
 
-The implementation is pure C17 plus optional TOML configuration and an integrated C TOML parser. It currently covers SemVer, common version files, conventional-commit bump selection, changelog generation, release lifecycle scripts, release commits, and annotated tags. Non-default changelog presets are not implemented. Lerna package selection uses the latest stable package tag for bump recommendation; the configured `tagPrefix` still controls the generated release tag and changelog windows. Byte-level comparisons against upstream pass for release counts `0` through `4` in the tested fixtures, as well as the default dry-run fixture; broad behavioral and byte-for-byte compatibility has **not** been established. The upstream Node project is used only as a test reference outside this repository.
+The implementation is pure C17 plus optional TOML configuration and an integrated C TOML parser. It currently covers SemVer, common version files, conventional-commit bump selection, changelog generation, release lifecycle scripts, release commits, and annotated tags. The built-in changelog presets are `conventional-changelog-conventionalcommits` and Angular (`angular` or `conventional-changelog-angular`); other preset names are rejected rather than silently treated as the default. Angular support implements the common section mapping/order, release heading levels, visible performance commits, breaking-change footer, and suppression of revert pairs when both commits are in the changelog window. It does not yet implement arbitrary parser/writer extension points. Lerna package selection uses the latest stable package tag for bump recommendation; the configured `tagPrefix` still controls the generated release tag and changelog windows. Byte-level comparisons against upstream pass for release counts `0` through `4` in the tested fixtures, the default dry-run fixture, selected Angular fixtures including revert handling across tag boundaries, and UTC-dated headings under a non-UTC `TZ`; broad behavioral and byte-for-byte compatibility has **not** been established. The upstream Node project is used only as a test reference outside this repository.
 
 The native CLI targets POSIX systems with `/bin/sh`, Git, and a C17 compiler. It never pushes to a remote; inspect the generated release and push the resulting branch and tag explicitly.
 

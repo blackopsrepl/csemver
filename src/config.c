@@ -28,6 +28,10 @@ static int copy_text(char *target, size_t size, const char *value, char *error,
   return 1;
 }
 
+static const char *const lifecycle_script_names[] = {
+    "prerelease", "prebump",    "postbump", "prechangelog", "postchangelog",
+    "precommit",  "postcommit", "pretag",   "posttag"};
+
 static int add_file(CsemverFile *files, size_t *count, const char *filename,
                     const char *type, char *error, size_t error_size) {
   CsemverFile *file;
@@ -322,21 +326,20 @@ static int read_type_array(CsemverConfig *config, const toml_table_t *root,
 
 static int read_scripts(CsemverConfig *config, const toml_table_t *root,
                         char *error, size_t error_size) {
-  static const char *const names[] = {
-      "prerelease", "prebump",    "postbump", "prechangelog", "postchangelog",
-      "precommit",  "postcommit", "pretag",   "posttag"};
   const toml_table_t *table = toml_table_in(root, "scripts");
   size_t index;
 
   if (table == NULL)
     return 1;
   config->script_count = 0;
-  for (index = 0; index < sizeof names / sizeof names[0]; ++index) {
+  for (index = 0;
+       index < sizeof lifecycle_script_names / sizeof lifecycle_script_names[0];
+       ++index) {
     toml_datum_t command;
     CsemverScript *script;
-    if (!toml_key_exists(table, names[index]))
+    if (!toml_key_exists(table, lifecycle_script_names[index]))
       continue;
-    command = toml_string_in(table, names[index]);
+    command = toml_string_in(table, lifecycle_script_names[index]);
     if (!command.ok || config->script_count >= CSEMVER_MAX_SCRIPT) {
       if (command.ok)
         free(command.u.s);
@@ -344,7 +347,8 @@ static int read_scripts(CsemverConfig *config, const toml_table_t *root,
       return 0;
     }
     script = &config->scripts[config->script_count++];
-    snprintf(script->name, sizeof script->name, "%s", names[index]);
+    snprintf(script->name, sizeof script->name, "%s",
+             lifecycle_script_names[index]);
     if (!copy_text(script->command, sizeof script->command, command.u.s, error,
                    error_size)) {
       free(command.u.s);
@@ -569,6 +573,46 @@ int csemver_config_set_string(CsemverConfig *config, const char *key,
     return 0;
   }
   return copy_text(target, target_size, value, error, error_size);
+}
+
+int csemver_config_set_script(CsemverConfig *config, const char *name,
+                              const char *command, char *error,
+                              size_t error_size) {
+  CsemverScript *script = NULL;
+  size_t index;
+  if (name == NULL || command == NULL) {
+    set_error(error, error_size,
+              "lifecycle script name and command are required");
+    return 0;
+  }
+  for (index = 0;
+       index < sizeof lifecycle_script_names / sizeof lifecycle_script_names[0];
+       ++index)
+    if (strcmp(name, lifecycle_script_names[index]) == 0)
+      break;
+  if (index == sizeof lifecycle_script_names / sizeof lifecycle_script_names[0])
+    return 1;
+  for (index = 0; index < config->script_count; ++index)
+    if (strcmp(config->scripts[index].name, name) == 0) {
+      script = &config->scripts[index];
+      break;
+    }
+  if (script == NULL) {
+    if (config->script_count >= CSEMVER_MAX_SCRIPT) {
+      set_error(error, error_size, "too many lifecycle scripts");
+      return 0;
+    }
+    script = &config->scripts[config->script_count];
+    if (!copy_text(script->name, sizeof script->name, name, error, error_size))
+      return 0;
+    if (!copy_text(script->command, sizeof script->command, command, error,
+                   error_size))
+      return 0;
+    ++config->script_count;
+    return 1;
+  }
+  return copy_text(script->command, sizeof script->command, command, error,
+                   error_size);
 }
 
 int csemver_config_set_bool(CsemverConfig *config, const char *key, bool value,

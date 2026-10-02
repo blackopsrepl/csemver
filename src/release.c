@@ -86,6 +86,9 @@ static void print_help(void) {
        "      --bumpFiles FILE...    Override files to update\n"
        "      --issuePrefixes PFX... Issue prefixes to link\n"
        "      --release-count N      Changelog sections (0 all, N latest)\n"
+       "      --preset NAME          Select conventional or Angular changelog\n"
+       "      --scripts.EVENT CMD   Override a lifecycle script\n"
+       "      --npmPublishHint TXT Override the release publishing hint\n"
        "  -s, --sign                 Sign release commit and tag\n"
        "      --signoff              Add a DCO signoff\n"
        "  -m, --message FORMAT       Deprecated; use --releaseCommitMessageFormat\n"
@@ -177,6 +180,22 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
       if (id != NULL &&
           !csemver_config_set_string(config, "prerelease", id, NULL, 0))
         return 2;
+      continue;
+    }
+    if (strncmp(key, "--scripts.", sizeof "--scripts." - 1) == 0) {
+      char error[256] = {0};
+      const char *name = key + sizeof "--scripts." - 1;
+      if (value == NULL && i + 1 < argc && argv[i + 1][0] != '-')
+        value = argv[++i];
+      if (value == NULL) {
+        errorf("%s requires a command", key);
+        return 2;
+      }
+      if (!csemver_config_set_script(config, name, value, error,
+                                     sizeof error)) {
+        errorf("%s", error);
+        return 2;
+      }
       continue;
     }
     if (strcmp(key, "--release-as") == 0 || strcmp(key, "-r") == 0 ||
@@ -564,6 +583,30 @@ static int type_index(const CsemverConfig *config, const char *type) {
   return -1;
 }
 
+static const CsemverCommitType angular_commit_types[] = {
+    {"feat", "Features", false, true},
+    {"fix", "Bug Fixes", false, false},
+    {"perf", "Performance Improvements", false, false},
+    {"revert", "Reverts", false, false},
+    {"docs", "Documentation", true, false},
+    {"style", "Styles", true, false},
+    {"refactor", "Code Refactoring", true, false},
+    {"test", "Tests", true, false},
+    {"build", "Build System", true, false},
+    {"ci", "Continuous Integration", true, false},
+};
+
+static int preset_is_angular(const CsemverConfig *config) {
+  return strcmp(config->preset, "angular") == 0 ||
+         strcmp(config->preset, "conventional-changelog-angular") == 0;
+}
+
+static int preset_is_supported(const CsemverConfig *config) {
+  return preset_is_angular(config) ||
+         strcmp(config->preset, "conventional-changelog-conventionalcommits") ==
+             0;
+}
+
 static int body_has_breaking_note(const char *body) {
   const char *line;
   if (body == NULL)
@@ -619,6 +662,54 @@ static int conventional_type(const char *subject, char *type, size_t size,
   while (**description == ' ')
     ++*description;
   return 1;
+}
+
+static int angular_conventional_type(const char *subject, char *type,
+                                     size_t size, char *scope,
+                                     size_t scope_size,
+                                     const char **description) {
+  const char *colon = strchr(subject, ':');
+  const char *open;
+  const char *close = NULL;
+  const char *cursor;
+  size_t type_size, scope_length = 0;
+  if (colon == NULL || colon[1] != ' ')
+    return 0;
+  open = memchr(subject, '(', (size_t)(colon - subject));
+  type_size =
+      open == NULL ? (size_t)(colon - subject) : (size_t)(open - subject);
+  if (type_size == 0 || type_size >= size)
+    return 0;
+  for (cursor = subject; cursor < (open == NULL ? colon : open); ++cursor)
+    if (!isalnum((unsigned char)*cursor) && *cursor != '_')
+      return 0;
+  if (open != NULL) {
+    for (cursor = colon; cursor > open; --cursor)
+      if (cursor[-1] == ')') {
+        close = cursor - 1;
+        break;
+      }
+    if (close == NULL || close != colon - 1)
+      return 0;
+    scope_length = (size_t)(close - open - 1);
+    if (scope_length >= scope_size)
+      return 0;
+    memcpy(scope, open + 1, scope_length);
+  }
+  memcpy(type, subject, type_size);
+  type[type_size] = '\0';
+  scope[scope_length] = '\0';
+  *description = colon + 2;
+  return 1;
+}
+
+static int preset_commit_type(const CsemverConfig *config, const char *subject,
+                              char *type, size_t size, char *scope,
+                              size_t scope_size, const char **description) {
+  if (preset_is_angular(config))
+    return angular_conventional_type(subject, type, size, scope, scope_size,
+                                     description);
+  return conventional_type(subject, type, size, scope, scope_size, description);
 }
 
 static int append_issue_link(CsemverBuffer *out, const CsemverConfig *config,
@@ -677,6 +768,93 @@ static int text_contains_reference(const char *text, const char *reference) {
       return 1;
   }
   return 0;
+}
+
+static int angular_revert_target(const Commit *commit, char target[41]) {
+  static const char marker[] = "This reverts commit ";
+  const char *cursor;
+  if (commit == NULL || strlen(commit->subject) < 7 ||
+      !ascii_equal_fold(commit->subject[0], 'r') ||
+      !ascii_equal_fold(commit->subject[1], 'e') ||
+      !ascii_equal_fold(commit->subject[2], 'v') ||
+      !ascii_equal_fold(commit->subject[3], 'e') ||
+      !ascii_equal_fold(commit->subject[4], 'r') ||
+      !ascii_equal_fold(commit->subject[5], 't') ||
+      (commit->subject[6] != ':' &&
+       !isspace((unsigned char)commit->subject[6])) ||
+      (commit->subject[6] == ':' &&
+       !isspace((unsigned char)commit->subject[7])))
+    return 0;
+  for (cursor = commit->body; *cursor != '\0'; ++cursor) {
+    size_t i;
+    size_t target_length = 0;
+    for (i = 0; i < sizeof marker - 1 && cursor[i] != '\0'; ++i)
+      if (!ascii_equal_fold(cursor[i], marker[i]))
+        break;
+    if (i != sizeof marker - 1)
+      continue;
+    cursor += sizeof marker - 1;
+    while (isspace((unsigned char)*cursor))
+      ++cursor;
+    while (isxdigit((unsigned char)*cursor)) {
+      if (target_length == 40)
+        break;
+      target[target_length++] = *cursor++;
+    }
+    if (target_length < 7 || isalnum((unsigned char)*cursor) || *cursor == '_')
+      continue;
+    target[target_length] = '\0';
+    return 1;
+  }
+  return 0;
+}
+
+static void collect_angular_revert_pairs(const Commit *commits,
+                                         size_t commit_count,
+                                         bool reverted[COMMIT_MAX]) {
+  size_t i;
+  memset(reverted, 0, commit_count * sizeof *reverted);
+  for (i = 0; i < commit_count; ++i) {
+    char target[41];
+    size_t target_length, j, match = 0, match_count = 0;
+    if (!angular_revert_target(&commits[i], target))
+      continue;
+    target_length = strlen(target);
+    for (j = 0; j < commit_count; ++j) {
+      size_t k;
+      if (j == i || strlen(commits[j].hash) < target_length)
+        continue;
+      for (k = 0; k < target_length; ++k)
+        if (!ascii_equal_fold(commits[j].hash[k], target[k]))
+          break;
+      if (k == target_length) {
+        match = j;
+        ++match_count;
+      }
+    }
+    if (match_count == 1) {
+      reverted[i] = true;
+      reverted[match] = true;
+    }
+  }
+}
+
+static int preset_commit_type_for_commit(const CsemverConfig *config,
+                                         const Commit *commit, char *type,
+                                         size_t size, char *scope,
+                                         size_t scope_size,
+                                         const char **description) {
+  char target[41];
+  if (preset_commit_type(config, commit->subject, type, size, scope, scope_size,
+                         description))
+    return 1;
+  if (!preset_is_angular(config) || !angular_revert_target(commit, target) ||
+      sizeof "revert" > size || scope_size == 0)
+    return 0;
+  memcpy(type, "revert", sizeof "revert");
+  scope[0] = '\0';
+  *description = commit->subject;
+  return 1;
 }
 
 static int is_reference_word_char(char value) {
@@ -853,8 +1031,8 @@ static int append_commit_line(CsemverBuffer *section,
   const char *description;
   char short_hash[8];
   size_t i;
-  if (!conventional_type(commit->subject, type, sizeof type, scope,
-                         sizeof scope, &description)) {
+  if (!preset_commit_type_for_commit(config, commit, type, sizeof type, scope,
+                                     sizeof scope, &description)) {
     description = commit->subject;
     type[0] = scope[0] = '\0';
   }
@@ -935,11 +1113,12 @@ static int add_breaking_note(BreakingNote **notes, size_t *note_count,
 }
 
 static int append_breaking_note(CsemverBuffer *notes,
+                                const CsemverConfig *config,
                                 const BreakingNote *note) {
   char type[128], scope[256];
   const char *description;
-  if (!conventional_type(note->commit->subject, type, sizeof type, scope,
-                         sizeof scope, &description))
+  if (!preset_commit_type_for_commit(config, note->commit, type, sizeof type,
+                                     scope, sizeof scope, &description))
     scope[0] = '\0';
   if (!csemver_buffer_append(notes, "* ", 2) ||
       (scope[0] != '\0' && !csemver_buffer_appendf(notes, "**%s:** ", scope)) ||
@@ -1002,13 +1181,46 @@ static int changelog_section(const CsemverConfig *config, const Commit *commits,
   BreakingNote *breaking_notes = NULL;
   size_t breaking_note_count = 0, breaking_note_capacity = 0;
   bool used[CSEMVER_MAX_TYPES] = {false};
+  bool reverted[COMMIT_MAX] = {false};
   char base[1024];
-  size_t i;
+  size_t i, group_count;
+  size_t group_order[CSEMVER_MAX_TYPES];
+  bool angular = preset_is_angular(config);
+  CsemverConfig angular_config;
   if (commit_count > COMMIT_MAX)
     return 0;
+  if (angular)
+    collect_angular_revert_pairs(commits, commit_count, reverted);
+  if (angular) {
+    size_t preset_count =
+        sizeof angular_commit_types / sizeof angular_commit_types[0];
+    angular_config = *config;
+    memset(angular_config.commit_types, 0, sizeof angular_config.commit_types);
+    memcpy(angular_config.commit_types, angular_commit_types,
+           sizeof angular_commit_types);
+    angular_config.commit_type_count = preset_count;
+    config = &angular_config;
+    for (i = 0; i < commit_count; ++i) {
+      char type[128], scope[256];
+      const char *description;
+      CsemverCommitType *entry;
+      if (reverted[i] ||
+          !preset_commit_type_for_commit(config, &commits[i], type, sizeof type,
+                                         scope, sizeof scope, &description) ||
+          !body_has_breaking_note(commits[i].body) ||
+          strlen(type) >= sizeof angular_config.commit_types[0].type ||
+          type_index(config, type) >= 0 ||
+          angular_config.commit_type_count >= CSEMVER_MAX_TYPES)
+        continue;
+      entry = &angular_config.commit_types[angular_config.commit_type_count++];
+      memcpy(entry->type, type, strlen(type) + 1);
+      snprintf(entry->section, sizeof entry->section, "%s", type);
+    }
+  }
+  group_count = config->commit_type_count;
   csemver_buffer_init(&breaking);
   repository_base(base, sizeof base);
-  for (i = 0; i < config->commit_type_count; ++i)
+  for (i = 0; i < group_count; ++i)
     csemver_buffer_init(&groups[i]);
   for (i = 0; i < commit_count; ++i) {
     sort_keys[i].type_index = -1;
@@ -1018,9 +1230,14 @@ static int changelog_section(const CsemverConfig *config, const Commit *commits,
     char type[128], scope[256];
     const char *description;
     int index;
-    int parsed = conventional_type(commits[i].subject, type, sizeof type, scope,
-                                   sizeof scope, &description);
-    bool has_breaking_note = body_has_breaking_note(commits[i].body);
+    int parsed;
+    bool has_breaking_note;
+    if (angular && reverted[i])
+      continue;
+    parsed =
+        preset_commit_type_for_commit(config, &commits[i], type, sizeof type,
+                                      scope, sizeof scope, &description);
+    has_breaking_note = body_has_breaking_note(commits[i].body);
     if (!parsed)
       scope[0] = '\0';
     if (!collect_breaking_notes(&commits[i], &breaking_notes,
@@ -1035,7 +1252,9 @@ static int changelog_section(const CsemverConfig *config, const Commit *commits,
     if (!parsed)
       continue;
     index = type_index(config, type);
-    if (index < 0 || config->commit_types[index].hidden ||
+    if (index < 0 ||
+        (config->commit_types[index].hidden &&
+         !(angular && has_breaking_note)) ||
         config->commit_types[index].section[0] == '\0')
       continue;
     used[index] = true;
@@ -1055,32 +1274,55 @@ static int changelog_section(const CsemverConfig *config, const Commit *commits,
     }
     breaking_notes[j] = note;
   }
+  for (i = 0; i < group_count; ++i)
+    group_order[i] = i;
+  if (angular) {
+    for (i = 1; i < group_count; ++i) {
+      size_t group_index = group_order[i];
+      size_t j = i;
+      while (j > 0 && strcmp(config->commit_types[group_order[j - 1]].section,
+                             config->commit_types[group_index].section) > 0) {
+        group_order[j] = group_order[j - 1];
+        --j;
+      }
+      group_order[j] = group_index;
+    }
+  }
   for (i = 0; i < breaking_note_count; ++i)
-    if (!append_breaking_note(&breaking, &breaking_notes[i]))
+    if (!append_breaking_note(&breaking, config, &breaking_notes[i]))
       goto fail;
-  for (i = 0; i < config->commit_type_count; ++i)
+  for (i = 0; i < group_count; ++i)
     if (used[i] && !append_sorted_group(&groups[i], config, sort_keys, commits,
                                         commit_count, (int)i, base))
       goto fail;
-  if (breaking.length > 0) {
+  if (!angular && breaking.length > 0) {
     if (!csemver_buffer_appendf(output, "### ⚠ BREAKING CHANGES\n\n") ||
         !csemver_buffer_append(output, breaking.data, breaking.length))
       goto fail;
   }
   {
-    bool wrote_section = breaking.length > 0;
-    for (i = 0; i < config->commit_type_count; ++i) {
-      if (!used[i])
+    bool wrote_section = !angular && breaking.length > 0;
+    for (i = 0; i < group_count; ++i) {
+      size_t index = angular ? group_order[i] : i;
+      if (!used[index])
         continue;
       if ((wrote_section && !csemver_buffer_append(output, "\n", 1)) ||
           !csemver_buffer_appendf(output, "### %s\n\n",
-                                  config->commit_types[i].section) ||
-          !csemver_buffer_append(output, groups[i].data, groups[i].length))
+                                  config->commit_types[index].section) ||
+          !csemver_buffer_append(output, groups[index].data,
+                                 groups[index].length))
         goto fail;
       wrote_section = true;
     }
+    if (angular && breaking.length > 0) {
+      if ((wrote_section && !csemver_buffer_append(output, "\n", 1)) ||
+          !csemver_buffer_append(output, "### BREAKING CHANGES\n\n",
+                                 sizeof "### BREAKING CHANGES\n\n" - 1) ||
+          !csemver_buffer_append(output, breaking.data, breaking.length))
+        goto fail;
+    }
   }
-  for (i = 0; i < config->commit_type_count; ++i)
+  for (i = 0; i < group_count; ++i)
     csemver_buffer_free(&groups[i]);
   csemver_buffer_free(&breaking);
   for (i = 0; i < commit_count; ++i)
@@ -1088,7 +1330,7 @@ static int changelog_section(const CsemverConfig *config, const Commit *commits,
   free(breaking_notes);
   return 1;
 fail:
-  for (i = 0; i < config->commit_type_count; ++i)
+  for (i = 0; i < group_count; ++i)
     csemver_buffer_free(&groups[i]);
   csemver_buffer_free(&breaking);
   for (i = 0; i < commit_count; ++i)
@@ -1099,14 +1341,26 @@ fail:
 
 static int calculate_bump(const CsemverConfig *config, const Commit *commits,
                           size_t count, const Semver *current) {
-  int bump = 0;
+  bool angular = preset_is_angular(config);
+  int bump = angular && count > 0 ? 1 : 0;
   size_t i;
   for (i = 0; i < count; ++i) {
     char type[128], scope[256];
     const char *description;
+    int parsed =
+        preset_commit_type(config, commits[i].subject, type, sizeof type, scope,
+                           sizeof scope, &description);
     int index;
-    if (!conventional_type(commits[i].subject, type, sizeof type, scope,
-                           sizeof scope, &description))
+    if (angular) {
+      if (body_has_breaking_note(commits[i].body))
+        return config->pre_major && current->major == 0 ? 2 : 3;
+      if (parsed && strcmp(type, "feat") == 0)
+        bump = bump < (current->major == 0 && config->pre_major ? 1 : 2)
+                   ? (current->major == 0 && config->pre_major ? 1 : 2)
+                   : bump;
+      continue;
+    }
+    if (!parsed)
       continue;
     (void)description;
     if (commit_is_breaking(commits[i].subject, commits[i].body))
@@ -1520,6 +1774,10 @@ int csemver_main(int argc, char **argv) {
   parsed_args = parse_args(argc, argv, &config, &config_path);
   if (parsed_args != 0)
     return parsed_args == 1 ? 0 : parsed_args;
+  if (!preset_is_supported(&config)) {
+    errorf("unsupported changelog preset '%s'", config.preset);
+    return 2;
+  }
   {
     const char *args[] = {"rev-parse", "--is-inside-work-tree", NULL};
     if (!run_git(args, &check_output, &status) || status != 0 ||
@@ -1697,24 +1955,44 @@ static int get_tag_date(const char *tag, char *date, size_t date_size) {
   return 1;
 }
 
-static int append_compare_heading(CsemverBuffer *output, const char *base,
+static const char *release_heading_level(const CsemverConfig *config,
+                                         const char *version) {
+  Semver parsed;
+  if (!preset_is_angular(config))
+    return "##";
+  if (!semver_parse(version, &parsed) || parsed.patch == 0)
+    return "#";
+  return "##";
+}
+
+static int append_compare_heading(const CsemverConfig *config,
+                                  CsemverBuffer *output, const char *base,
                                   const char *version, const char *previous_tag,
                                   const char *tag, const char *date) {
+  const char *level = release_heading_level(config, version);
   if (base[0] != '\0')
     return csemver_buffer_appendf(output,
-                                  "## [%s](%s/compare/%s...%s) (%s)\n\n",
+                                  "%s [%s](%s/compare/%s...%s) (%s)\n\n", level,
                                   version, base, previous_tag, tag, date);
+  if (preset_is_angular(config))
+    return csemver_buffer_appendf(output, "%s %s (%s)\n\n", level, version,
+                                  date);
   return csemver_buffer_appendf(output, "## [%s](///compare/%s...%s) (%s)\n\n",
                                 version, previous_tag, tag, date);
 }
 
-static int append_release_heading(CsemverBuffer *output, const char *base,
+static int append_release_heading(const CsemverConfig *config,
+                                  CsemverBuffer *output, const char *base,
                                   const char *version, const char *previous_tag,
                                   const char *tag, const char *date,
                                   bool initial_release) {
   if (previous_tag != NULL)
-    return append_compare_heading(output, base, version, previous_tag, tag,
-                                  date);
+    return append_compare_heading(config, output, base, version, previous_tag,
+                                  tag, date);
+  if (preset_is_angular(config))
+    return csemver_buffer_appendf(output, "%s %s (%s)\n\n",
+                                  release_heading_level(config, version),
+                                  version, date);
   if (initial_release)
     return csemver_buffer_appendf(output, "## %s (%s)\n", version, date);
   return csemver_buffer_appendf(output, "## [%s] (%s)\n\n", version, date);
@@ -1737,8 +2015,8 @@ static int regenerate_all_changelogs(
   if (historical == NULL)
     return 0;
   if (previous_tag == NULL || strcmp(previous_tag, new_tag) != 0) {
-    if (!append_release_heading(output, base, version, previous_tag, new_tag,
-                                date, false) ||
+    if (!append_release_heading(config, output, base, version, previous_tag,
+                                new_tag, date, false) ||
         !changelog_section(config, commits, commit_count, output))
       goto fail;
     wrote_section = true;
@@ -1771,8 +2049,9 @@ static int regenerate_all_changelogs(
           output->data[output->length - 2] == '\n') &&
         !csemver_buffer_append(output, "\n", 1))
       goto fail;
-    if (!append_release_heading(output, base, current_version, older_tag,
-                                tags[i], current_date, older_tag == NULL) ||
+    if (!append_release_heading(config, output, base, current_version,
+                                older_tag, tags[i], current_date,
+                                older_tag == NULL) ||
         !changelog_section(config, historical, historical_count, output))
       goto fail;
     wrote_section = true;
@@ -1796,7 +2075,7 @@ static int render_changelog(const CsemverConfig *config, const char *version,
   const char *line;
   char date[32];
   time_t now = time(NULL);
-  struct tm local;
+  struct tm utc;
   size_t old_length = 0;
   repository_base(base, sizeof base);
   if (!config->dry_run && config->release_count != 0 &&
@@ -1814,8 +2093,8 @@ static int render_changelog(const CsemverConfig *config, const char *version,
       ++line;
     }
   }
-  localtime_r(&now, &local);
-  strftime(date, sizeof date, "%Y-%m-%d", &local);
+  gmtime_r(&now, &utc);
+  strftime(date, sizeof date, "%Y-%m-%d", &utc);
   if (!config->dry_run && ((config->header[0] != '\0' &&
                             !csemver_buffer_append(output, config->header,
                                                    strlen(config->header))) ||
@@ -1848,14 +2127,15 @@ static int render_changelog(const CsemverConfig *config, const char *version,
     return 1;
   }
   if (previous_tag != NULL) {
-    if (!append_compare_heading(output, base, version, previous_tag, new_tag,
-                                date))
+    if (!append_compare_heading(config, output, base, version, previous_tag,
+                                new_tag, date))
       goto fail;
   } else if (config->first_release) {
-    if (!append_release_heading(output, base, version, NULL, new_tag, date,
-                                true))
+    if (!append_release_heading(config, output, base, version, NULL, new_tag,
+                                date, true))
       goto fail;
-  } else if (!csemver_buffer_appendf(output, "## [%s] (%s)\n\n", version, date))
+  } else if (!append_release_heading(config, output, base, version, NULL,
+                                     new_tag, date, false))
     goto fail;
   if (!changelog_section(config, commits, commit_count, output))
     goto fail;

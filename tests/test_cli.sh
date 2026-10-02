@@ -6,9 +6,11 @@ help=$($bin --help)
 printf '%s\n' "$help" | grep -Fq 'Usage: csemver [options]'
 printf '%s\n' "$help" | grep -q -- '--release-as'
 printf '%s\n' "$help" | grep -q -- '--dry-run'
+printf '%s\n' "$help" | grep -q -- '--preset'
 printf '%s\n' "$help" | grep -Fq 'Changelog sections (0 all, N latest)'
 for option in --first-release --packageFiles --bumpFiles --issuePrefixes \
-    --lerna-package --tag-force --git-tag-fallback --noBumpWhenEmptyChanges; do
+    --lerna-package --tag-force --git-tag-fallback --noBumpWhenEmptyChanges \
+    --scripts; do
     if ! printf '%s\n' "$help" | grep -Fq -- "$option"; then
         printf 'help is missing %s\n' "$option" >&2
         exit 1

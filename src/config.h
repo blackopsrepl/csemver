@@ -83,6 +83,9 @@ int csemver_config_parse(CsemverConfig *config, const char *toml, char *error,
 int csemver_config_set_string(CsemverConfig *config, const char *key,
                               const char *value, char *error,
                               size_t error_size);
+int csemver_config_set_script(CsemverConfig *config, const char *name,
+                              const char *command, char *error,
+                              size_t error_size);
 int csemver_config_set_bool(CsemverConfig *config, const char *key, bool value,
                             char *error, size_t error_size);
 int csemver_config_set_array(CsemverConfig *config, const char *key,
