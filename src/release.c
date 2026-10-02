@@ -1787,6 +1787,10 @@ static int render_changelog(const CsemverConfig *config, const char *version,
     if (!append_compare_heading(output, base, version, previous_tag, new_tag,
                                 date))
       goto fail;
+  } else if (config->first_release) {
+    if (!append_release_heading(output, base, version, NULL, new_tag, date,
+                                true))
+      goto fail;
   } else if (!csemver_buffer_appendf(output, "## [%s] (%s)\n\n", version, date))
     goto fail;
   if (!changelog_section(config, commits, commit_count, output))

@@ -196,6 +196,11 @@ printf '{\n  "name": "prerelease-window",\n  "version": "1.0.0",\n  "repository"
 git add package.json
 git commit -qm 'chore: initialize prerelease window fixture'
 "$bin" --first-release > /dev/null
+first_release_heading=$(grep -m 1 '^## ' CHANGELOG.md)
+case "$first_release_heading" in
+  '## 1.0.0 ('*) ;;
+  *) printf 'first release heading is not in upstream format: %s\n' "$first_release_heading" >&2; exit 1 ;;
+esac
 printf 'feature\n' > feature.txt
 git add feature.txt
 git commit -qm 'feat: add prerelease feature'
