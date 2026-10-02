@@ -1,0 +1,4 @@
+tagPrefix = "v"
+releaseCommitMessageFormat = "chore(release): {{currentTag}}"
+packageFiles = [{ filename = "VERSION", type = "plain-text" }]
+bumpFiles = [{ filename = "VERSION", type = "plain-text" }]
