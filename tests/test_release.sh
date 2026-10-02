@@ -186,6 +186,38 @@ test "$(git cat-file -t refs/tags/v3.0.0)" = tag
 grep -q '^### .*BREAKING CHANGES' CHANGELOG.md
 grep -q 'callers must migrate to the new API' CHANGELOG.md
 
+mkdir "$tmp/prerelease-window"
+cd "$tmp/prerelease-window"
+git init -q -b main
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "prerelease-window",\n  "version": "1.0.0",\n  "repository": {"type": "git", "url": "https://github.com/example/prerelease.git"}\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize prerelease window fixture'
+"$bin" --first-release > /dev/null
+printf 'feature\n' > feature.txt
+git add feature.txt
+git commit -qm 'feat: add prerelease feature'
+"$bin" --prerelease dev > /dev/null
+test "$(git tag --list 'v1.1.0-dev.0')" = 'v1.1.0-dev.0'
+printf 'fix\n' > fix.txt
+git add fix.txt
+git commit -qm 'fix: add prerelease fix'
+"$bin" --prerelease rc > /dev/null
+test "$(git tag --list 'v1.1.0-rc.0')" = 'v1.1.0-rc.0'
+rc_heading=$(grep -F '## [1.1.0-rc.0]' CHANGELOG.md)
+case "$rc_heading" in
+  *'compare/v1.0.0...v1.1.0-rc.0'*) ;;
+  *) printf 'rc changelog range starts from the wrong tag: %s\n' "$rc_heading" >&2; exit 1 ;;
+esac
+feature_count=$(grep -Fc '* add prerelease feature' CHANGELOG.md)
+[ "$feature_count" -eq 2 ] || {
+  printf 'expected the prerelease feature in both dev and rc sections; got %s copies\n' \
+    "$feature_count" >&2
+  exit 1
+}
+
 test -z "$(git status --porcelain)"
 mkdir "$tmp/no-empty-bump"
 cd "$tmp/no-empty-bump"

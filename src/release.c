@@ -338,8 +338,9 @@ static int collect_tags(const CsemverConfig *config,
   char *line;
   char *save = NULL;
   int status = 0;
-  Semver latest = {0};
-  bool found = false;
+  char latest_stable_version[SEMVER_TEXT_MAX] = "";
+  bool found_version = false;
+  bool found_stable = false;
   *tag_count = 0;
   latest_version[0] = latest_tag[0] = '\0';
   if (!run_git(args, &output, &status) || status != 0) {
@@ -355,20 +356,38 @@ static int collect_tags(const CsemverConfig *config,
       snprintf(candidate, sizeof candidate, "%s",
                line + strlen(config->tag_prefix));
       if (semver_parse(candidate, &parsed)) {
+        bool relevant_version = true;
+        if (config->has_prerelease && config->prerelease_id[0] != '\0' &&
+            parsed.has_prerelease) {
+          const char *separator = strchr(parsed.prerelease, '.');
+          size_t identifier_length =
+              separator == NULL ? strlen(parsed.prerelease)
+                                : (size_t)(separator - parsed.prerelease);
+          relevant_version =
+              identifier_length == strlen(config->prerelease_id) &&
+              strncmp(parsed.prerelease, config->prerelease_id,
+                      identifier_length) == 0;
+        }
         if (*tag_count < COMMIT_MAX)
           snprintf(tags[(*tag_count)++], SEMVER_TEXT_MAX, "%s", line);
-        if (!found || semver_compare(candidate, latest_version) > 0) {
-          latest = parsed;
+        if (relevant_version &&
+            (!found_version || semver_compare(candidate, latest_version) > 0)) {
           snprintf(latest_version, SEMVER_TEXT_MAX, "%s", candidate);
+          found_version = true;
+        }
+        if (!parsed.has_prerelease &&
+            (!found_stable ||
+             semver_compare(candidate, latest_stable_version) > 0)) {
+          snprintf(latest_stable_version, sizeof latest_stable_version, "%s",
+                   candidate);
           snprintf(latest_tag, SEMVER_TEXT_MAX, "%s", line);
-          found = true;
+          found_stable = true;
         }
       }
     }
     line = strtok_r(NULL, "\n", &save);
   }
   free(output);
-  (void)latest;
   return 1;
 }
 
