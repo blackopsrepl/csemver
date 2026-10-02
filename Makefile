@@ -7,8 +7,11 @@ WARNINGS = -std=c17 -Wall -Wextra -Wpedantic -Werror
 
 all: build/csemver
 
-build/csemver: src/main.c src/semver.c src/semver.h vendor/tomlc99/toml.c vendor/tomlc99/toml.h | build
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ src/main.c src/semver.c vendor/tomlc99/toml.c
+build/csemver: src/main.c src/config.c src/config.h src/semver.c src/semver.h vendor/tomlc99/toml.c vendor/tomlc99/toml.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ src/main.c src/config.c src/semver.c vendor/tomlc99/toml.c
+
+build/test_config: tests/test_config.c src/config.c src/config.h vendor/tomlc99/toml.c vendor/tomlc99/toml.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_config.c src/config.c vendor/tomlc99/toml.c
 
 build/test_toml: tests/test_toml.c vendor/tomlc99/toml.c vendor/tomlc99/toml.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_toml.c vendor/tomlc99/toml.c
@@ -19,9 +22,10 @@ build/test_semver: tests/test_semver.c src/semver.c src/semver.h | build
 build:
 	mkdir -p $@
 
-test: build/csemver build/test_semver build/test_toml
+test: build/csemver build/test_semver build/test_toml build/test_config
 	./build/test_semver
 	./build/test_toml
+	./build/test_config
 	./tests/test_cli.sh ./build/csemver
 
 clean:
