@@ -206,15 +206,20 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
       }
       continue;
     }
-    if (strcmp(key, "--release-as") == 0 || strcmp(key, "-r") == 0 ||
-        strcmp(key, "--infile") == 0 || strcmp(key, "-i") == 0 ||
-        strcmp(key, "--tag-prefix") == 0 || strcmp(key, "-t") == 0 ||
+    if (strcmp(key, "--release-as") == 0 || strcmp(key, "--releaseAs") == 0 ||
+        strcmp(key, "-r") == 0 || strcmp(key, "--infile") == 0 ||
+        strcmp(key, "-i") == 0 || strcmp(key, "--tag-prefix") == 0 ||
+        strcmp(key, "--tagPrefix") == 0 || strcmp(key, "-t") == 0 ||
         strcmp(key, "--path") == 0 || strcmp(key, "--preset") == 0 ||
         strcmp(key, "--message") == 0 || strcmp(key, "-m") == 0 ||
         strcmp(key, "--releaseCommitMessageFormat") == 0 ||
+        strcmp(key, "--release-commit-message-format") == 0 ||
         strcmp(key, "--header") == 0 || strcmp(key, "--changelogHeader") == 0 ||
+        strcmp(key, "--changelog-header") == 0 ||
         strcmp(key, "--lerna-package") == 0 ||
+        strcmp(key, "--lernaPackage") == 0 ||
         strcmp(key, "--npmPublishHint") == 0 ||
+        strcmp(key, "--npm-publish-hint") == 0 ||
         strcmp(key, "--commitUrlFormat") == 0 ||
         strcmp(key, "--commit-url-format") == 0 ||
         strcmp(key, "--compareUrlFormat") == 0 ||
@@ -241,10 +246,17 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
         name = "preset";
       if (strcmp(key, "--releaseCommitMessageFormat") == 0)
         name = "releaseCommitMessageFormat";
-      if (strcmp(key, "--header") == 0 || strcmp(key, "--changelogHeader") == 0)
+      if (strcmp(key, "--release-commit-message-format") == 0)
+        name = "release-commit-message-format";
+      if (strcmp(key, "--header") == 0)
         name = "header";
+      if (strcmp(key, "--changelogHeader") == 0 ||
+          strcmp(key, "--changelog-header") == 0)
+        name = "changelogHeader";
       if (strcmp(key, "--lerna-package") == 0)
         name = "lerna-package";
+      if (strcmp(key, "--lernaPackage") == 0)
+        name = "lernaPackage";
       if (strcmp(key, "--npmPublishHint") == 0)
         name = "npmPublishHint";
       if (!csemver_config_set_string(config, name, value, error,
@@ -254,7 +266,7 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
       }
       continue;
     }
-    if (strcmp(key, "--packageFiles") == 0 ||
+    if (strcmp(key, "--types") == 0 || strcmp(key, "--packageFiles") == 0 ||
         strcmp(key, "--package-files") == 0 ||
         strcmp(key, "--bumpFiles") == 0 || strcmp(key, "--bump-files") == 0 ||
         strcmp(key, "--issuePrefixes") == 0 ||
@@ -319,13 +331,17 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
       }
       continue;
     }
-    if (strcmp(key, "--dry-run") == 0 || strcmp(key, "--first-release") == 0 ||
-        strcmp(key, "-f") == 0 || strcmp(key, "--sign") == 0 ||
-        strcmp(key, "-s") == 0 || strcmp(key, "--signoff") == 0 ||
-        strcmp(key, "--no-verify") == 0 || strcmp(key, "-n") == 0 ||
-        strcmp(key, "--commit-all") == 0 || strcmp(key, "-a") == 0 ||
-        strcmp(key, "--silent") == 0 || strcmp(key, "--tag-force") == 0 ||
+    if (strcmp(key, "--dry-run") == 0 || strcmp(key, "--dryRun") == 0 ||
+        strcmp(key, "--first-release") == 0 ||
+        strcmp(key, "--firstRelease") == 0 || strcmp(key, "-f") == 0 ||
+        strcmp(key, "--sign") == 0 || strcmp(key, "-s") == 0 ||
+        strcmp(key, "--signoff") == 0 || strcmp(key, "--no-verify") == 0 ||
+        strcmp(key, "--noVerify") == 0 || strcmp(key, "-n") == 0 ||
+        strcmp(key, "--commit-all") == 0 || strcmp(key, "--commitAll") == 0 ||
+        strcmp(key, "-a") == 0 || strcmp(key, "--silent") == 0 ||
+        strcmp(key, "--tag-force") == 0 || strcmp(key, "--tagForce") == 0 ||
         strcmp(key, "--git-tag-fallback") == 0 ||
+        strcmp(key, "--gitTagFallback") == 0 ||
         strcmp(key, "--noBumpWhenEmptyChanges") == 0 ||
         strcmp(key, "--no-bump-when-empty-changes") == 0 ||
         strcmp(key, "--preMajor") == 0 || strcmp(key, "--pre-major") == 0 ||
@@ -359,8 +375,8 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
       }
       continue;
     }
-    errorf("unknown option '%s'", arg);
-    return 2;
+    /* Upstream yargs accepts unknown flags and positional arguments. */
+    continue;
   }
   return 0;
 }
@@ -1532,6 +1548,7 @@ fail:
 static int calculate_bump(const CsemverConfig *config, const Commit *commits,
                           size_t count, const Semver *current) {
   bool angular = preset_is_angular(config);
+  bool pre_major = config->pre_major || (!angular && current->major == 0);
   int bump = angular && count > 0 ? 1 : 0;
   size_t i;
   for (i = 0; i < count; ++i) {
@@ -1554,14 +1571,12 @@ static int calculate_bump(const CsemverConfig *config, const Commit *commits,
       continue;
     (void)description;
     if (commit_is_breaking(commits[i].subject, commits[i].body))
-      return config->pre_major && current->major == 0 ? 2 : 3;
+      return pre_major ? 2 : 3;
     index = type_index(config, type);
     if (index < 0 || config->commit_types[index].hidden)
       continue;
     if (strcmp(type, "feat") == 0 || strcmp(type, "feature") == 0)
-      bump = bump < (current->major == 0 && config->pre_major ? 1 : 2)
-                 ? (current->major == 0 && config->pre_major ? 1 : 2)
-                 : bump;
+      bump = bump < (pre_major ? 1 : 2) ? (pre_major ? 1 : 2) : bump;
     else if (config->commit_types[index].bump && bump < 1)
       bump = 1;
   }
@@ -1671,9 +1686,9 @@ static int generate_version(const CsemverConfig *config, const char *current,
   if (config->first_release && config->release_as[0] == '\0')
     return semver_format(&parsed, next, next_size);
   if (config->release_as[0] != '\0') {
-    if (semver_parse(config->release_as, &parsed)) {
-      return semver_format(&parsed, next, next_size);
-    }
+    Semver release_version;
+    if (semver_parse(config->release_as, &release_version))
+      return semver_format(&release_version, next, next_size);
     if (config->has_prerelease) {
       if (snprintf(type, sizeof type, "pre%s", config->release_as) >=
           (int)sizeof type)

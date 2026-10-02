@@ -18,8 +18,8 @@ for option in --first-release --packageFiles --bumpFiles --issuePrefixes \
     fi
 done
 [ "$("$bin" --version)" = "csemver $expected_version" ]
-if "$bin" --definitely-not-an-option >/dev/null 2>&1; then
-    printf '%s\n' 'unknown option unexpectedly succeeded' >&2
+if ! "$bin" --definitely-not-an-option --help >/dev/null 2>&1; then
+    printf '%s\n' 'upstream-compatible unknown option was rejected' >&2
     exit 1
 fi
 for option in \
@@ -34,6 +34,20 @@ for option in \
     '--preMajor'; do
     if ! "$bin" "$option" --help >/dev/null 2>&1; then
         printf 'upstream-compatible option was rejected: %s\n' "$option" >&2
+        exit 1
+    fi
+done
+for option in \
+    --dryRun --firstRelease --commitAll --noVerify --tagForce --gitTagFallback; do
+    if ! "$bin" "$option" --help >/dev/null 2>&1; then
+        printf 'upstream camelCase option was rejected: %s\n' "$option" >&2
+        exit 1
+    fi
+done
+for option in '--releaseAs=patch' '--tagPrefix=release-' \
+    '--lernaPackage=core' '--npmPublishHint=custom publish'; do
+    if ! "$bin" "$option" --help >/dev/null 2>&1; then
+        printf 'upstream camelCase option was rejected: %s\n' "$option" >&2
         exit 1
     fi
 done

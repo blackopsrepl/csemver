@@ -639,17 +639,20 @@ int csemver_config_set_bool(CsemverConfig *config, const char *key, bool value,
     target = &config->sign;
   else if (strcmp(key, "signoff") == 0)
     target = &config->signoff;
-  else if (strcmp(key, "no-verify") == 0 || strcmp(key, "n") == 0)
+  else if (strcmp(key, "no-verify") == 0 || strcmp(key, "noVerify") == 0 ||
+           strcmp(key, "n") == 0)
     target = &config->no_verify;
-  else if (strcmp(key, "commit-all") == 0 || strcmp(key, "a") == 0)
+  else if (strcmp(key, "commit-all") == 0 || strcmp(key, "commitAll") == 0 ||
+           strcmp(key, "a") == 0)
     target = &config->commit_all;
   else if (strcmp(key, "silent") == 0)
     target = &config->silent;
-  else if (strcmp(key, "tag-force") == 0)
+  else if (strcmp(key, "tag-force") == 0 || strcmp(key, "tagForce") == 0)
     target = &config->tag_force;
-  else if (strcmp(key, "dry-run") == 0)
+  else if (strcmp(key, "dry-run") == 0 || strcmp(key, "dryRun") == 0)
     target = &config->dry_run;
-  else if (strcmp(key, "git-tag-fallback") == 0)
+  else if (strcmp(key, "git-tag-fallback") == 0 ||
+           strcmp(key, "gitTagFallback") == 0)
     target = &config->git_tag_fallback;
   else if (strcmp(key, "noBumpWhenEmptyChanges") == 0 ||
            strcmp(key, "no-bump-when-empty-changes") == 0)
@@ -678,6 +681,11 @@ int csemver_config_set_array(CsemverConfig *config, const char *key,
                              char *error, size_t error_size) {
   size_t index;
 
+  if (strcmp(key, "types") == 0) {
+    /* yargs passes these config-spec array entries as strings, not objects. */
+    config->commit_type_count = 0;
+    return 1;
+  }
   if (strcmp(key, "packageFiles") == 0 || strcmp(key, "package-files") == 0) {
     config->package_file_count = 0;
     config->package_files_explicit = true;

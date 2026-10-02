@@ -497,9 +497,54 @@ printf '%s\n' "$pre_major_preview" | \
   }
 default_pre_major_preview=$("$bin" --dry-run)
 printf '%s\n' "$default_pre_major_preview" | \
-  grep -q 'bumping version in package.json from 0.1.0 to 0.2.0' || {
-    printf 'default bump rules should remain unchanged without preMajor:\n%s\n' \
+  grep -q 'bumping version in package.json from 0.1.0 to 0.1.1' || {
+    printf 'upstream should automatically apply pre-major rules below 1.0.0:\n%s\n' \
       "$default_pre_major_preview" >&2
+    exit 1
+  }
+camel_case_preview=$("$bin" --dryRun --releaseAs=patch)
+printf '%s\n' "$camel_case_preview" | \
+  grep -q 'bumping version in package.json from 0.1.0 to 0.1.1' || {
+    printf 'camelCase dry-run and release-as options were not applied:\n%s\n' \
+      "$camel_case_preview" >&2
+    exit 1
+  }
+grep -Fq '"version": "0.1.0"' package.json
+types_override_preview=$("$bin" --dry-run --types=feat --silent)
+printf '%s\n' "$types_override_preview" | grep -Fq '## [0.1.1]' || {
+    printf 'types array should replace the default commit types:\n%s\n' \
+      "$types_override_preview" >&2
+    exit 1
+}
+if printf '%s\n' "$types_override_preview" | grep -Fq '### Features'; then
+    printf 'string entries in upstream types array should not match commit objects\n' >&2
+    exit 1
+fi
+git commit --allow-empty -m 'feat!: change the contract' -m 'BREAKING CHANGE: incompatible API.'
+breaking_preview=$("$bin" --dry-run)
+printf '%s\n' "$breaking_preview" | \
+  grep -q 'bumping version in package.json from 0.1.0 to 0.2.0' || {
+    printf 'upstream should bump a 0.x breaking change to minor:\n%s\n' \
+      "$breaking_preview" >&2
+    exit 1
+  }
+
+mkdir "$tmp/pre-major-1x"
+cd "$tmp/pre-major-1x"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "pre-major-1x",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize pre-major 1.x fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git commit --allow-empty -qm 'feat: test explicit pre-major option'
+explicit_pre_major_preview=$("$bin" --dry-run --preMajor)
+printf '%s\n' "$explicit_pre_major_preview" | \
+  grep -q 'bumping version in package.json from 1.0.0 to 1.0.1' || {
+    printf 'explicit preMajor should apply below a future major release:\n%s\n' \
+      "$explicit_pre_major_preview" >&2
     exit 1
   }
 
