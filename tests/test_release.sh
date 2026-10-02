@@ -88,6 +88,16 @@ rm -f "$marker"
 [ "$(cat VERSION)" = '2.0.1' ]
 test "$(git cat-file -t refs/tags/v2.0.1)" = tag
 
+printf 'stale generated history\n' > CHANGELOG.md
+"$bin" --release-count 0 --skip bump --skip commit --skip tag > /dev/null
+grep -q '^## \[2.0.1\]' CHANGELOG.md
+grep -q '^## \[2.0.0\]' CHANGELOG.md
+grep -q '^## \[1.1.1\]' CHANGELOG.md
+grep -q '^## \[1.1.0\]' CHANGELOG.md
+! grep -q 'stale generated history' CHANGELOG.md
+rm -f "$marker"
+git checkout -- CHANGELOG.md
+
 test -z "$(git status --porcelain)"
 
 mkdir "$tmp/first-release"

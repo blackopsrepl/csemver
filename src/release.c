@@ -30,6 +30,7 @@ static char *trim(char *text);
 static int render_changelog(const CsemverConfig *config, const char *version,
                             const char *previous_tag, const char *new_tag,
                             const Commit *commits, size_t commit_count,
+                            char tags[][SEMVER_TEXT_MAX], size_t tag_count,
                             CsemverBuffer *output);
 
 static void errorf(const char *format, ...) {
@@ -360,8 +361,19 @@ static int get_version(const CsemverConfig *config, char *version,
   return 0;
 }
 
+static int read_commits_range(const CsemverConfig *config,
+                              const char *previous_tag, const char *end_ref,
+                              Commit *commits, size_t *commit_count);
+
 static int read_commits(const CsemverConfig *config, const char *previous_tag,
                         Commit *commits, size_t *commit_count) {
+  return read_commits_range(config, previous_tag, "HEAD", commits,
+                            commit_count);
+}
+
+static int read_commits_range(const CsemverConfig *config,
+                              const char *previous_tag, const char *end_ref,
+                              Commit *commits, size_t *commit_count) {
   const char *args[ARG_MAX_COUNT];
   char range[SEMVER_TEXT_MAX * 2];
   char *output = NULL;
@@ -371,9 +383,18 @@ static int read_commits(const CsemverConfig *config, const char *previous_tag,
   args[used++] = "log";
   args[used++] = "--no-merges";
   args[used++] = "--format=%H%x1f%s%x1f%b%x1e";
-  if (previous_tag != NULL) {
-    snprintf(range, sizeof range, "%s..HEAD", previous_tag);
+  if (previous_tag != NULL && end_ref != NULL) {
+    if (snprintf(range, sizeof range, "%s..%s", previous_tag, end_ref) >=
+        (int)sizeof range)
+      return 0;
     args[used++] = range;
+  } else if (previous_tag != NULL) {
+    if (snprintf(range, sizeof range, "%s..HEAD", previous_tag) >=
+        (int)sizeof range)
+      return 0;
+    args[used++] = range;
+  } else if (end_ref != NULL) {
+    args[used++] = end_ref;
   }
   if (config->path[0] != '\0') {
     args[used++] = "--";
@@ -887,6 +908,7 @@ static int update_files(const CsemverConfig *config, const char *version,
 static int write_changelog(const CsemverConfig *config, const char *version,
                            const char *previous_tag, const char *new_tag,
                            const Commit *commits, size_t commit_count,
+                           char tags[][SEMVER_TEXT_MAX], size_t tag_count,
                            char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX],
                            size_t *path_count) {
   CsemverBuffer content;
@@ -899,7 +921,7 @@ static int write_changelog(const CsemverConfig *config, const char *version,
     printf("✔ created %s\n", config->infile);
   csemver_buffer_init(&content);
   if (!render_changelog(config, version, previous_tag, new_tag, commits,
-                        commit_count, &content)) {
+                        commit_count, tags, tag_count, &content)) {
     csemver_buffer_free(&content);
     errorf("failed to generate changelog");
     return 0;
@@ -907,7 +929,8 @@ static int write_changelog(const CsemverConfig *config, const char *version,
   if (!config->silent)
     printf("✔ outputting changes to %s\n", config->infile);
   if (config->dry_run) {
-    printf("\n---\n%s---\n\n", content.data == NULL ? "" : content.data);
+    char *preview = content.data == NULL ? NULL : trim(content.data);
+    printf("\n---\n%s\n---\n\n", preview == NULL ? "" : preview);
     ok = 1;
   } else {
     ok = csemver_write_file(config->infile,
@@ -1206,7 +1229,8 @@ int csemver_main(int argc, char **argv) {
   }
   if (!config.skip_changelog &&
       !write_changelog(&config, next, latest_tag[0] == '\0' ? NULL : latest_tag,
-                       new_tag, commits, commit_count, paths, &path_count)) {
+                       new_tag, commits, commit_count, tags, tag_count, paths,
+                       &path_count)) {
     free(commits);
     return 1;
   }
@@ -1241,9 +1265,110 @@ int csemver_main(int argc, char **argv) {
   return 0;
 }
 
+static int stable_tag_version(const CsemverConfig *config, const char *tag,
+                              char *version, size_t version_size) {
+  size_t prefix_size = strlen(config->tag_prefix);
+  Semver parsed;
+  if (strncmp(tag, config->tag_prefix, prefix_size) != 0 ||
+      strlen(tag + prefix_size) >= version_size ||
+      !semver_parse(tag + prefix_size, &parsed) || parsed.has_prerelease)
+    return 0;
+  snprintf(version, version_size, "%s", tag + prefix_size);
+  return 1;
+}
+
+static int get_tag_date(const char *tag, char *date, size_t date_size) {
+  const char *args[] = {"log", "-1", "--format=%cs", tag, NULL};
+  char *output = NULL;
+  int status = 0;
+  if (!run_git(args, &output, &status) || status != 0 || output == NULL) {
+    free(output);
+    return 0;
+  }
+  if (snprintf(date, date_size, "%s", trim(output)) >= (int)date_size) {
+    free(output);
+    return 0;
+  }
+  free(output);
+  return 1;
+}
+
+static int append_release_heading(CsemverBuffer *output, const char *base,
+                                  const char *version, const char *previous_tag,
+                                  const char *tag, const char *date,
+                                  bool initial_release) {
+  if (base[0] != '\0' && previous_tag != NULL)
+    return csemver_buffer_appendf(output,
+                                  "## [%s](%s/compare/%s...%s) (%s)\n\n",
+                                  version, base, previous_tag, tag, date);
+  if (initial_release)
+    return csemver_buffer_appendf(output, "## %s (%s)\n\n", version, date);
+  return csemver_buffer_appendf(output, "## [%s] (%s)\n\n", version, date);
+}
+
+static int normalize_changelog_newlines(CsemverBuffer *output) {
+  while (output->length > 0 && output->data[output->length - 1] == '\n')
+    output->data[--output->length] = '\0';
+  return output->length == 0 || csemver_buffer_append(output, "\n", 1);
+}
+
+static int regenerate_all_changelogs(
+    const CsemverConfig *config, const char *version, const char *previous_tag,
+    const char *new_tag, const Commit *commits, size_t commit_count,
+    char tags[][SEMVER_TEXT_MAX], size_t tag_count, const char *date,
+    const char *base, CsemverBuffer *output) {
+  Commit *historical = calloc(COMMIT_MAX, sizeof(*historical));
+  bool wrote_section = false;
+  size_t i;
+  if (historical == NULL)
+    return 0;
+  if (previous_tag == NULL || strcmp(previous_tag, new_tag) != 0) {
+    if (!append_release_heading(output, base, version, previous_tag, new_tag,
+                                date, false) ||
+        !changelog_section(config, commits, commit_count, output))
+      goto fail;
+    wrote_section = true;
+  }
+  for (i = 0; i < tag_count; ++i) {
+    char current_version[SEMVER_TEXT_MAX];
+    char current_date[32];
+    const char *older_tag = NULL;
+    size_t j, historical_count = 0;
+    if (!stable_tag_version(config, tags[i], current_version,
+                            sizeof current_version))
+      continue;
+    for (j = i + 1; j < tag_count; ++j) {
+      char ignored_version[SEMVER_TEXT_MAX];
+      if (stable_tag_version(config, tags[j], ignored_version,
+                             sizeof ignored_version)) {
+        older_tag = tags[j];
+        break;
+      }
+    }
+    if (!read_commits_range(config, older_tag, tags[i], historical,
+                            &historical_count))
+      goto fail;
+    if (!get_tag_date(tags[i], current_date, sizeof current_date))
+      snprintf(current_date, sizeof current_date, "%s", date);
+    if (wrote_section && !csemver_buffer_append(output, "\n", 1))
+      goto fail;
+    if (!append_release_heading(output, base, current_version, older_tag,
+                                tags[i], current_date, older_tag == NULL) ||
+        !changelog_section(config, historical, historical_count, output))
+      goto fail;
+    wrote_section = true;
+  }
+  free(historical);
+  return 1;
+fail:
+  free(historical);
+  return 0;
+}
+
 static int render_changelog(const CsemverConfig *config, const char *version,
                             const char *previous_tag, const char *new_tag,
                             const Commit *commits, size_t commit_count,
+                            char tags[][SEMVER_TEXT_MAX], size_t tag_count,
                             CsemverBuffer *output) {
   char *old_content = NULL;
   char base[1024];
@@ -1275,6 +1400,18 @@ static int render_changelog(const CsemverConfig *config, const char *version,
       (!csemver_buffer_append(output, config->header, strlen(config->header)) ||
        !csemver_buffer_append(output, "\n", 1)))
     goto fail;
+  if (config->release_count == 0) {
+    if ((!config->dry_run && !csemver_buffer_append(output, "\n", 1)) ||
+        !regenerate_all_changelogs(config, version, previous_tag, new_tag,
+                                   commits, commit_count, tags, tag_count, date,
+                                   base, output) ||
+        !normalize_changelog_newlines(output))
+      goto fail;
+    free(old_content);
+    return 1;
+  }
+  if (!config->dry_run && !csemver_buffer_append(output, "\n", 1))
+    goto fail;
   if (base[0] != '\0' && previous_tag != NULL) {
     if (!csemver_buffer_appendf(output, "## [%s](%s/compare/%s...%s) (%s)\n\n",
                                 version, base, previous_tag, new_tag, date))
@@ -1286,6 +1423,8 @@ static int render_changelog(const CsemverConfig *config, const char *version,
   if (*old_body != '\0' &&
       !csemver_buffer_append(output, old_body,
                              old_length - (size_t)(old_body - old_content)))
+    goto fail;
+  if (!normalize_changelog_newlines(output))
     goto fail;
   free(old_content);
   return 1;
