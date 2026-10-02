@@ -35,7 +35,7 @@ test: build/csemver build/csemver-version-test build/test_semver build/test_toml
 	./build/test_toml
 	./build/test_config
 	./build/test_version
-	./tests/test_cli.sh ./build/csemver 0.1.0
+	./tests/test_cli.sh ./build/csemver $(CSEMVER_VERSION)
 	./tests/test_cli.sh ./build/csemver-version-test 9.8.7
 	./tests/test_release.sh
 
