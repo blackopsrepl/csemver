@@ -1,5 +1,9 @@
 # csemver
 
+<p align="center">
+  <img src="docs/assets/csemver-mascot.png" alt="The csemver clockwork raven release steward" width="200">
+</p>
+
 **A native C17 release manager with TOML configuration.**
 
 csemver implements the version bump, changelog, release commit, and annotated Git tag workflow of `commit-and-tag-version` without a Node.js runtime or JavaScript configuration. The current port is under active compatibility work; it is not yet a byte-for-byte replacement. Preview every release with `--dry-run` before using it on a production repository.
