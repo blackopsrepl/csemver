@@ -91,6 +91,11 @@ Lifecycle commands run through `/bin/sh -c`; only use scripts from a trusted con
 -m, --message FORMAT       Deprecated; use the TOML release message format
     --releaseCommitMessageFormat FORMAT
     --header TEXT           Changelog heading
+    --commitUrlFormat URL   Customize commit links
+    --compareUrlFormat URL  Customize compare links
+    --issueUrlFormat URL    Customize issue links
+    --userUrlFormat URL     Customize user links
+    --preMajor              Apply pre-1.0.0 bump rules
     --issuePrefixes PREFIX... Issue prefixes to link
     --tag-force             Replace an existing tag
     --git-tag-fallback      Read version from a tag if no version file exists

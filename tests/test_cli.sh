@@ -10,7 +10,8 @@ printf '%s\n' "$help" | grep -q -- '--preset'
 printf '%s\n' "$help" | grep -Fq 'Changelog sections (0 all, N latest)'
 for option in --first-release --packageFiles --bumpFiles --issuePrefixes \
     --lerna-package --tag-force --git-tag-fallback --noBumpWhenEmptyChanges \
-    --scripts; do
+    --scripts --commitUrlFormat --compareUrlFormat --issueUrlFormat \
+    --userUrlFormat --preMajor; do
     if ! printf '%s\n' "$help" | grep -Fq -- "$option"; then
         printf 'help is missing %s\n' "$option" >&2
         exit 1
@@ -21,4 +22,19 @@ if "$bin" --definitely-not-an-option >/dev/null 2>&1; then
     printf '%s\n' 'unknown option unexpectedly succeeded' >&2
     exit 1
 fi
+for option in \
+    '--commitUrlFormat=https://example.invalid/{{hash}}' \
+    '--commit-url-format=https://example.invalid/{{hash}}' \
+    '--compareUrlFormat=https://example.invalid/{{previousTag}}...{{currentTag}}' \
+    '--compare-url-format=https://example.invalid/{{previousTag}}...{{currentTag}}' \
+    '--issueUrlFormat=https://example.invalid/issues/{{id}}' \
+    '--issue-url-format=https://example.invalid/issues/{{id}}' \
+    '--userUrlFormat=https://example.invalid/{{user}}' \
+    '--user-url-format=https://example.invalid/{{user}}' \
+    '--preMajor'; do
+    if ! "$bin" "$option" --help >/dev/null 2>&1; then
+        printf 'upstream-compatible option was rejected: %s\n' "$option" >&2
+        exit 1
+    fi
+done
 printf '%s\n' 'cli smoke tests passed'

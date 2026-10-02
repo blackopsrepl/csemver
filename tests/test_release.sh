@@ -453,4 +453,54 @@ unknown_script_marker="$tmp/unknown-script.marker"
 "$bin" --release-as 1.0.2 --scripts.unknown="touch $unknown_script_marker" > /dev/null
 test ! -e "$unknown_script_marker"
 
+mkdir "$tmp/url-formats"
+cd "$tmp/url-formats"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "url-formats",\n  "version": "1.0.0",\n  "repository": {"type": "git", "url": "https://github.com/example/url-formats.git"}\n}\n' > package.json
+printf '%s\n' \
+  'commitUrlFormat = "https://links.invalid/c/{{hash}}"' \
+  'compareUrlFormat = "https://links.invalid/d/{{previousTag}}...{{currentTag}}"' \
+  'issueUrlFormat = "https://links.invalid/i/{{id}}/{{prefix}}"' \
+  'userUrlFormat = "https://links.invalid/u/{{user}}"' > csemver.toml
+git add package.json csemver.toml
+git commit -qm 'chore: initialize URL format fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git commit --allow-empty -m 'feat(api): thank @alice for #42' -m 'Closes #99.'
+url_format_commit_hash=$(git rev-parse HEAD)
+"$bin" --release-as 1.1.0 --skip.commit --skip.tag > /dev/null
+grep -Fq 'https://links.invalid/d/v1.0.0...v1.1.0' CHANGELOG.md
+grep -Fq "https://links.invalid/c/$url_format_commit_hash" CHANGELOG.md
+grep -Fq '[#42](https://links.invalid/i/42/#)' CHANGELOG.md
+grep -Fq '[@alice](https://links.invalid/u/alice)' CHANGELOG.md
+grep -Fq 'closes [#99](https://links.invalid/i/99/#)' CHANGELOG.md
+
+mkdir "$tmp/pre-major"
+cd "$tmp/pre-major"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "pre-major",\n  "version": "0.1.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize pre-major fixture'
+git tag -a v0.1.0 -m 'chore(release): 0.1.0'
+git commit --allow-empty -qm 'feat: exercise pre-major bump rules'
+pre_major_preview=$("$bin" --dry-run --preMajor)
+printf '%s\n' "$pre_major_preview" | \
+  grep -q 'bumping version in package.json from 0.1.0 to 0.1.1' || {
+    printf 'preMajor should apply pre-1.0.0 bump rules:\n%s\n' \
+      "$pre_major_preview" >&2
+    exit 1
+  }
+default_pre_major_preview=$("$bin" --dry-run)
+printf '%s\n' "$default_pre_major_preview" | \
+  grep -q 'bumping version in package.json from 0.1.0 to 0.2.0' || {
+    printf 'default bump rules should remain unchanged without preMajor:\n%s\n' \
+      "$default_pre_major_preview" >&2
+    exit 1
+  }
+
 printf '%s\n' 'release workflow tests passed'

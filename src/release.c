@@ -66,38 +66,46 @@ static void errorf(const char *format, ...) {
 }
 
 static void print_help(void) {
-  puts("Usage: csemver [options]\n\n"
-       "Options:\n"
-       "  -h, --help                 Show this help\n"
-       "  -v, --version              Show version\n"
-       "  -r, --release-as VERSION   Release type or exact SemVer\n"
-       "  -p, --prerelease [ID]      Create a prerelease\n"
-       "  -f, --first-release        Tag the current version without bumping\n"
-       "  -t, --tag-prefix PREFIX    Git tag prefix (default: v)\n"
-       "  -i, --infile FILE          Changelog path (default: CHANGELOG.md)\n"
-       "  -c, --config FILE          Read configuration from TOML\n"
-       "      --dry-run              Preview without modifying the repository\n"
-       "  -n, --no-verify            Bypass git commit hooks\n"
-       "  -a, --commit-all           Include all staged and working files\n"
-       "      --skip STEP            Skip bump, changelog, commit, or tag\n"
-       "      --path PATH            Include commits under this path\n"
-       "      --lerna-package NAME   Use package tags for bump selection\n"
-       "      --packageFiles FILE... Override package version files\n"
-       "      --bumpFiles FILE...    Override files to update\n"
-       "      --issuePrefixes PFX... Issue prefixes to link\n"
-       "      --release-count N      Changelog sections (0 all, N latest)\n"
-       "      --preset NAME          Select conventional or Angular changelog\n"
-       "      --scripts.EVENT CMD   Override a lifecycle script\n"
-       "      --npmPublishHint TXT Override the release publishing hint\n"
-       "  -s, --sign                 Sign release commit and tag\n"
-       "      --signoff              Add a DCO signoff\n"
-       "  -m, --message FORMAT       Deprecated; use --releaseCommitMessageFormat\n"
-       "      --releaseCommitMessageFormat FORMAT\n"
-       "      --header TEXT          Set changelog heading\n"
-       "      --tag-force            Replace an existing tag\n"
-       "      --git-tag-fallback     Read version from a tag if no file exists\n"
-       "      --noBumpWhenEmptyChanges\n"
-       "      --silent               Suppress normal progress output\n");
+  puts(
+      "Usage: csemver [options]\n\n"
+      "Options:\n"
+      "  -h, --help                 Show this help\n"
+      "  -v, --version              Show version\n"
+      "  -r, --release-as VERSION   Release type or exact SemVer\n"
+      "  -p, --prerelease [ID]      Create a prerelease\n"
+      "  -f, --first-release        Tag the current version without bumping\n"
+      "  -t, --tag-prefix PREFIX    Git tag prefix (default: v)\n"
+      "  -i, --infile FILE          Changelog path (default: CHANGELOG.md)\n"
+      "  -c, --config FILE          Read configuration from TOML\n"
+      "      --dry-run              Preview without modifying the repository\n"
+      "  -n, --no-verify            Bypass git commit hooks\n"
+      "  -a, --commit-all           Include all staged and working files\n"
+      "      --skip STEP            Skip bump, changelog, commit, or tag\n"
+      "      --path PATH            Include commits under this path\n"
+      "      --lerna-package NAME   Use package tags for bump selection\n"
+      "      --packageFiles FILE... Override package version files\n"
+      "      --bumpFiles FILE...    Override files to update\n"
+      "      --issuePrefixes PFX... Issue prefixes to link\n"
+      "      --release-count N      Changelog sections (0 all, N latest)\n"
+      "      --preset NAME          Select conventional or Angular changelog\n"
+      "      --scripts.EVENT CMD   Override a lifecycle script\n"
+      "      --npmPublishHint TXT Override the release publishing hint\n"
+      "  -s, --sign                 Sign release commit and tag\n"
+      "      --signoff              Add a DCO signoff\n"
+      "  -m, --message FORMAT       Deprecated; use "
+      "--releaseCommitMessageFormat\n"
+      "      --releaseCommitMessageFormat FORMAT\n"
+      "      --header TEXT          Set changelog heading\n"
+      "      --commitUrlFormat URL Set commit links ({{hash}})\n"
+      "      --compareUrlFormat URL Set compare links ({{previousTag}}, "
+      "{{currentTag}})\n"
+      "      --issueUrlFormat URL  Set issue links ({{id}}, {{prefix}})\n"
+      "      --userUrlFormat URL   Set user links ({{user}})\n"
+      "      --preMajor            Apply pre-1.0.0 bump rules\n"
+      "      --tag-force            Replace an existing tag\n"
+      "      --git-tag-fallback     Read version from a tag if no file exists\n"
+      "      --noBumpWhenEmptyChanges\n"
+      "      --silent               Suppress normal progress output\n");
 }
 
 static int run_command(const char *const argv[], char **output, int *status) {
@@ -206,7 +214,15 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
         strcmp(key, "--releaseCommitMessageFormat") == 0 ||
         strcmp(key, "--header") == 0 || strcmp(key, "--changelogHeader") == 0 ||
         strcmp(key, "--lerna-package") == 0 ||
-        strcmp(key, "--npmPublishHint") == 0) {
+        strcmp(key, "--npmPublishHint") == 0 ||
+        strcmp(key, "--commitUrlFormat") == 0 ||
+        strcmp(key, "--commit-url-format") == 0 ||
+        strcmp(key, "--compareUrlFormat") == 0 ||
+        strcmp(key, "--compare-url-format") == 0 ||
+        strcmp(key, "--issueUrlFormat") == 0 ||
+        strcmp(key, "--issue-url-format") == 0 ||
+        strcmp(key, "--userUrlFormat") == 0 ||
+        strcmp(key, "--user-url-format") == 0) {
       char error[256] = {0};
       const char *name = strcmp(key, "-r") == 0   ? "release-as"
                          : strcmp(key, "-i") == 0 ? "infile"
@@ -312,6 +328,7 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
         strcmp(key, "--git-tag-fallback") == 0 ||
         strcmp(key, "--noBumpWhenEmptyChanges") == 0 ||
         strcmp(key, "--no-bump-when-empty-changes") == 0 ||
+        strcmp(key, "--preMajor") == 0 || strcmp(key, "--pre-major") == 0 ||
         strncmp(key, "--skip.", 7) == 0) {
       const char *name = key;
       bool flag = true;
@@ -712,8 +729,131 @@ static int preset_commit_type(const CsemverConfig *config, const char *subject,
   return conventional_type(subject, type, size, scope, scope_size, description);
 }
 
+typedef struct {
+  char host[CSEMVER_PATH_MAX];
+  char owner[CSEMVER_PATH_MAX];
+  char repository[CSEMVER_PATH_MAX];
+  const char *previous_tag;
+  const char *current_tag;
+  const char *hash;
+  const char *id;
+  const char *prefix;
+  const char *user;
+} CsemverUrlContext;
+
+static void url_context_init(CsemverUrlContext *context, const char *base,
+                             const char *previous_tag, const char *current_tag,
+                             const char *hash, const char *id,
+                             const char *prefix, const char *user) {
+  const char *authority, *path, *path_end, *last_slash = NULL, *cursor;
+  const char *scheme;
+  memset(context, 0, sizeof *context);
+  context->previous_tag = previous_tag == NULL ? "" : previous_tag;
+  context->current_tag = current_tag == NULL ? "" : current_tag;
+  context->hash = hash == NULL ? "" : hash;
+  context->id = id == NULL ? "" : id;
+  context->prefix = prefix == NULL ? "" : prefix;
+  context->user = user == NULL ? "" : user;
+  if (base == NULL || base[0] == '\0')
+    return;
+  scheme = strstr(base, "://");
+  authority = scheme == NULL ? base : scheme + 3;
+  path = strchr(authority, '/');
+  if (path == NULL)
+    return;
+  snprintf(context->host, sizeof context->host, "%.*s", (int)(path - base),
+           base);
+  ++path;
+  path_end = path + strlen(path);
+  while (path_end > path && path_end[-1] == '/')
+    --path_end;
+  for (cursor = path; cursor < path_end; ++cursor)
+    if (*cursor == '/')
+      last_slash = cursor;
+  if (last_slash == NULL) {
+    snprintf(context->repository, sizeof context->repository, "%.*s",
+             (int)(path_end - path), path);
+  } else {
+    snprintf(context->owner, sizeof context->owner, "%.*s",
+             (int)(last_slash - path), path);
+    snprintf(context->repository, sizeof context->repository, "%.*s",
+             (int)(path_end - last_slash - 1), last_slash + 1);
+  }
+}
+
+static const char *url_template_value(const CsemverUrlContext *context,
+                                      const char *name, size_t name_length) {
+  if (name_length == 4 && memcmp(name, "host", 4) == 0)
+    return context->host;
+  if (name_length == 5 && memcmp(name, "owner", 5) == 0)
+    return context->owner;
+  if (name_length == 10 && memcmp(name, "repository", 10) == 0)
+    return context->repository;
+  if (name_length == 11 && memcmp(name, "previousTag", 11) == 0)
+    return context->previous_tag;
+  if (name_length == 10 && memcmp(name, "currentTag", 10) == 0)
+    return context->current_tag;
+  if (name_length == 4 && memcmp(name, "hash", 4) == 0)
+    return context->hash;
+  if (name_length == 2 && memcmp(name, "id", 2) == 0)
+    return context->id;
+  if (name_length == 6 && memcmp(name, "prefix", 6) == 0)
+    return context->prefix;
+  if (name_length == 4 && memcmp(name, "user", 4) == 0)
+    return context->user;
+  return "";
+}
+
+static int append_url_template(CsemverBuffer *output, const char *format,
+                               const CsemverUrlContext *context) {
+  const char *literal = format;
+  const char *cursor = format;
+  while (*cursor != '\0') {
+    if (cursor[0] == '{' && cursor[1] == '{') {
+      const char *close = strstr(cursor + 2, "}}");
+      if (close != NULL) {
+        const char *name = cursor + 2;
+        const char *name_end = close;
+        const char *value;
+        while (name < name_end && isspace((unsigned char)*name))
+          ++name;
+        while (name_end > name && isspace((unsigned char)name_end[-1]))
+          --name_end;
+        if (!csemver_buffer_append(output, literal, (size_t)(cursor - literal)))
+          return 0;
+        value = url_template_value(context, name, (size_t)(name_end - name));
+        if (!csemver_buffer_append(output, value, strlen(value)))
+          return 0;
+        cursor = close + 2;
+        literal = cursor;
+        continue;
+      }
+    }
+    ++cursor;
+  }
+  return csemver_buffer_append(output, literal, (size_t)(cursor - literal));
+}
+
+static const char *effective_url_format(const char *format,
+                                        const char *default_format) {
+  return format[0] == '\0' ? default_format : format;
+}
+
+static int url_format_is_enabled(const char *base, bool explicit_format,
+                                 const char *format) {
+  return (base != NULL && base[0] != '\0') ||
+         (explicit_format && format[0] != '\0');
+}
+
 static int append_issue_link(CsemverBuffer *out, const CsemverConfig *config,
                              const char *text, const char *base) {
+  static const char default_issue_format[] =
+      "{{host}}/{{owner}}/{{repository}}/issues/{{id}}";
+  static const char default_user_format[] = "{{host}}/{{user}}";
+  const char *issue_format =
+      effective_url_format(config->issue_url_format, default_issue_format);
+  const char *user_format =
+      effective_url_format(config->user_url_format, default_user_format);
   size_t i;
   for (i = 0; text[i] != '\0';) {
     size_t prefix;
@@ -727,26 +867,57 @@ static int append_issue_link(CsemverBuffer *out, const CsemverConfig *config,
       while (text[i + token_len + digits] != '\0' &&
              isdigit((unsigned char)text[i + token_len + digits]))
         ++digits;
-      if (digits > 0 && base[0] != '\0') {
+      if (digits > 0 &&
+          url_format_is_enabled(base, config->issue_url_format_explicit,
+                                config->issue_url_format)) {
         char id[32];
+        CsemverUrlContext context;
         size_t id_len = token_len + digits;
         if (id_len >= sizeof id)
           return 0;
-        memcpy(id, text + i, id_len);
-        id[id_len] = '\0';
-        if (!csemver_buffer_appendf(out, "[%s](%s/issues/%s)", id, base,
-                                    id + token_len))
+        memcpy(id, text + i + token_len, digits);
+        id[digits] = '\0';
+        url_context_init(&context, base, NULL, NULL, NULL, id, token, NULL);
+        if (!csemver_buffer_appendf(out, "[%.*s](", (int)id_len, text + i) ||
+            !append_url_template(out, issue_format, &context) ||
+            !csemver_buffer_append(out, ")", 1))
           return 0;
         i += id_len;
         matched = true;
         break;
       }
     }
-    if (!matched) {
-      if (!csemver_buffer_append(out, text + i, 1))
-        return 0;
-      ++i;
+    if (matched)
+      continue;
+    if (text[i] == '@' &&
+        (i == 0 || (!isalnum((unsigned char)text[i - 1]) &&
+                    text[i - 1] != '_' && text[i - 1] != '-'))) {
+      char user[128];
+      size_t end = i + 1, user_length;
+      while (isalnum((unsigned char)text[end]) || text[end] == '_' ||
+             text[end] == '-')
+        ++end;
+      user_length = end - i - 1;
+      if (user_length > 0 && user_length < sizeof user &&
+          url_format_is_enabled(base, config->user_url_format_explicit,
+                                config->user_url_format)) {
+        CsemverUrlContext context;
+        memcpy(user, text + i + 1, user_length);
+        user[user_length] = '\0';
+        url_context_init(&context, base, NULL, NULL, NULL, NULL, NULL, user);
+        if (!csemver_buffer_append(out, "[@", 2) ||
+            !csemver_buffer_append(out, user, user_length) ||
+            !csemver_buffer_append(out, "](", 2) ||
+            !append_url_template(out, user_format, &context) ||
+            !csemver_buffer_append(out, ")", 1))
+          return 0;
+        i = end;
+        continue;
+      }
     }
+    if (!csemver_buffer_append(out, text + i, 1))
+      return 0;
+    ++i;
   }
   return 1;
 }
@@ -1045,9 +1216,19 @@ static int append_commit_line(CsemverBuffer *section,
     return 0;
   if (!append_issue_link(section, config, description, base))
     return 0;
-  if (base[0] != '\0') {
-    if (!csemver_buffer_appendf(section, " ([%s](%s/commit/%s))", short_hash,
-                                base, commit->hash))
+  if (url_format_is_enabled(base, config->commit_url_format_explicit,
+                            config->commit_url_format)) {
+    static const char default_commit_format[] =
+        "{{host}}/{{owner}}/{{repository}}/commit/{{hash}}";
+    CsemverUrlContext context;
+    url_context_init(&context, base, NULL, NULL, commit->hash, NULL, NULL,
+                     NULL);
+    if (!csemver_buffer_appendf(section, " ([%s](", short_hash) ||
+        !append_url_template(section,
+                             effective_url_format(config->commit_url_format,
+                                                  default_commit_format),
+                             &context) ||
+        !csemver_buffer_append(section, "))", 2))
       return 0;
   } else if (!csemver_buffer_appendf(section, " %s", short_hash))
     return 0;
@@ -1114,17 +1295,26 @@ static int add_breaking_note(BreakingNote **notes, size_t *note_count,
 
 static int append_breaking_note(CsemverBuffer *notes,
                                 const CsemverConfig *config,
-                                const BreakingNote *note) {
+                                const BreakingNote *note, const char *base) {
   char type[128], scope[256];
+  char *text;
   const char *description;
+  int appended;
   if (!preset_commit_type_for_commit(config, note->commit, type, sizeof type,
                                      scope, sizeof scope, &description))
     scope[0] = '\0';
-  if (!csemver_buffer_append(notes, "* ", 2) ||
-      (scope[0] != '\0' && !csemver_buffer_appendf(notes, "**%s:** ", scope)) ||
-      !csemver_buffer_append(notes, note->text, note->text_length))
+  text = malloc(note->text_length + 1);
+  if (text == NULL)
     return 0;
-  return csemver_buffer_append(notes, "\n", 1);
+  memcpy(text, note->text, note->text_length);
+  text[note->text_length] = '\0';
+  appended =
+      csemver_buffer_append(notes, "* ", 2) &&
+      (scope[0] == '\0' || csemver_buffer_appendf(notes, "**%s:** ", scope)) &&
+      append_issue_link(notes, config, text, base) &&
+      csemver_buffer_append(notes, "\n", 1);
+  free(text);
+  return appended;
 }
 
 static int collect_breaking_notes(const Commit *commit, BreakingNote **notes,
@@ -1289,7 +1479,7 @@ static int changelog_section(const CsemverConfig *config, const Commit *commits,
     }
   }
   for (i = 0; i < breaking_note_count; ++i)
-    if (!append_breaking_note(&breaking, config, &breaking_notes[i]))
+    if (!append_breaking_note(&breaking, config, &breaking_notes[i], base))
       goto fail;
   for (i = 0; i < group_count; ++i)
     if (used[i] && !append_sorted_group(&groups[i], config, sort_keys, commits,
@@ -1969,11 +2159,21 @@ static int append_compare_heading(const CsemverConfig *config,
                                   CsemverBuffer *output, const char *base,
                                   const char *version, const char *previous_tag,
                                   const char *tag, const char *date) {
+  static const char default_compare_format[] =
+      "{{host}}/{{owner}}/{{repository}}/compare/"
+      "{{previousTag}}...{{currentTag}}";
   const char *level = release_heading_level(config, version);
-  if (base[0] != '\0')
-    return csemver_buffer_appendf(output,
-                                  "%s [%s](%s/compare/%s...%s) (%s)\n\n", level,
-                                  version, base, previous_tag, tag, date);
+  if (url_format_is_enabled(base, config->compare_url_format_explicit,
+                            config->compare_url_format)) {
+    CsemverUrlContext context;
+    url_context_init(&context, base, previous_tag, tag, NULL, NULL, NULL, NULL);
+    return csemver_buffer_appendf(output, "%s [%s](", level, version) &&
+           append_url_template(output,
+                               effective_url_format(config->compare_url_format,
+                                                    default_compare_format),
+                               &context) &&
+           csemver_buffer_appendf(output, ") (%s)\n\n", date);
+  }
   if (preset_is_angular(config))
     return csemver_buffer_appendf(output, "%s %s (%s)\n\n", level, version,
                                   date);

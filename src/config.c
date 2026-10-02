@@ -466,6 +466,11 @@ int csemver_config_parse(CsemverConfig *config, const char *toml, char *error,
                            string_sizes[index], error, error_size))
       goto fail;
   }
+  config->commit_url_format_explicit = toml_key_exists(root, "commitUrlFormat");
+  config->compare_url_format_explicit =
+      toml_key_exists(root, "compareUrlFormat");
+  config->issue_url_format_explicit = toml_key_exists(root, "issueUrlFormat");
+  config->user_url_format_explicit = toml_key_exists(root, "userUrlFormat");
   config->has_prerelease = toml_key_exists(root, "prerelease");
   config->has_message = toml_key_exists(root, "message");
   config->has_changelog_header = toml_key_exists(root, "changelogHeader");
@@ -555,19 +560,27 @@ int csemver_config_set_string(CsemverConfig *config, const char *key,
            strcmp(key, "npm-publish-hint") == 0)
     target = config->npm_publish_hint,
     target_size = sizeof config->npm_publish_hint;
-  else if (strcmp(key, "commitUrlFormat") == 0)
-    target = config->commit_url_format,
+  else if (strcmp(key, "commitUrlFormat") == 0 ||
+           strcmp(key, "commit-url-format") == 0) {
+    target = config->commit_url_format;
     target_size = sizeof config->commit_url_format;
-  else if (strcmp(key, "compareUrlFormat") == 0)
-    target = config->compare_url_format,
+    config->commit_url_format_explicit = true;
+  } else if (strcmp(key, "compareUrlFormat") == 0 ||
+             strcmp(key, "compare-url-format") == 0) {
+    target = config->compare_url_format;
     target_size = sizeof config->compare_url_format;
-  else if (strcmp(key, "issueUrlFormat") == 0)
-    target = config->issue_url_format,
+    config->compare_url_format_explicit = true;
+  } else if (strcmp(key, "issueUrlFormat") == 0 ||
+             strcmp(key, "issue-url-format") == 0) {
+    target = config->issue_url_format;
     target_size = sizeof config->issue_url_format;
-  else if (strcmp(key, "userUrlFormat") == 0)
-    target = config->user_url_format,
+    config->issue_url_format_explicit = true;
+  } else if (strcmp(key, "userUrlFormat") == 0 ||
+             strcmp(key, "user-url-format") == 0) {
+    target = config->user_url_format;
     target_size = sizeof config->user_url_format;
-  else {
+    config->user_url_format_explicit = true;
+  } else {
     if (error != NULL && error_size > 0)
       snprintf(error, error_size, "unknown string option: %s", key);
     return 0;
@@ -641,7 +654,7 @@ int csemver_config_set_bool(CsemverConfig *config, const char *key, bool value,
   else if (strcmp(key, "noBumpWhenEmptyChanges") == 0 ||
            strcmp(key, "no-bump-when-empty-changes") == 0)
     target = &config->no_bump_when_empty_changes;
-  else if (strcmp(key, "preMajor") == 0)
+  else if (strcmp(key, "preMajor") == 0 || strcmp(key, "pre-major") == 0)
     target = &config->pre_major;
   else if (strcmp(key, "skip.bump") == 0)
     target = &config->skip_bump;

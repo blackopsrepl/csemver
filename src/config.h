@@ -73,6 +73,10 @@ typedef struct {
   unsigned release_count;
   bool has_message;
   bool has_changelog_header;
+  bool commit_url_format_explicit;
+  bool compare_url_format_explicit;
+  bool issue_url_format_explicit;
+  bool user_url_format_explicit;
   bool package_files_explicit;
   bool bump_files_explicit;
 } CsemverConfig;
