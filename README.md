@@ -45,7 +45,7 @@ packageFiles = [{ filename = "VERSION", type = "plain-text" }]
 bumpFiles = [{ filename = "VERSION", type = "plain-text" }]
 ```
 
-File lists may also contain strings (for recognized extensions) or tables with `filename` and `type`. Supported updater types are `json`, `python`, `toml`, `yaml`, `openapi`, and `plain-text`. JSON package-lock files update only the root package version surfaces. Version changes preserve the surrounding file bytes; the plain-text updater writes just the version token.
+File lists may also contain strings (for recognized extensions) or tables with `filename` and `type`. Supported updater types are `json`, `python`, `toml`, `yaml`, `openapi`, and `plain-text`. JSON package-lock files update only the root package version surfaces. JSON files are reserialized with detected indentation and newline conventions and end with a newline, matching upstream behavior; the other text updaters preserve surrounding bytes, while plain-text replaces only the version token.
 
 Other supported keys include `infile`, `header`, `releaseAs`, `prerelease`, `releaseCount`, `tagPrefix`, `issuePrefixes`, `path`, `preMajor`, `noBumpWhenEmptyChanges`, `releaseCommitMessageFormat`, `commitUrlFormat`, `compareUrlFormat`, `issueUrlFormat`, `userUrlFormat`, `packageFiles`, `bumpFiles`, `types`, `skip`, and `scripts`. A custom `types` array replaces the default types; each entry uses `type`, optional `section`, and either `hidden` or `effect = "hidden" | "changelog" | "bump"`.
 

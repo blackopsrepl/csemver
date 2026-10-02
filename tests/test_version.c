@@ -47,6 +47,142 @@ static void test_json_round_trip(void) {
   free(updated);
 }
 
+static void test_json_compact_input_uses_default_upstream_indent(void) {
+  const char *input = "{\"name\":\"fixture\",\"version\":\"1.2.3\","
+                      "\"repository\":{\"type\":\"git\","
+                      "\"url\":\"https://github.com/example/project.git\"}}\n";
+  const char *expected =
+      "{\n  \"name\": \"fixture\",\n"
+      "  \"version\": \"1.3.0\",\n"
+      "  \"repository\": {\n"
+      "    \"type\": \"git\",\n"
+      "    \"url\": \"https://github.com/example/project.git\"\n"
+      "  }\n}\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("package.json", "json", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_json_escape_sequences_normalize_like_upstream(void) {
+  const char *input = "{\"name\":\"\\u0066ixture\\/x\",\"version\":\"1.2.3\"}";
+  const char *expected = "{\n  \"name\": \"fixture/x\",\n"
+                         "  \"version\": \"1.3.0\"\n}\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("package.json", "json", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_json_number_spelling_normalizes_like_upstream(void) {
+  const char *input = "{\"name\":\"fixture\",\"version\":\"1.2.3\","
+                      "\"weight\":1.0}";
+  const char *expected = "{\n  \"name\": \"fixture\",\n"
+                         "  \"version\": \"1.3.0\",\n"
+                         "  \"weight\": 1\n}\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("package.json", "json", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_json_integer_keys_reorder_like_upstream(void) {
+  const char *input = "{\"name\":\"fixture\",\"version\":\"1.2.3\","
+                      "\"10\":\"ten\",\"2\":\"two\"}";
+  const char *expected = "{\n  \"2\": \"two\",\n"
+                         "  \"10\": \"ten\",\n"
+                         "  \"name\": \"fixture\",\n"
+                         "  \"version\": \"1.3.0\"\n}\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("package.json", "json", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_json_duplicate_version_uses_last_value(void) {
+  const char *input = "{\"version\":\"0.1.0\",\"version\":\"1.2.3\"}";
+  const char *expected = "{\n  \"version\": \"1.3.0\"\n}\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_read_text("package.json", "json", input, version,
+                                   sizeof version, NULL, error, sizeof error));
+  assert(strcmp(version, "1.2.3") == 0);
+  assert(csemver_version_update_text("package.json", "json", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_json_unicode_escapes_in_version_key_and_value(void) {
+  const char *input = "{\"\\u0076ersion\":\"\\u0031.2.3\"}";
+  const char *expected = "{\n  \"version\": \"1.3.0\"\n}\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_read_text("package.json", "json", input, version,
+                                   sizeof version, NULL, error, sizeof error));
+  assert(strcmp(version, "1.2.3") == 0);
+  assert(csemver_version_update_text("package.json", "json", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_json_key_with_embedded_nul_does_not_match_version(void) {
+  const char *input = "{\"version\\u0000suffix\":\"1.2.3\"}";
+  char version[128];
+  char error[256];
+
+  assert(!csemver_version_read_text("package.json", "json", input, version,
+                                    sizeof version, NULL, error, sizeof error));
+}
+
+static void test_json_version_with_embedded_nul_is_rejected(void) {
+  const char *input = "{\"version\":\"1.2.3\\u0000suffix\"}";
+  char version[128];
+  char error[256];
+
+  assert(!csemver_version_read_text("package.json", "json", input, version,
+                                    sizeof version, NULL, error, sizeof error));
+}
+
 static void test_package_lock_updates_only_root_package(void) {
   const char *input = "{\n  \"version\": \"1.0.0\",\n"
                       "  \"packages\": {\n    \"\": {\n"
@@ -115,6 +251,14 @@ static void test_toml_and_yaml_surface(void) {
 int main(void) {
   test_repository_url_forms();
   test_json_round_trip();
+  test_json_compact_input_uses_default_upstream_indent();
+  test_json_escape_sequences_normalize_like_upstream();
+  test_json_number_spelling_normalizes_like_upstream();
+  test_json_integer_keys_reorder_like_upstream();
+  test_json_duplicate_version_uses_last_value();
+  test_json_unicode_escapes_in_version_key_and_value();
+  test_json_key_with_embedded_nul_does_not_match_version();
+  test_json_version_with_embedded_nul_is_rejected();
   test_package_lock_updates_only_root_package();
   test_plain_text_preserves_upstream_write_semantics();
   test_toml_and_yaml_surface();

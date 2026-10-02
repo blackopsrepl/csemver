@@ -3,6 +3,7 @@
 #include "common.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,9 @@ typedef struct {
   bool has_private, is_private, has_lock_version, has_lock_package_version;
 } JsonFields;
 
+static int read_json_hex4(const char *text, size_t length, size_t *position,
+                          unsigned int *value);
+
 static void set_error(char *error, size_t size, const char *message) {
   if (error != NULL && size > 0)
     snprintf(error, size, "%s", message);
@@ -31,7 +35,43 @@ static void spaces(Scanner *s) {
     ++s->position;
 }
 
-static int string_value(Scanner *s, char *out, size_t out_size, Range *range) {
+static int append_decoded_json_codepoint(char *out, size_t out_size,
+                                         size_t *used, unsigned int value) {
+  char bytes[4];
+  size_t count;
+  if (value >= 0xd800 && value <= 0xdfff)
+    value = 0xfffd;
+  if (value <= 0x7f) {
+    bytes[0] = (char)value;
+    count = 1;
+  } else if (value <= 0x7ff) {
+    bytes[0] = (char)(0xc0 | (value >> 6));
+    bytes[1] = (char)(0x80 | (value & 0x3f));
+    count = 2;
+  } else if (value <= 0xffff) {
+    bytes[0] = (char)(0xe0 | (value >> 12));
+    bytes[1] = (char)(0x80 | ((value >> 6) & 0x3f));
+    bytes[2] = (char)(0x80 | (value & 0x3f));
+    count = 3;
+  } else if (value <= 0x10ffff) {
+    bytes[0] = (char)(0xf0 | (value >> 18));
+    bytes[1] = (char)(0x80 | ((value >> 12) & 0x3f));
+    bytes[2] = (char)(0x80 | ((value >> 6) & 0x3f));
+    bytes[3] = (char)(0x80 | (value & 0x3f));
+    count = 4;
+  } else
+    return 0;
+  if (out != NULL) {
+    if (*used >= out_size || count >= out_size - *used)
+      return 0;
+    memcpy(out + *used, bytes, count);
+    *used += count;
+  }
+  return 1;
+}
+
+static int string_value(Scanner *s, char *out, size_t out_size,
+                        size_t *out_length, Range *range) {
   size_t used = 0;
   if (s->position >= s->length || s->text[s->position] != '"')
     return 0;
@@ -39,13 +79,15 @@ static int string_value(Scanner *s, char *out, size_t out_size, Range *range) {
     range->start = s->position;
   ++s->position;
   while (s->position < s->length) {
-    char c = s->text[s->position++];
+    unsigned char c = (unsigned char)s->text[s->position++];
     if (c == '"') {
       if (out != NULL) {
         if (used >= out_size)
           return 0;
         out[used] = '\0';
       }
+      if (out_length != NULL)
+        *out_length = used;
       if (range != NULL)
         range->end = s->position;
       return 1;
@@ -55,11 +97,27 @@ static int string_value(Scanner *s, char *out, size_t out_size, Range *range) {
         return 0;
       c = s->text[s->position++];
       if (c == 'u') {
-        if (s->position + 4 > s->length)
+        unsigned int value, low;
+        if (!read_json_hex4(s->text, s->length, &s->position, &value))
           return 0;
-        s->position += 4;
-        c = '?';
-      } else if (c == 'n')
+        if (value >= 0xd800 && value <= 0xdbff &&
+            s->position + 6 <= s->length && s->text[s->position] == '\\' &&
+            s->text[s->position + 1] == 'u') {
+          size_t low_position = s->position + 2;
+          if (read_json_hex4(s->text, s->length, &low_position, &low) &&
+              low >= 0xdc00 && low <= 0xdfff) {
+            value = 0x10000 + ((value - 0xd800) << 10) + (low - 0xdc00);
+            s->position = low_position;
+          }
+        }
+        if (!append_decoded_json_codepoint(out, out_size, &used, value))
+          return 0;
+        continue;
+      } else if (c == 'b')
+        c = '\b';
+      else if (c == 'f')
+        c = '\f';
+      else if (c == 'n')
         c = '\n';
       else if (c == 'r')
         c = '\r';
@@ -68,10 +126,12 @@ static int string_value(Scanner *s, char *out, size_t out_size, Range *range) {
       else if (c != '"' && c != '\\' && c != '/')
         return 0;
     }
+    if (c < 0x20)
+      return 0;
     if (out != NULL) {
       if (used + 1 >= out_size)
         return 0;
-      out[used++] = c;
+      out[used++] = (char)c;
     }
   }
   return 0;
@@ -83,7 +143,7 @@ static int skip_object(Scanner *s) {
     return 0;
   spaces(s);
   while (s->position < s->length && s->text[s->position] != '}') {
-    if (!string_value(s, NULL, 0, NULL))
+    if (!string_value(s, NULL, 0, NULL, NULL))
       return 0;
     spaces(s);
     if (s->position >= s->length || s->text[s->position++] != ':')
@@ -129,7 +189,7 @@ static int skip_value(Scanner *s, Range *range) {
     return 0;
   first = s->text[start];
   if (first == '"')
-    return string_value(s, NULL, 0, range);
+    return string_value(s, NULL, 0, NULL, range);
   if (first == '{' || first == '[') {
     int ok = first == '{' ? skip_object(s) : skip_array(s);
     if (ok && range != NULL) {
@@ -152,28 +212,44 @@ static int skip_value(Scanner *s, Range *range) {
 
 static int object_field(Scanner *s, const char *wanted, Range *range,
                         char *decoded, size_t decoded_size) {
+  int found = 0;
   if (s->position >= s->length || s->text[s->position++] != '{')
     return 0;
   spaces(s);
   while (s->position < s->length && s->text[s->position] != '}') {
     char key[128];
-    if (!string_value(s, key, sizeof key, NULL))
+    size_t key_length;
+    Range value;
+    if (!string_value(s, key, sizeof key, &key_length, NULL))
       return 0;
     spaces(s);
     if (s->position >= s->length || s->text[s->position++] != ':')
       return 0;
     spaces(s);
-    if (strcmp(key, wanted) == 0)
-      return decoded != NULL ? string_value(s, decoded, decoded_size, range)
-                             : skip_value(s, range);
-    if (!skip_value(s, NULL))
+    if (key_length == strlen(wanted) && memcmp(key, wanted, key_length) == 0) {
+      if (decoded != NULL) {
+        size_t decoded_length;
+        if (!string_value(s, decoded, decoded_size, &decoded_length, &value) ||
+            decoded_length != strlen(decoded))
+          return 0;
+      } else if (!skip_value(s, &value))
+        return 0;
+      if (range != NULL)
+        *range = value;
+      found = 1;
+    } else if (!skip_value(s, NULL))
       return 0;
     spaces(s);
-    if (s->position < s->length && s->text[s->position] == ',')
+    if (s->position < s->length && s->text[s->position] == ',') {
       ++s->position;
-    spaces(s);
+      spaces(s);
+    } else if (s->position >= s->length || s->text[s->position] != '}')
+      return 0;
   }
-  return 0;
+  if (s->position >= s->length)
+    return 0;
+  ++s->position;
+  return found;
 }
 
 static int json_fields(const char *content, const char *filename,
@@ -217,15 +293,677 @@ static int json_fields(const char *content, const char *filename,
 
 static int copy_json_string(const char *text, Range range, char *out,
                             size_t out_size) {
-  size_t length;
-  if (range.end < range.start + 2 || text[range.start] != '"')
+  size_t decoded_length;
+  Scanner scanner = {text, range.start, range.end};
+  return string_value(&scanner, out, out_size, &decoded_length, NULL) &&
+         decoded_length == strlen(out);
+}
+
+typedef struct {
+  char type;
+  size_t amount, uses, weight;
+} IndentStat;
+
+typedef struct {
+  Scanner scanner;
+  const Range *versions;
+  size_t version_count;
+  const char *replacement;
+  char indent_char;
+  size_t indent_size;
+  const char *newline;
+  size_t newline_size;
+  CsemverBuffer *output;
+} JsonPrinter;
+
+typedef struct {
+  Range value;
+  char *key_text;
+  size_t key_size;
+  unsigned long array_index;
+  size_t order;
+  bool is_index;
+} JsonProperty;
+
+static int append_json_indent(JsonPrinter *printer, size_t depth) {
+  size_t level, column;
+  if (depth > 512)
     return 0;
-  length = range.end - range.start - 2;
-  if (length >= out_size)
-    return 0;
-  memcpy(out, text + range.start + 1, length);
-  out[length] = '\0';
+  for (level = 0; level < depth; ++level)
+    for (column = 0; column < printer->indent_size; ++column)
+      if (!csemver_buffer_append(printer->output, &printer->indent_char, 1))
+        return 0;
   return 1;
+}
+
+static int append_json_newline(JsonPrinter *printer) {
+  return csemver_buffer_append(printer->output, printer->newline,
+                               printer->newline_size);
+}
+
+static int read_json_hex4(const char *text, size_t length, size_t *position,
+                          unsigned int *value) {
+  size_t i;
+  unsigned int result = 0;
+  for (i = 0; i < 4; ++i) {
+    unsigned char c;
+    if (*position >= length)
+      return 0;
+    c = (unsigned char)text[(*position)++];
+    if (c >= '0' && c <= '9')
+      result = result * 16 + (unsigned int)(c - '0');
+    else if (c >= 'a' && c <= 'f')
+      result = result * 16 + (unsigned int)(c - 'a' + 10);
+    else if (c >= 'A' && c <= 'F')
+      result = result * 16 + (unsigned int)(c - 'A' + 10);
+    else
+      return 0;
+  }
+  *value = result;
+  return 1;
+}
+
+static int append_json_codepoint(CsemverBuffer *output, unsigned int value) {
+  char bytes[4];
+  size_t count;
+  if (value == '"' || value == '\\') {
+    bytes[0] = '\\';
+    bytes[1] = (char)value;
+    return csemver_buffer_append(output, bytes, 2);
+  }
+  if (value == '\b')
+    return csemver_buffer_append(output, "\\b", 2);
+  if (value == '\f')
+    return csemver_buffer_append(output, "\\f", 2);
+  if (value == '\n')
+    return csemver_buffer_append(output, "\\n", 2);
+  if (value == '\r')
+    return csemver_buffer_append(output, "\\r", 2);
+  if (value == '\t')
+    return csemver_buffer_append(output, "\\t", 2);
+  if (value < 0x20 || (value >= 0xd800 && value <= 0xdfff)) {
+    char escaped[7];
+    snprintf(escaped, sizeof escaped, "\\u%04x", value);
+    return csemver_buffer_append(output, escaped, 6);
+  }
+  if (value <= 0x7f) {
+    bytes[0] = (char)value;
+    count = 1;
+  } else if (value <= 0x7ff) {
+    bytes[0] = (char)(0xc0 | (value >> 6));
+    bytes[1] = (char)(0x80 | (value & 0x3f));
+    count = 2;
+  } else if (value <= 0xffff) {
+    bytes[0] = (char)(0xe0 | (value >> 12));
+    bytes[1] = (char)(0x80 | ((value >> 6) & 0x3f));
+    bytes[2] = (char)(0x80 | (value & 0x3f));
+    count = 3;
+  } else if (value <= 0x10ffff) {
+    bytes[0] = (char)(0xf0 | (value >> 18));
+    bytes[1] = (char)(0x80 | ((value >> 12) & 0x3f));
+    bytes[2] = (char)(0x80 | ((value >> 6) & 0x3f));
+    bytes[3] = (char)(0x80 | (value & 0x3f));
+    count = 4;
+  } else
+    return 0;
+  return csemver_buffer_append(output, bytes, count);
+}
+
+static int json_print_string(Scanner *scanner, CsemverBuffer *output) {
+  size_t position = scanner->position;
+  if (position >= scanner->length || scanner->text[position++] != '"' ||
+      !csemver_buffer_append(output, "\"", 1))
+    return 0;
+  while (position < scanner->length) {
+    unsigned char c = (unsigned char)scanner->text[position++];
+    unsigned int value = c;
+    if (c == '"') {
+      if (!csemver_buffer_append(output, "\"", 1))
+        return 0;
+      scanner->position = position;
+      return 1;
+    }
+    if (c == '\\') {
+      unsigned char escape;
+      if (position >= scanner->length)
+        return 0;
+      escape = (unsigned char)scanner->text[position++];
+      if (escape == 'u') {
+        if (!read_json_hex4(scanner->text, scanner->length, &position, &value))
+          return 0;
+        if (value >= 0xd800 && value <= 0xdbff &&
+            position + 6 <= scanner->length &&
+            scanner->text[position] == '\\' &&
+            scanner->text[position + 1] == 'u') {
+          size_t low_position = position + 2;
+          unsigned int low;
+          if (read_json_hex4(scanner->text, scanner->length, &low_position,
+                             &low) &&
+              low >= 0xdc00 && low <= 0xdfff) {
+            value = 0x10000 + ((value - 0xd800) << 10) + (low - 0xdc00);
+            position = low_position;
+          }
+        }
+      } else if (escape == '"' || escape == '\\' || escape == '/')
+        value = escape;
+      else if (escape == 'b')
+        value = '\b';
+      else if (escape == 'f')
+        value = '\f';
+      else if (escape == 'n')
+        value = '\n';
+      else if (escape == 'r')
+        value = '\r';
+      else if (escape == 't')
+        value = '\t';
+      else
+        return 0;
+      if (!append_json_codepoint(output, value))
+        return 0;
+    } else {
+      if (c < 0x20 || !csemver_buffer_append(output, (const char *)&c, 1))
+        return 0;
+    }
+  }
+  return 0;
+}
+
+static void json_property_array_index(JsonProperty *property) {
+  size_t position = 1, end, digits = 0;
+  unsigned long value = 0;
+  property->is_index = false;
+  property->array_index = 0;
+  if (property->key_size < 2 || property->key_text[0] != '"' ||
+      property->key_text[property->key_size - 1] != '"')
+    return;
+  end = property->key_size - 1;
+  while (position < end) {
+    unsigned char c = (unsigned char)property->key_text[position++];
+    if (c < '0' || c > '9' || (digits == 1 && value == 0))
+      return;
+    if (value > (4294967294UL - (unsigned long)(c - '0')) / 10UL)
+      return;
+    value = value * 10UL + (unsigned long)(c - '0');
+    ++digits;
+  }
+  if (digits != 0) {
+    property->is_index = true;
+    property->array_index = value;
+  }
+}
+
+static int json_property_compare(const void *left, const void *right) {
+  const JsonProperty *a = left;
+  const JsonProperty *b = right;
+  if (a->is_index != b->is_index)
+    return a->is_index ? -1 : 1;
+  if (a->is_index && a->array_index != b->array_index)
+    return a->array_index < b->array_index ? -1 : 1;
+  return a->order < b->order ? -1 : a->order > b->order;
+}
+
+static int indent_stat_index(IndentStat *stats, size_t count, char type,
+                             size_t amount, size_t *index) {
+  size_t i;
+  for (i = 0; i < count; ++i)
+    if (stats[i].type == type && stats[i].amount == amount) {
+      *index = i;
+      return 1;
+    }
+  *index = count;
+  return 2;
+}
+
+static size_t collect_indent_stats(const char *text, size_t length,
+                                   bool ignore_single, IndentStat *stats,
+                                   size_t capacity) {
+  size_t count = 0, previous_size = 0, previous_key = (size_t)-1;
+  size_t line_start = 0;
+  char previous_type = '\0';
+
+  while (line_start <= length) {
+    size_t line_end = line_start, indent = 0, difference, index;
+    size_t use = 1, weight = 0;
+    char type = '\0';
+    int found;
+
+    while (line_end < length && text[line_end] != '\n')
+      ++line_end;
+    if (line_end != line_start) {
+      while (line_start + indent < line_end &&
+             (text[line_start + indent] == ' ' ||
+              text[line_start + indent] == '\t')) {
+        if (type == '\0')
+          type = text[line_start + indent];
+        if (text[line_start + indent] != type)
+          break;
+        ++indent;
+      }
+      if (type == '\0') {
+        previous_size = 0;
+        previous_type = '\0';
+      } else if (!(ignore_single && type == ' ' && indent == 1)) {
+        if (type != previous_type)
+          previous_size = 0;
+        previous_type = type;
+        difference = indent >= previous_size ? indent - previous_size
+                                             : previous_size - indent;
+        previous_size = indent;
+        if (difference == 0) {
+          use = 0;
+          weight = 1;
+          index = previous_key;
+        } else {
+          if (ignore_single && type == ' ' && difference == 1)
+            goto next_line;
+          found = indent_stat_index(stats, count, type, difference, &index);
+          if (found == 0 || (found == 2 && count >= capacity))
+            goto next_line;
+          if (found == 2) {
+            memset(&stats[count], 0, sizeof stats[count]);
+            stats[count].type = type;
+            stats[count].amount = difference;
+            ++count;
+          }
+          previous_key = index;
+        }
+        if (index != (size_t)-1 && index < count) {
+          stats[index].uses += use;
+          stats[index].weight += weight;
+        }
+      }
+    }
+  next_line:
+    if (line_end == length)
+      break;
+    line_start = line_end + 1;
+  }
+  return count;
+}
+
+static int detect_json_format(const char *text, char *indent_char,
+                              size_t *indent_size, const char **newline,
+                              size_t *newline_size) {
+  size_t length = strlen(text), lines = 1, i, count, best = 0;
+  size_t best_uses = 0, best_weight = 0;
+  IndentStat *stats;
+  bool crlf = false;
+  size_t crlf_count = 0, lf_count = 0;
+
+  for (i = 0; i < length; ++i) {
+    if (text[i] == '\n') {
+      ++lines;
+      if (i != 0 && text[i - 1] == '\r')
+        ++crlf_count;
+      else
+        ++lf_count;
+    }
+  }
+  if (lines == (size_t)-1 || lines + 1 > (size_t)-1 / sizeof *stats)
+    return 0;
+  stats = calloc(lines + 1, sizeof *stats);
+  if (stats == NULL)
+    return 0;
+  count = collect_indent_stats(text, length, true, stats, lines + 1);
+  if (count == 0)
+    count = collect_indent_stats(text, length, false, stats, lines + 1);
+  for (i = 0; i < count; ++i)
+    if (stats[i].uses > best_uses ||
+        (stats[i].uses == best_uses && stats[i].weight > best_weight)) {
+      best = i;
+      best_uses = stats[i].uses;
+      best_weight = stats[i].weight;
+    }
+  if (best_uses == 0) {
+    *indent_char = ' ';
+    *indent_size = 2;
+  } else {
+    *indent_char = stats[best].type;
+    *indent_size = stats[best].amount > 10 ? 10 : stats[best].amount;
+  }
+  free(stats);
+  crlf = crlf_count > lf_count;
+  *newline = crlf ? "\r\n" : "\n";
+  *newline_size = crlf ? 2 : 1;
+  return 1;
+}
+
+static int json_print_value(JsonPrinter *printer, size_t depth);
+
+static int json_print_object(JsonPrinter *printer, size_t depth) {
+  Scanner *scanner = &printer->scanner;
+  CsemverBuffer *output = printer->output;
+  JsonProperty *properties = NULL;
+  size_t count = 0, capacity = 0, close_position, i;
+
+  if (scanner->text[scanner->position++] != '{')
+    return 0;
+  spaces(scanner);
+  if (scanner->position < scanner->length &&
+      scanner->text[scanner->position] == '}') {
+    ++scanner->position;
+    return csemver_buffer_append(output, "{}", 2);
+  }
+  for (;;) {
+    JsonProperty property;
+    CsemverBuffer key;
+    size_t existing;
+    memset(&property, 0, sizeof property);
+    csemver_buffer_init(&key);
+    if (!json_print_string(scanner, &key)) {
+      csemver_buffer_free(&key);
+      goto fail;
+    }
+    property.key_text = key.data;
+    property.key_size = key.length;
+    json_property_array_index(&property);
+    spaces(scanner);
+    if (scanner->position >= scanner->length ||
+        scanner->text[scanner->position++] != ':') {
+      free(property.key_text);
+      goto fail;
+    }
+    spaces(scanner);
+    if (!skip_value(scanner, &property.value)) {
+      free(property.key_text);
+      goto fail;
+    }
+    for (existing = 0; existing < count; ++existing)
+      if (properties[existing].key_size == property.key_size &&
+          memcmp(properties[existing].key_text, property.key_text,
+                 property.key_size) == 0)
+        break;
+    if (existing < count) {
+      properties[existing].value = property.value;
+      free(property.key_text);
+    } else {
+      property.order = count;
+      if (count == capacity) {
+        size_t new_capacity = capacity == 0 ? 8 : capacity * 2;
+        JsonProperty *grown;
+        if (new_capacity < capacity ||
+            new_capacity > (size_t)-1 / sizeof *properties) {
+          free(property.key_text);
+          goto fail;
+        }
+        grown = realloc(properties, new_capacity * sizeof *properties);
+        if (grown == NULL) {
+          free(property.key_text);
+          goto fail;
+        }
+        properties = grown;
+        capacity = new_capacity;
+      }
+      properties[count++] = property;
+    }
+    spaces(scanner);
+    if (scanner->position < scanner->length &&
+        scanner->text[scanner->position] == ',') {
+      ++scanner->position;
+      spaces(scanner);
+      continue;
+    }
+    if (scanner->position >= scanner->length ||
+        scanner->text[scanner->position] != '}')
+      goto fail;
+    close_position = scanner->position++;
+    break;
+  }
+  qsort(properties, count, sizeof *properties, json_property_compare);
+  if (!csemver_buffer_append(output, "{", 1) || !append_json_newline(printer))
+    goto fail;
+  for (i = 0; i < count; ++i) {
+    if (!append_json_indent(printer, depth + 1) ||
+        !csemver_buffer_append(output, properties[i].key_text,
+                               properties[i].key_size) ||
+        !csemver_buffer_append(output, ": ", 2))
+      goto fail;
+    scanner->position = properties[i].value.start;
+    if (!json_print_value(printer, depth + 1))
+      goto fail;
+    if (i + 1 < count) {
+      if (!csemver_buffer_append(output, ",", 1) ||
+          !append_json_newline(printer))
+        goto fail;
+    } else if (!append_json_newline(printer) ||
+               !append_json_indent(printer, depth) ||
+               !csemver_buffer_append(output, "}", 1))
+      goto fail;
+  }
+  scanner->position = close_position + 1;
+  for (i = 0; i < count; ++i)
+    free(properties[i].key_text);
+  free(properties);
+  return 1;
+fail:
+  for (i = 0; i < count; ++i)
+    free(properties[i].key_text);
+  free(properties);
+  return 0;
+}
+
+static int json_print_array(JsonPrinter *printer, size_t depth) {
+  Scanner *scanner = &printer->scanner;
+  CsemverBuffer *output = printer->output;
+
+  if (scanner->text[scanner->position++] != '[' ||
+      !csemver_buffer_append(output, "[", 1))
+    return 0;
+  spaces(scanner);
+  if (scanner->position < scanner->length &&
+      scanner->text[scanner->position] == ']') {
+    ++scanner->position;
+    return csemver_buffer_append(output, "]", 1);
+  }
+  if (!append_json_newline(printer))
+    return 0;
+  for (;;) {
+    if (!append_json_indent(printer, depth + 1) ||
+        !json_print_value(printer, depth + 1))
+      return 0;
+    spaces(scanner);
+    if (scanner->position < scanner->length &&
+        scanner->text[scanner->position] == ',') {
+      ++scanner->position;
+      if (!csemver_buffer_append(output, ",", 1) ||
+          !append_json_newline(printer))
+        return 0;
+      spaces(scanner);
+      continue;
+    }
+    if (scanner->position >= scanner->length ||
+        scanner->text[scanner->position++] != ']' ||
+        !append_json_newline(printer) || !append_json_indent(printer, depth) ||
+        !csemver_buffer_append(output, "]", 1))
+      return 0;
+    return 1;
+  }
+}
+
+static int json_print_number(JsonPrinter *printer) {
+  Scanner *scanner = &printer->scanner;
+  CsemverBuffer *output = printer->output;
+  char candidate[64], digits[32];
+  char *parsed_end;
+  size_t digit_count = 0, leading = 0, trailing, i;
+  size_t decimal_digits = 0;
+  int precision, candidate_length;
+  bool negative = false, after_decimal = false;
+  long long explicit_exponent = 0, point_position, exponent;
+  double value;
+  Range token;
+  const char *p;
+
+  if (!skip_value(scanner, &token))
+    return 0;
+  value = strtod(scanner->text + token.start, &parsed_end);
+  if (parsed_end != scanner->text + token.end)
+    return 0;
+  if (!isfinite(value))
+    return csemver_buffer_append(output, "null", 4);
+  if (value == 0.0)
+    return csemver_buffer_append(output, "0", 1);
+  for (precision = 1; precision <= 17; ++precision) {
+    candidate_length =
+        snprintf(candidate, sizeof candidate, "%.*g", precision, value);
+    if (candidate_length < 0 || (size_t)candidate_length >= sizeof candidate)
+      return 0;
+    if (strtod(candidate, &parsed_end) == value && *parsed_end == '\0')
+      break;
+  }
+  if (precision > 17)
+    return 0;
+  p = candidate;
+  if (*p == '-') {
+    negative = true;
+    ++p;
+  }
+  while (*p != '\0' && *p != 'e' && *p != 'E') {
+    if (*p == '.')
+      after_decimal = true;
+    else if (isdigit((unsigned char)*p)) {
+      if (digit_count >= sizeof digits)
+        return 0;
+      digits[digit_count++] = *p;
+      if (!after_decimal)
+        ++decimal_digits;
+    } else
+      return 0;
+    ++p;
+  }
+  if (*p == 'e' || *p == 'E') {
+    char *end;
+    explicit_exponent = strtoll(p + 1, &end, 10);
+    if (*end != '\0')
+      return 0;
+  }
+  while (leading < digit_count && digits[leading] == '0')
+    ++leading;
+  if (leading == digit_count)
+    return csemver_buffer_append(output, "0", 1);
+  point_position =
+      (long long)decimal_digits + explicit_exponent - (long long)leading;
+  trailing = digit_count;
+  while (trailing > leading + 1 && digits[trailing - 1] == '0')
+    --trailing;
+  digit_count = trailing - leading;
+  if (negative && !csemver_buffer_append(output, "-", 1))
+    return 0;
+  if (point_position >= (long long)digit_count && point_position <= 21) {
+    if (!csemver_buffer_append(output, digits + leading, digit_count))
+      return 0;
+    for (i = digit_count; i < (size_t)point_position; ++i)
+      if (!csemver_buffer_append(output, "0", 1))
+        return 0;
+    return 1;
+  }
+  if (point_position > 0 && point_position <= 21) {
+    if (!csemver_buffer_append(output, digits + leading,
+                               (size_t)point_position) ||
+        !csemver_buffer_append(output, ".", 1))
+      return 0;
+    return csemver_buffer_append(output,
+                                 digits + leading + (size_t)point_position,
+                                 digit_count - (size_t)point_position);
+  }
+  if (point_position <= 0 && point_position > -6) {
+    if (!csemver_buffer_append(output, "0.", 2))
+      return 0;
+    for (i = 0; i < (size_t)-point_position; ++i)
+      if (!csemver_buffer_append(output, "0", 1))
+        return 0;
+    return csemver_buffer_append(output, digits + leading, digit_count);
+  }
+  exponent = point_position - 1;
+  if (!csemver_buffer_append(output, digits + leading, 1))
+    return 0;
+  if (digit_count > 1 &&
+      (!csemver_buffer_append(output, ".", 1) ||
+       !csemver_buffer_append(output, digits + leading + 1, digit_count - 1)))
+    return 0;
+  if (!csemver_buffer_append(output, "e", 1))
+    return 0;
+  if (exponent >= 0) {
+    if (!csemver_buffer_append(output, "+", 1))
+      return 0;
+  } else {
+    if (!csemver_buffer_append(output, "-", 1))
+      return 0;
+    exponent = -exponent;
+  }
+  return csemver_buffer_appendf(output, "%lld", exponent);
+}
+
+static int json_print_value(JsonPrinter *printer, size_t depth) {
+  Scanner *scanner = &printer->scanner;
+  size_t start;
+  size_t i;
+  Range token;
+  char first;
+
+  spaces(scanner);
+  if (scanner->position >= scanner->length || depth > 512)
+    return 0;
+  start = scanner->position;
+  for (i = 0; i < printer->version_count; ++i)
+    if (printer->versions[i].start == start) {
+      if (!skip_value(scanner, NULL) ||
+          !csemver_buffer_append(printer->output, "\"", 1) ||
+          !csemver_buffer_append(printer->output, printer->replacement,
+                                 strlen(printer->replacement)) ||
+          !csemver_buffer_append(printer->output, "\"", 1))
+        return 0;
+      return 1;
+    }
+  first = scanner->text[start];
+  if (first == '{')
+    return json_print_object(printer, depth);
+  if (first == '[')
+    return json_print_array(printer, depth);
+  if (first == '"')
+    return json_print_string(scanner, printer->output);
+  if (first == '-' || isdigit((unsigned char)first))
+    return json_print_number(printer);
+  if (!skip_value(scanner, &token))
+    return 0;
+  return csemver_buffer_append(printer->output, scanner->text + token.start,
+                               token.end - token.start);
+}
+
+static int json_update_formatted(const char *content, const Range *versions,
+                                 size_t version_count, const char *new_version,
+                                 char **updated, size_t *updated_size) {
+  JsonPrinter printer;
+  CsemverBuffer output;
+  const char *newline;
+  size_t newline_size;
+
+  memset(&printer, 0, sizeof printer);
+  if (!detect_json_format(content, &printer.indent_char, &printer.indent_size,
+                          &newline, &newline_size))
+    return 0;
+  printer.scanner.text = content;
+  printer.scanner.length = strlen(content);
+  printer.versions = versions;
+  printer.version_count = version_count;
+  printer.replacement = new_version;
+  printer.newline = newline;
+  printer.newline_size = newline_size;
+  csemver_buffer_init(&output);
+  printer.output = &output;
+  spaces(&printer.scanner);
+  if (!json_print_value(&printer, 0))
+    goto fail;
+  spaces(&printer.scanner);
+  if (printer.scanner.position != printer.scanner.length ||
+      !append_json_newline(&printer))
+    goto fail;
+  *updated = output.data;
+  *updated_size = output.length;
+  return 1;
+fail:
+  csemver_buffer_free(&output);
+  return 0;
 }
 
 int csemver_json_repository_url(const char *content, char *url,
@@ -244,9 +982,11 @@ int csemver_json_repository_url(const char *content, char *url,
   if (!object_field(&root, "repository", &repository, NULL, 0))
     return 0;
   root.position = repository.start;
-  if (content[repository.start] == '"')
-    found = string_value(&root, url, url_size, NULL);
-  else if (content[repository.start] == '{')
+  if (content[repository.start] == '"') {
+    size_t decoded_length;
+    found = string_value(&root, url, url_size, &decoded_length, NULL) &&
+            decoded_length == strlen(url);
+  } else if (content[repository.start] == '{')
     found = object_field(&root, "url", NULL, url, url_size);
   else
     found = 0;
@@ -381,18 +1121,25 @@ int csemver_version_update_text(const char *filename, const char *type,
   Range ranges[3];
   size_t count = 0, i, j, pos = 0, length = strlen(content);
   CsemverBuffer buffer;
-  bool quote_json = strcmp(kind, "json") == 0;
   if (!csemver_version_read_text(filename, type, content, old_version,
                                  old_version_size, NULL, error, error_size))
     return 0;
-  if (quote_json) {
+  if (strcmp(kind, "json") == 0) {
     JsonFields fields;
     if (!json_fields(content, filename, &fields))
       goto bad_format;
     ranges[count++] = fields.root_version;
     if (fields.has_lock_package_version)
       ranges[count++] = fields.lock_package_version;
-  } else if (strcmp(kind, "python") == 0 || strcmp(kind, "toml") == 0) {
+    if (!json_update_formatted(content, ranges, count, new_version, updated,
+                               updated_size)) {
+      set_error(error, error_size,
+                "malformed JSON or out of memory updating version file");
+      return 0;
+    }
+    return 1;
+  }
+  if (strcmp(kind, "python") == 0 || strcmp(kind, "toml") == 0) {
     if (!line_version(content, "version", false, &ranges[count], old_version,
                       old_version_size))
       goto bad_format;
@@ -418,11 +1165,7 @@ int csemver_version_update_text(const char *filename, const char *type,
     if (ranges[i].start < pos || ranges[i].end > length ||
         !csemver_buffer_append(&buffer, content + pos, ranges[i].start - pos))
       goto allocation_error;
-    if (quote_json && !csemver_buffer_append(&buffer, "\"", 1))
-      goto allocation_error;
     if (!csemver_buffer_append(&buffer, new_version, strlen(new_version)))
-      goto allocation_error;
-    if (quote_json && !csemver_buffer_append(&buffer, "\"", 1))
       goto allocation_error;
     pos = ranges[i].end;
   }
