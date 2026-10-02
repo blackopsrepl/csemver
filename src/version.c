@@ -18,7 +18,9 @@ typedef struct {
 
 typedef struct {
   Range root_version, private_value, lock_version, lock_package_version;
-  bool has_private, is_private, has_lock_version, has_lock_package_version;
+  Range lock_package_object;
+  bool has_private, is_private, has_lock_version, has_lock_package;
+  bool has_lock_package_version;
 } JsonFields;
 
 static int read_json_hex4(const char *text, size_t length, size_t *position,
@@ -280,10 +282,14 @@ static int json_fields(const char *content, const char *filename,
   spaces(&root);
   if (!object_field(&root, "", &raw, NULL, 0))
     return 1;
-  root.position = raw.start;
-  spaces(&root);
-  if (object_field(&root, "version", &fields->lock_package_version, NULL, 0))
-    fields->has_lock_package_version = true;
+  if (content[raw.start] == '{') {
+    fields->lock_package_object = raw;
+    fields->has_lock_package = true;
+    root.position = raw.start;
+    spaces(&root);
+    if (object_field(&root, "version", &fields->lock_package_version, NULL, 0))
+      fields->has_lock_package_version = true;
+  }
   root.position = 0;
   spaces(&root);
   if (object_field(&root, "version", &fields->lock_version, NULL, 0))
@@ -307,6 +313,7 @@ typedef struct {
 typedef struct {
   Scanner scanner;
   const Range *versions;
+  const Range *insert_version_object;
   size_t version_count;
   const char *replacement;
   char indent_char;
@@ -322,7 +329,7 @@ typedef struct {
   size_t key_size;
   unsigned long array_index;
   size_t order;
-  bool is_index;
+  bool is_index, is_replacement;
 } JsonProperty;
 
 static int append_json_indent(JsonPrinter *printer, size_t depth) {
@@ -502,6 +509,24 @@ static int json_property_compare(const void *left, const void *right) {
   return a->order < b->order ? -1 : a->order > b->order;
 }
 
+static int json_property_add(JsonProperty **properties, size_t *count,
+                             size_t *capacity, JsonProperty property) {
+  if (*count == *capacity) {
+    size_t new_capacity = *capacity == 0 ? 8 : *capacity * 2;
+    JsonProperty *grown;
+    if (new_capacity < *capacity ||
+        new_capacity > (size_t)-1 / sizeof **properties)
+      return 0;
+    grown = realloc(*properties, new_capacity * sizeof **properties);
+    if (grown == NULL)
+      return 0;
+    *properties = grown;
+    *capacity = new_capacity;
+  }
+  (*properties)[(*count)++] = property;
+  return 1;
+}
+
 static int indent_stat_index(IndentStat *stats, size_t count, char type,
                              size_t amount, size_t *index) {
   size_t i;
@@ -635,79 +660,86 @@ static int json_print_object(JsonPrinter *printer, size_t depth) {
   CsemverBuffer *output = printer->output;
   JsonProperty *properties = NULL;
   size_t count = 0, capacity = 0, close_position, i;
+  size_t object_start = scanner->position;
+  bool insert_version = printer->insert_version_object != NULL &&
+                        printer->insert_version_object->start == object_start;
 
   if (scanner->text[scanner->position++] != '{')
     return 0;
   spaces(scanner);
   if (scanner->position < scanner->length &&
       scanner->text[scanner->position] == '}') {
-    ++scanner->position;
-    return csemver_buffer_append(output, "{}", 2);
-  }
-  for (;;) {
-    JsonProperty property;
-    CsemverBuffer key;
-    size_t existing;
-    memset(&property, 0, sizeof property);
-    csemver_buffer_init(&key);
-    if (!json_print_string(scanner, &key)) {
-      csemver_buffer_free(&key);
-      goto fail;
-    }
-    property.key_text = key.data;
-    property.key_size = key.length;
-    json_property_array_index(&property);
-    spaces(scanner);
-    if (scanner->position >= scanner->length ||
-        scanner->text[scanner->position++] != ':') {
-      free(property.key_text);
-      goto fail;
-    }
-    spaces(scanner);
-    if (!skip_value(scanner, &property.value)) {
-      free(property.key_text);
-      goto fail;
-    }
-    for (existing = 0; existing < count; ++existing)
-      if (properties[existing].key_size == property.key_size &&
-          memcmp(properties[existing].key_text, property.key_text,
-                 property.key_size) == 0)
-        break;
-    if (existing < count) {
-      properties[existing].value = property.value;
-      free(property.key_text);
-    } else {
-      property.order = count;
-      if (count == capacity) {
-        size_t new_capacity = capacity == 0 ? 8 : capacity * 2;
-        JsonProperty *grown;
-        if (new_capacity < capacity ||
-            new_capacity > (size_t)-1 / sizeof *properties) {
-          free(property.key_text);
-          goto fail;
-        }
-        grown = realloc(properties, new_capacity * sizeof *properties);
-        if (grown == NULL) {
-          free(property.key_text);
-          goto fail;
-        }
-        properties = grown;
-        capacity = new_capacity;
-      }
-      properties[count++] = property;
-    }
-    spaces(scanner);
-    if (scanner->position < scanner->length &&
-        scanner->text[scanner->position] == ',') {
-      ++scanner->position;
-      spaces(scanner);
-      continue;
-    }
-    if (scanner->position >= scanner->length ||
-        scanner->text[scanner->position] != '}')
-      goto fail;
     close_position = scanner->position++;
-    break;
+    if (!insert_version)
+      return csemver_buffer_append(output, "{}", 2);
+  } else {
+    for (;;) {
+      JsonProperty property;
+      CsemverBuffer key;
+      size_t existing;
+      memset(&property, 0, sizeof property);
+      csemver_buffer_init(&key);
+      if (!json_print_string(scanner, &key)) {
+        csemver_buffer_free(&key);
+        goto fail;
+      }
+      property.key_text = key.data;
+      property.key_size = key.length;
+      json_property_array_index(&property);
+      spaces(scanner);
+      if (scanner->position >= scanner->length ||
+          scanner->text[scanner->position++] != ':') {
+        free(property.key_text);
+        goto fail;
+      }
+      spaces(scanner);
+      if (!skip_value(scanner, &property.value)) {
+        free(property.key_text);
+        goto fail;
+      }
+      for (existing = 0; existing < count; ++existing)
+        if (properties[existing].key_size == property.key_size &&
+            memcmp(properties[existing].key_text, property.key_text,
+                   property.key_size) == 0)
+          break;
+      if (existing < count) {
+        properties[existing].value = property.value;
+        free(property.key_text);
+      } else {
+        property.order = count;
+        if (!json_property_add(&properties, &count, &capacity, property)) {
+          free(property.key_text);
+          goto fail;
+        }
+      }
+      spaces(scanner);
+      if (scanner->position < scanner->length &&
+          scanner->text[scanner->position] == ',') {
+        ++scanner->position;
+        spaces(scanner);
+        continue;
+      }
+      if (scanner->position >= scanner->length ||
+          scanner->text[scanner->position] != '}')
+        goto fail;
+      close_position = scanner->position++;
+      break;
+    }
+  }
+  if (insert_version) {
+    JsonProperty property;
+    memset(&property, 0, sizeof property);
+    property.key_text = malloc(sizeof "\"version\"");
+    if (property.key_text == NULL)
+      goto fail;
+    memcpy(property.key_text, "\"version\"", sizeof "\"version\"");
+    property.key_size = sizeof "\"version\"" - 1;
+    property.order = count;
+    property.is_replacement = true;
+    if (!json_property_add(&properties, &count, &capacity, property)) {
+      free(property.key_text);
+      goto fail;
+    }
   }
   qsort(properties, count, sizeof *properties, json_property_compare);
   if (!csemver_buffer_append(output, "{", 1) || !append_json_newline(printer))
@@ -718,9 +750,17 @@ static int json_print_object(JsonPrinter *printer, size_t depth) {
                                properties[i].key_size) ||
         !csemver_buffer_append(output, ": ", 2))
       goto fail;
-    scanner->position = properties[i].value.start;
-    if (!json_print_value(printer, depth + 1))
-      goto fail;
+    if (properties[i].is_replacement) {
+      if (!csemver_buffer_append(output, "\"", 1) ||
+          !csemver_buffer_append(output, printer->replacement,
+                                 strlen(printer->replacement)) ||
+          !csemver_buffer_append(output, "\"", 1))
+        goto fail;
+    } else {
+      scanner->position = properties[i].value.start;
+      if (!json_print_value(printer, depth + 1))
+        goto fail;
+    }
     if (i + 1 < count) {
       if (!csemver_buffer_append(output, ",", 1) ||
           !append_json_newline(printer))
@@ -932,6 +972,7 @@ static int json_print_value(JsonPrinter *printer, size_t depth) {
 
 static int json_update_formatted(const char *content, const Range *versions,
                                  size_t version_count, const char *new_version,
+                                 const Range *insert_version_object,
                                  char **updated, size_t *updated_size) {
   JsonPrinter printer;
   CsemverBuffer output;
@@ -945,6 +986,7 @@ static int json_update_formatted(const char *content, const Range *versions,
   printer.scanner.text = content;
   printer.scanner.length = strlen(content);
   printer.versions = versions;
+  printer.insert_version_object = insert_version_object;
   printer.version_count = version_count;
   printer.replacement = new_version;
   printer.newline = newline;
@@ -1126,13 +1168,16 @@ int csemver_version_update_text(const char *filename, const char *type,
     return 0;
   if (strcmp(kind, "json") == 0) {
     JsonFields fields;
+    const Range *insert_version_object = NULL;
     if (!json_fields(content, filename, &fields))
       goto bad_format;
     ranges[count++] = fields.root_version;
     if (fields.has_lock_package_version)
       ranges[count++] = fields.lock_package_version;
-    if (!json_update_formatted(content, ranges, count, new_version, updated,
-                               updated_size)) {
+    else if (fields.has_lock_package)
+      insert_version_object = &fields.lock_package_object;
+    if (!json_update_formatted(content, ranges, count, new_version,
+                               insert_version_object, updated, updated_size)) {
       set_error(error, error_size,
                 "malformed JSON or out of memory updating version file");
       return 0;

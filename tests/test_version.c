@@ -210,6 +210,27 @@ static void test_package_lock_updates_only_root_package(void) {
   free(updated);
 }
 
+static void test_package_lock_adds_missing_root_package_version(void) {
+  const char *input =
+      "{\"version\":\"1.2.3\",\"packages\":{\"\":{\"name\":\"fixture\"}}}";
+  const char *expected = "{\n  \"version\": \"1.3.0\",\n"
+                         "  \"packages\": {\n    \"\": {\n"
+                         "      \"name\": \"fixture\",\n"
+                         "      \"version\": \"1.3.0\"\n"
+                         "    }\n  }\n}\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("package-lock.json", "json", input,
+                                     "1.3.0", &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
 static void test_plain_text_preserves_upstream_write_semantics(void) {
   char version[128];
   char error[256];
@@ -260,6 +281,7 @@ int main(void) {
   test_json_key_with_embedded_nul_does_not_match_version();
   test_json_version_with_embedded_nul_is_rejected();
   test_package_lock_updates_only_root_package();
+  test_package_lock_adds_missing_root_package_version();
   test_plain_text_preserves_upstream_write_semantics();
   test_toml_and_yaml_surface();
   puts("version file tests passed");
