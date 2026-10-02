@@ -540,7 +540,15 @@ git add package.json
 git commit -qm 'chore: initialize pre-major 1.x fixture'
 git tag -a v1.0.0 -m 'chore(release): 1.0.0'
 git commit --allow-empty -qm 'feat: test explicit pre-major option'
-explicit_pre_major_preview=$("$bin" --dry-run --preMajor)
+printf 'firstRelease = true\n' > csemver.toml
+no_first_release_preview=$("$bin" --dry-run --no-firstRelease)
+printf '%s\n' "$no_first_release_preview" | \
+  grep -q 'bumping version in package.json from 1.0.0 to 1.1.0' || {
+    printf 'negative firstRelease option should override TOML true:\n%s\n' \
+      "$no_first_release_preview" >&2
+    exit 1
+  }
+explicit_pre_major_preview=$("$bin" --dry-run --no-firstRelease --preMajor)
 printf '%s\n' "$explicit_pre_major_preview" | \
   grep -q 'bumping version in package.json from 1.0.0 to 1.0.1' || {
     printf 'explicit preMajor should apply below a future major release:\n%s\n' \

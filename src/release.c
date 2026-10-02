@@ -145,6 +145,29 @@ static int load_config(CsemverConfig *config, const char *path) {
   return 1;
 }
 
+static int set_negated_boolean_option(CsemverConfig *config, const char *key) {
+  char name[128];
+  const char *start;
+  size_t length;
+  int camel_case = 0;
+
+  if (strncmp(key, "--no-", 5) == 0) {
+    start = key + 5;
+  } else if (strncmp(key, "--no", 4) == 0 && key[4] >= 'A' && key[4] <= 'Z') {
+    start = key + 4;
+    camel_case = 1;
+  } else {
+    return 0;
+  }
+  length = strlen(start);
+  if (length == 0 || length >= sizeof name)
+    return 0;
+  memcpy(name, start, length + 1);
+  if (camel_case)
+    name[0] = (char)(name[0] - 'A' + 'a');
+  return csemver_config_set_bool(config, name, false, NULL, 0);
+}
+
 static int parse_args(int argc, char **argv, CsemverConfig *config,
                       const char **config_path) {
   int i;
@@ -375,6 +398,8 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
       }
       continue;
     }
+    if (set_negated_boolean_option(config, key))
+      continue;
     /* Upstream yargs accepts unknown flags and positional arguments. */
     continue;
   }

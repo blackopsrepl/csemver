@@ -44,6 +44,15 @@ for option in \
         exit 1
     fi
 done
+for option in \
+    --noDryRun --no-first-release --noSign --no-signoff --no-no-verify \
+    --no-commit-all --noSilent --no-tag-force --noGitTagFallback \
+    --noPreMajor --no-noBumpWhenEmptyChanges; do
+    if ! "$bin" "$option" --help >/dev/null 2>&1; then
+        printf 'upstream negated boolean option was rejected: %s\n' "$option" >&2
+        exit 1
+    fi
+done
 for option in '--releaseAs=patch' '--tagPrefix=release-' \
     '--lernaPackage=core' '--npmPublishHint=custom publish'; do
     if ! "$bin" "$option" --help >/dev/null 2>&1; then
