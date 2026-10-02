@@ -1683,7 +1683,10 @@ static int regenerate_all_changelogs(
       goto fail;
     if (!get_tag_date(tags[i], current_date, sizeof current_date))
       snprintf(current_date, sizeof current_date, "%s", date);
-    if (wrote_section && !csemver_buffer_append(output, "\n", 1))
+    if (wrote_section &&
+        !(output->length >= 2 && output->data[output->length - 1] == '\n' &&
+          output->data[output->length - 2] == '\n') &&
+        !csemver_buffer_append(output, "\n", 1))
       goto fail;
     if (!append_release_heading(output, base, current_version, older_tag,
                                 tags[i], current_date, older_tag == NULL) ||

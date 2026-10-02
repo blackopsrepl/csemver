@@ -116,6 +116,17 @@ preserved_release_line=$(grep -n '^## \[2\.0\.1\]' CHANGELOG.md | tail -n 1 | cu
 [ "$((preserved_release_line - initial_release_line))" -eq 2 ]
 git checkout -- CHANGELOG.md
 
+release_count_zero_preview=$("$bin" --dry-run --release-count 0)
+candidate_heading=$(printf '%s\n' "$release_count_zero_preview" | grep -m 1 '^## \[2\.0\.2\]')
+latest_tag_heading=$(printf '%s\n' "$release_count_zero_preview" | grep -m 1 '^## \[2\.0\.1\]')
+section_boundary=$(printf '%s\n' "$release_count_zero_preview" | grep -F -A2 "$candidate_heading")
+expected_section_boundary=$(printf '%s\n\n%s' "$candidate_heading" "$latest_tag_heading")
+[ "$section_boundary" = "$expected_section_boundary" ] || {
+  printf 'empty latest section has wrong spacing\nexpected:\n%s\nactual:\n%s\n' \
+    "$expected_section_boundary" "$section_boundary" >&2
+  exit 1
+}
+
 test -z "$(git status --porcelain)"
 
 mkdir "$tmp/first-release"
