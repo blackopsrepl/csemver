@@ -6,7 +6,7 @@ csemver implements the version bump, changelog, release commit, and annotated Gi
 
 ## Build and test
 
-Requirements: a C17 compiler, GNU Make, and Git. The TOML parser is vendored; there are no runtime package dependencies.
+Requirements: a C17 compiler, GNU Make, and Git. The TOML parser is compiled directly from `src/toml.c`; there are no runtime package dependencies.
 
 ```sh
 make
@@ -117,4 +117,4 @@ GitHub Actions builds and tests on Ubuntu and macOS. The matching Forgejo CI wor
 
 ## License
 
-The TOML parser in `vendor/tomlc99` is MIT-licensed; see its `LICENSE` file. The csemver project license has not yet been selected.
+The embedded parser in `src/toml.c` and `src/toml.h` is based on [tomlc99](https://github.com/cktan/tomlc99), revision `29076dfd095bbbbd50a3c1b2760d29f4b83e74ac`. Its MIT copyright and license notices are retained in the source files. The csemver project license has not yet been selected.

@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "config.h"
 
-#include "../vendor/tomlc99/toml.h"
+#include "toml.h"
 
 #include <limits.h>
 #include <stdio.h>

@@ -9,17 +9,17 @@ WARNINGS = -std=c17 -Wall -Wextra -Wpedantic -Werror
 
 all: build/csemver
 
-build/csemver: src/main.c src/release.c src/release.h src/common.c src/common.h src/version.c src/version.h src/config.c src/config.h src/semver.c src/semver.h vendor/tomlc99/toml.c vendor/tomlc99/toml.h | build
-	$(CC) $(CPPFLAGS) $(VERSION_CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ src/main.c src/release.c src/common.c src/version.c src/config.c src/semver.c vendor/tomlc99/toml.c
+build/csemver: src/main.c src/release.c src/release.h src/common.c src/common.h src/version.c src/version.h src/config.c src/config.h src/semver.c src/semver.h src/toml.c src/toml.h | build
+	$(CC) $(CPPFLAGS) $(VERSION_CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ src/main.c src/release.c src/common.c src/version.c src/config.c src/semver.c src/toml.c
 
-build/csemver-version-test: src/main.c src/release.c src/release.h src/common.c src/common.h src/version.c src/version.h src/config.c src/config.h src/semver.c src/semver.h vendor/tomlc99/toml.c vendor/tomlc99/toml.h | build
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -DCSEMVER_VERSION='"9.8.7"' -o $@ src/main.c src/release.c src/common.c src/version.c src/config.c src/semver.c vendor/tomlc99/toml.c
+build/csemver-version-test: src/main.c src/release.c src/release.h src/common.c src/common.h src/version.c src/version.h src/config.c src/config.h src/semver.c src/semver.h src/toml.c src/toml.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -DCSEMVER_VERSION='"9.8.7"' -o $@ src/main.c src/release.c src/common.c src/version.c src/config.c src/semver.c src/toml.c
 
-build/test_config: tests/test_config.c src/config.c src/config.h vendor/tomlc99/toml.c vendor/tomlc99/toml.h | build
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_config.c src/config.c vendor/tomlc99/toml.c
+build/test_config: tests/test_config.c src/config.c src/config.h src/toml.c src/toml.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_config.c src/config.c src/toml.c
 
-build/test_toml: tests/test_toml.c vendor/tomlc99/toml.c vendor/tomlc99/toml.h | build
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_toml.c vendor/tomlc99/toml.c
+build/test_toml: tests/test_toml.c src/toml.c src/toml.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_toml.c src/toml.c
 
 build/test_version: tests/test_version.c src/version.c src/version.h src/common.c src/common.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_version.c src/version.c src/common.c

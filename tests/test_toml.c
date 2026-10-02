@@ -1,4 +1,4 @@
-#include "../vendor/tomlc99/toml.h"
+#include "../src/toml.h"
 
 #include <assert.h>
 #include <stdio.h>
