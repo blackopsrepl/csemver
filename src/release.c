@@ -81,6 +81,7 @@ static void print_help(void) {
        "  -a, --commit-all           Include all staged and working files\n"
        "      --skip STEP            Skip bump, changelog, commit, or tag\n"
        "      --path PATH            Include commits under this path\n"
+       "      --lerna-package NAME   Use package tags for bump selection\n"
        "      --packageFiles FILE... Override package version files\n"
        "      --bumpFiles FILE...    Override files to update\n"
        "      --issuePrefixes PFX... Issue prefixes to link\n"
@@ -386,6 +387,56 @@ static int collect_tags(const CsemverConfig *config,
       }
     }
     line = strtok_r(NULL, "\n", &save);
+  }
+  free(output);
+  return 1;
+}
+
+static int collect_lerna_tag(const CsemverConfig *config, char *latest_tag,
+                             size_t tag_size) {
+  const char *args[] = {"log", "--decorate", "--no-color", "--date-order",
+                        NULL};
+  char *output = NULL;
+  char *cursor;
+  int status = 0;
+  size_t package_length = strlen(config->lerna_package);
+  latest_tag[0] = '\0';
+  if (package_length == 0)
+    return 1;
+  if (!run_git(args, &output, &status) || status != 0) {
+    free(output);
+    return 0;
+  }
+  cursor = output;
+  while ((cursor = strstr(cursor, "tag: ")) != NULL) {
+    char *tag_start = cursor + 5;
+    char *tag_end = strpbrk(tag_start, ",)");
+    char version[SEMVER_TEXT_MAX];
+    size_t tag_length, version_length;
+    Semver parsed;
+    if (tag_end == NULL)
+      tag_end = tag_start + strlen(tag_start);
+    tag_length = (size_t)(tag_end - tag_start);
+    if (tag_length > package_length + 1 &&
+        memcmp(tag_start, config->lerna_package, package_length) == 0 &&
+        tag_start[package_length] == '@') {
+      version_length = tag_length - package_length - 1;
+      if (version_length < sizeof version) {
+        memcpy(version, tag_start + package_length + 1, version_length);
+        version[version_length] = '\0';
+        if (semver_parse(version, &parsed) && !parsed.has_prerelease) {
+          if (tag_length >= tag_size) {
+            free(output);
+            return 0;
+          }
+          memcpy(latest_tag, tag_start, tag_length);
+          latest_tag[tag_length] = '\0';
+          free(output);
+          return 1;
+        }
+      }
+    }
+    cursor = tag_end;
   }
   free(output);
   return 1;
@@ -1448,10 +1499,12 @@ int csemver_main(int argc, char **argv) {
   char config_storage[CSEMVER_PATH_MAX];
   char tags[COMMIT_MAX][SEMVER_TEXT_MAX];
   char latest_version[SEMVER_TEXT_MAX], latest_tag[SEMVER_TEXT_MAX];
+  char lerna_tag[CSEMVER_VALUE_MAX];
   char current[SEMVER_TEXT_MAX], next[SEMVER_TEXT_MAX];
   char new_tag[SEMVER_TEXT_MAX];
   char message[CSEMVER_VALUE_MAX];
   bool is_private = false;
+  bool lerna_bump = false;
   size_t tag_count = 0, commit_count = 0, path_count = 0;
   Commit *commits = NULL;
   char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX];
@@ -1489,6 +1542,14 @@ int csemver_main(int argc, char **argv) {
   }
   if (!prepare_bump(&config))
     return 1;
+  if (config.lerna_package[0] != '\0' && config.release_as[0] == '\0' &&
+      !config.skip_bump && !config.first_release) {
+    if (!collect_lerna_tag(&config, lerna_tag, sizeof lerna_tag)) {
+      errorf("cannot inspect package release tags");
+      return 1;
+    }
+    lerna_bump = true;
+  }
   if (!semver_parse(current, &current_semver)) {
     errorf("invalid current version '%s'", current);
     return 1;
@@ -1498,8 +1559,10 @@ int csemver_main(int argc, char **argv) {
     errorf("out of memory");
     return 1;
   }
-  if (!read_commits(&config, latest_tag[0] == '\0' ? NULL : latest_tag, commits,
-                    &commit_count)) {
+  if (!read_commits(&config,
+                    lerna_bump ? (lerna_tag[0] == '\0' ? NULL : lerna_tag)
+                               : (latest_tag[0] == '\0' ? NULL : latest_tag),
+                    commits, &commit_count)) {
     free(commits);
     errorf("cannot read Git history");
     return 1;
@@ -1554,11 +1617,12 @@ int csemver_main(int argc, char **argv) {
     free(commits);
     return 1;
   }
-  if (!config.dry_run &&
+  if ((!config.dry_run || lerna_bump) &&
       !read_commits(&config, latest_tag[0] == '\0' ? NULL : latest_tag, commits,
                     &commit_count)) {
     free(commits);
-    errorf("cannot reread Git history after release hooks");
+    errorf(config.dry_run ? "cannot read Git history"
+                          : "cannot reread Git history after release hooks");
     return 1;
   }
   if (config.dry_run && !config.skip_bump && !config.first_release) {

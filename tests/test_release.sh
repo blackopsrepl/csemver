@@ -273,4 +273,45 @@ test "$(git cat-file -p refs/tags/v4.2.0 | grep -F 'chore(release): from precomm
 rm -f "$tmp/prerelease-ran" "$tmp/postbump-ran"
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/lerna-package"
+cd "$tmp/lerna-package"
+git init -q -b main
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+printf '1.0.0\n' > VERSION
+cat > csemver.toml <<'TOML'
+packageFiles = [{ filename = "VERSION", type = "plain-text" }]
+bumpFiles = [{ filename = "VERSION", type = "plain-text" }]
+TOML
+git add VERSION csemver.toml
+git commit -qm 'feat: add the package baseline feature'
+git tag -a '@scope/pkg@1.0.0' -m 'package release 1.0.0'
+printf 'patch\n' > fix.txt
+git add fix.txt
+git commit -qm 'fix: correct package behavior'
+lerna_dry_run=$("$bin" --dry-run --lerna-package '@scope/pkg')
+printf '%s\n' "$lerna_dry_run" | grep -q 'bumping version in VERSION from 1.0.0 to 1.0.1' || {
+  printf 'lerna package tag was not used as the bump boundary:\n%s\n' \
+    "$lerna_dry_run" >&2
+  exit 1
+}
+printf '%s\n' "$lerna_dry_run" | grep -q 'add the package baseline feature' || {
+  printf 'lerna package bump boundary leaked into the global changelog:\n%s\n' \
+    "$lerna_dry_run" >&2
+  exit 1
+}
+printf 'feature\n' > feature.txt
+git add feature.txt
+git commit -qm 'feat: add feature since package release'
+git tag -a '@scope/pkg@1.1.0-beta.0' -m 'package prerelease 1.1.0-beta.0'
+printf 'follow-up fix\n' > follow-up.txt
+git add follow-up.txt
+git commit -qm 'fix: correct package after prerelease'
+lerna_prerelease_dry_run=$("$bin" --dry-run --lerna-package '@scope/pkg')
+printf '%s\n' "$lerna_prerelease_dry_run" | grep -q 'bumping version in VERSION from 1.0.0 to 1.1.0' || {
+  printf 'unstable package tag replaced the last stable bump boundary:\n%s\n' \
+    "$lerna_prerelease_dry_run" >&2
+  exit 1
+}
+
 printf '%s\n' 'release workflow tests passed'

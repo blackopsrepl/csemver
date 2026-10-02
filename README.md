@@ -47,7 +47,7 @@ bumpFiles = [{ filename = "VERSION", type = "plain-text" }]
 
 File lists may also contain strings (for recognized extensions) or tables with `filename` and `type`. Supported updater types are `json`, `python`, `toml`, `yaml`, `openapi`, and `plain-text`. JSON package-lock files update only the root package version surfaces. JSON files are reserialized with detected indentation and newline conventions and end with a newline, matching upstream behavior; the other text updaters preserve surrounding bytes, while plain-text replaces only the version token.
 
-Other supported keys include `infile`, `header`, `releaseAs`, `prerelease`, `releaseCount`, `tagPrefix`, `issuePrefixes`, `path`, `preMajor`, `noBumpWhenEmptyChanges`, `releaseCommitMessageFormat`, `commitUrlFormat`, `compareUrlFormat`, `issueUrlFormat`, `userUrlFormat`, `packageFiles`, `bumpFiles`, `types`, `skip`, and `scripts`. A custom `types` array replaces the default types; each entry uses `type`, optional `section`, and either `hidden` or `effect = "hidden" | "changelog" | "bump"`.
+Other supported keys include `infile`, `header`, `releaseAs`, `prerelease`, `releaseCount`, `tagPrefix`, `issuePrefixes`, `path`, `lernaPackage`, `preMajor`, `noBumpWhenEmptyChanges`, `releaseCommitMessageFormat`, `commitUrlFormat`, `compareUrlFormat`, `issueUrlFormat`, `userUrlFormat`, `packageFiles`, `bumpFiles`, `types`, `skip`, and `scripts`. A custom `types` array replaces the default types; each entry uses `type`, optional `section`, and either `hidden` or `effect = "hidden" | "changelog" | "bump"`.
 
 ```toml
 types = [
@@ -81,6 +81,7 @@ Lifecycle commands run through `/bin/sh -c`; only use scripts from a trusted con
     --dry-run              Preview without changing files, commits, or tags
     --skip STEP            Skip bump, changelog, commit, or tag
     --path PATH            Limit commit history to a path
+    --lerna-package NAME   Use package tags for bump selection
     --packageFiles FILE... Override package version files
     --bumpFiles FILE...    Override version files to update
     --release-count N      Set regenerated sections; 0 rebuilds all history
@@ -98,7 +99,7 @@ Lifecycle commands run through `/bin/sh -c`; only use scripts from a trusted con
     --silent               Suppress normal progress output
 ```
 
-`--release-as` accepts `major`, `minor`, `patch`, or an exact SemVer version without the tag prefix. `--skip STEP` can be repeated. CLI flags override the TOML values. `--dry-run` does not execute configured lifecycle scripts. A positive `--release-count` regenerates that many recent release sections and retains older changelog content; `--release-count 0` rebuilds all tagged history.
+`--release-as` accepts `major`, `minor`, `patch`, or an exact SemVer version without the tag prefix. `--skip STEP` can be repeated. CLI flags override the TOML values. `--dry-run` does not execute configured lifecycle scripts. With `--lerna-package NAME`, bump recommendation starts after the package's latest stable `NAME@VERSION` tag; changelog ranges and the created release tag continue to use `tagPrefix`. A positive `--release-count` regenerates that many recent release sections and retains older changelog content; `--release-count 0` rebuilds all tagged history.
 
 ## Release builds
 
@@ -111,7 +112,7 @@ make clean all CSEMVER_VERSION=1.2.3
 
 ## Compatibility status
 
-The implementation is pure C17 plus optional TOML configuration and an integrated C TOML parser. It currently covers SemVer, common version files, conventional-commit bump selection, changelog generation, release lifecycle scripts, release commits, and annotated tags. Non-default changelog presets and Lerna package selection are not implemented. Byte-level comparisons against upstream pass for release counts `0` through `4` in the tested fixtures, as well as the default dry-run fixture; broad behavioral and byte-for-byte compatibility has **not** been established. The upstream Node project is used only as a test reference outside this repository.
+The implementation is pure C17 plus optional TOML configuration and an integrated C TOML parser. It currently covers SemVer, common version files, conventional-commit bump selection, changelog generation, release lifecycle scripts, release commits, and annotated tags. Non-default changelog presets are not implemented. Lerna package selection uses the latest stable package tag for bump recommendation; the configured `tagPrefix` still controls the generated release tag and changelog windows. Byte-level comparisons against upstream pass for release counts `0` through `4` in the tested fixtures, as well as the default dry-run fixture; broad behavioral and byte-for-byte compatibility has **not** been established. The upstream Node project is used only as a test reference outside this repository.
 
 The native CLI targets POSIX systems with `/bin/sh`, Git, and a C17 compiler. It never pushes to a remote; inspect the generated release and push the resulting branch and tag explicitly.
 
