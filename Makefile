@@ -16,16 +16,20 @@ build/test_config: tests/test_config.c src/config.c src/config.h vendor/tomlc99/
 build/test_toml: tests/test_toml.c vendor/tomlc99/toml.c vendor/tomlc99/toml.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_toml.c vendor/tomlc99/toml.c
 
+build/test_version: tests/test_version.c src/version.c src/version.h src/common.c src/common.h | build
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_version.c src/version.c src/common.c
+
 build/test_semver: tests/test_semver.c src/semver.c src/semver.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_semver.c src/semver.c
 
 build:
 	mkdir -p $@
 
-test: build/csemver build/test_semver build/test_toml build/test_config
+test: build/csemver build/test_semver build/test_toml build/test_config build/test_version
 	./build/test_semver
 	./build/test_toml
 	./build/test_config
+	./build/test_version
 	./tests/test_cli.sh ./build/csemver
 
 clean:
