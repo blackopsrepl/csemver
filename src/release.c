@@ -17,6 +17,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifndef CSEMVER_VERSION
+#define CSEMVER_VERSION "0.1.0"
+#endif
+
 #define ARG_MAX_COUNT 64
 #define COMMIT_MAX 1024
 
@@ -121,7 +125,7 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
       return 1;
     }
     if (strcmp(key, "--version") == 0 || strcmp(key, "-v") == 0) {
-      puts("csemver 0.1.0");
+      puts("csemver " CSEMVER_VERSION);
       return 1;
     }
     if (strcmp(key, "-c") == 0 || strcmp(key, "--config") == 0) {
