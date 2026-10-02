@@ -51,8 +51,8 @@ static void print_help(void) {
        "Options:\n"
        "  -h, --help                 Show this help\n"
        "  -v, --version              Show version\n"
-       "  -r, --release-as VERSION   Release type or exact version\n"
-       "  -p, --prerelease [ID]      Create a pre-release\n"
+       "  -r, --release-as VERSION   Release type or exact SemVer\n"
+       "  -p, --prerelease [ID]      Create a prerelease\n"
        "  -f, --first-release        Tag the current version without bumping\n"
        "  -t, --tag-prefix PREFIX    Git tag prefix (default: v)\n"
        "  -i, --infile FILE          Changelog path (default: CHANGELOG.md)\n"
@@ -62,8 +62,19 @@ static void print_help(void) {
        "  -a, --commit-all           Include all staged and working files\n"
        "      --skip STEP            Skip bump, changelog, commit, or tag\n"
        "      --path PATH            Include commits under this path\n"
-       "      --sign --signoff       Sign commit/tag; add DCO signoff\n"
-       "      --release-count N      Number of changelog releases (0 = all)\n");
+       "      --packageFiles FILE... Override package version files\n"
+       "      --bumpFiles FILE...    Override files to update\n"
+       "      --issuePrefixes PFX... Issue prefixes to link\n"
+       "      --release-count N      Changelog count (1 latest, 0 all)\n"
+       "  -s, --sign                 Sign release commit and tag\n"
+       "      --signoff              Add a DCO signoff\n"
+       "  -m, --message FORMAT       Deprecated; use --releaseCommitMessageFormat\n"
+       "      --releaseCommitMessageFormat FORMAT\n"
+       "      --header TEXT          Set changelog heading\n"
+       "      --tag-force            Replace an existing tag\n"
+       "      --git-tag-fallback     Read version from a tag if no file exists\n"
+       "      --noBumpWhenEmptyChanges\n"
+       "      --silent               Suppress normal progress output\n");
 }
 
 static int run_command(const char *const argv[], char **output, int *status) {
