@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -23,12 +24,30 @@
 
 #define ARG_MAX_COUNT 64
 #define COMMIT_MAX 1024
+#define ISSUE_REFERENCE_MAX 64
+#define ISSUE_REFERENCE_TEXT_MAX 128
 
 typedef struct {
   char hash[64];
   char subject[2048];
   char body[4096];
 } Commit;
+
+typedef struct {
+  char text[ISSUE_REFERENCE_TEXT_MAX];
+  bool closing;
+} IssueReference;
+
+typedef struct {
+  const Commit *commit;
+  const char *text;
+  size_t text_length;
+} BreakingNote;
+
+typedef struct {
+  int type_index;
+  CsemverBuffer key;
+} CommitSortKey;
 
 static char *trim(char *text);
 static int render_changelog(const CsemverConfig *config, const char *version,
@@ -475,14 +494,13 @@ static int type_index(const CsemverConfig *config, const char *type) {
   return -1;
 }
 
-static int commit_is_breaking(const char *subject, const char *body) {
-  const char *colon = strchr(subject, ':');
+static int body_has_breaking_note(const char *body) {
   const char *line;
-  if (colon != NULL && colon > subject && colon[-1] == '!')
-    return 1;
+  if (body == NULL)
+    return 0;
   line = body;
   while (*line != '\0') {
-    while (*line == '\n' || *line == '\r' || *line == ' ')
+    while (*line == '\n' || *line == '\r' || *line == ' ' || *line == '\t')
       ++line;
     if (strncmp(line, "BREAKING CHANGE:", 16) == 0 ||
         strncmp(line, "BREAKING-CHANGE:", 16) == 0)
@@ -493,6 +511,13 @@ static int commit_is_breaking(const char *subject, const char *body) {
     ++line;
   }
   return 0;
+}
+
+static int commit_is_breaking(const char *subject, const char *body) {
+  const char *colon = strchr(subject, ':');
+  if (colon != NULL && colon > subject && colon[-1] == '!')
+    return 1;
+  return body_has_breaking_note(body);
 }
 
 static int conventional_type(const char *subject, char *type, size_t size,
@@ -518,7 +543,7 @@ static int conventional_type(const char *subject, char *type, size_t size,
     scope[close - open - 1] = '\0';
   } else
     scope[0] = '\0';
-  if (colon > subject && colon[-1] == '!')
+  if (open == NULL && colon > subject && colon[-1] == '!')
     type[type_size - 1] = '\0';
   *description = colon + 1;
   while (**description == ' ')
@@ -560,6 +585,149 @@ static int append_issue_link(CsemverBuffer *out, const CsemverConfig *config,
       if (!csemver_buffer_append(out, text + i, 1))
         return 0;
       ++i;
+    }
+  }
+  return 1;
+}
+
+static int ascii_equal_fold(char left, char right) {
+  return tolower((unsigned char)left) == tolower((unsigned char)right);
+}
+
+static int text_contains_reference(const char *text, const char *reference) {
+  size_t i, reference_length = strlen(reference);
+  for (i = 0; text[i] != '\0'; ++i) {
+    size_t j = 0;
+    while (j < reference_length && text[i + j] != '\0' &&
+           ascii_equal_fold(text[i + j], reference[j]))
+      ++j;
+    if (j == reference_length &&
+        !isalnum((unsigned char)text[i + reference_length]) &&
+        text[i + reference_length] != '_' && text[i + reference_length] != '-')
+      return 1;
+  }
+  return 0;
+}
+
+static int is_reference_word_char(char value) {
+  return isalnum((unsigned char)value) || value == '_' || value == '-';
+}
+
+static int line_has_closing_action(const char *line, const char *end) {
+  static const char *const actions[] = {"close",   "closes",   "closed",
+                                        "fix",     "fixes",    "fixed",
+                                        "resolve", "resolves", "resolved"};
+  const char *cursor;
+  for (cursor = line; cursor < end; ++cursor) {
+    size_t action;
+    for (action = 0; action < sizeof actions / sizeof actions[0]; ++action) {
+      size_t length = strlen(actions[action]);
+      size_t i;
+      if ((size_t)(end - cursor) < length ||
+          (cursor > line && is_reference_word_char(cursor[-1])) ||
+          (cursor + length < end && is_reference_word_char(cursor[length])))
+        continue;
+      for (i = 0; i < length; ++i)
+        if (!ascii_equal_fold(cursor[i], actions[action][i]))
+          break;
+      if (i == length)
+        return 1;
+    }
+  }
+  return 0;
+}
+
+static int reference_is_duplicate(const IssueReference *references,
+                                  size_t reference_count, const char *text) {
+  size_t i;
+  for (i = 0; i < reference_count; ++i)
+    if (strcmp(references[i].text, text) == 0)
+      return 1;
+  return 0;
+}
+
+static int collect_body_references(const CsemverConfig *config,
+                                   const Commit *commit,
+                                   IssueReference *references,
+                                   size_t *reference_count) {
+  const char *line = commit->body;
+  *reference_count = 0;
+  while (*line != '\0') {
+    const char *line_end = strchr(line, '\n');
+    const char *cursor;
+    if (line_end == NULL)
+      line_end = line + strlen(line);
+    for (cursor = line; cursor < line_end;) {
+      size_t prefix;
+      int matched = 0;
+      for (prefix = 0; prefix < config->issue_prefix_count; ++prefix) {
+        const char *issue_start;
+        const char *issue_end;
+        size_t token_length;
+        char token[ISSUE_REFERENCE_TEXT_MAX];
+        IssueReference *reference;
+        if (config->issue_prefixes[prefix][0] == '\0' ||
+            strncmp(cursor, config->issue_prefixes[prefix],
+                    strlen(config->issue_prefixes[prefix])) != 0)
+          continue;
+        issue_start = cursor + strlen(config->issue_prefixes[prefix]);
+        issue_end = issue_start;
+        while (issue_end < line_end && is_reference_word_char(*issue_end))
+          ++issue_end;
+        if (issue_end == issue_start ||
+            (issue_end < line_end && *issue_end != ' ' && *issue_end != '\t' &&
+             *issue_end != ',' && *issue_end != ';' && *issue_end != '.' &&
+             *issue_end != ')' && *issue_end != ']'))
+          continue;
+        token_length = (size_t)(issue_end - cursor);
+        if (token_length >= sizeof token)
+          return 0;
+        memcpy(token, cursor, token_length);
+        token[token_length] = '\0';
+        if (!text_contains_reference(commit->subject, token) &&
+            !reference_is_duplicate(references, *reference_count, token)) {
+          if (*reference_count >= ISSUE_REFERENCE_MAX)
+            return 0;
+          reference = &references[(*reference_count)++];
+          memcpy(reference->text, token, token_length + 1);
+          reference->closing = line_has_closing_action(line, cursor);
+        }
+        cursor = issue_end;
+        matched = 1;
+        break;
+      }
+      if (!matched)
+        ++cursor;
+    }
+    line = *line_end == '\0' ? line_end : line_end + 1;
+  }
+  return 1;
+}
+
+static int append_body_references(CsemverBuffer *section,
+                                  const CsemverConfig *config,
+                                  const Commit *commit, const char *base) {
+  IssueReference references[ISSUE_REFERENCE_MAX];
+  size_t reference_count, i;
+  bool wrote;
+  int closing;
+  if (!collect_body_references(config, commit, references, &reference_count))
+    return 0;
+  for (closing = 1; closing >= 0; --closing) {
+    wrote = false;
+    for (i = 0; i < reference_count; ++i) {
+      if (references[i].closing != (closing != 0))
+        continue;
+      if (!wrote) {
+        if (!csemver_buffer_append(section,
+                                   closing ? ", closes " : ", references ",
+                                   closing ? 9 : 13))
+          return 0;
+        wrote = true;
+      } else if (!csemver_buffer_append(section, " ", 1))
+        return 0;
+      if (!append_issue_link(section, config, references[i].text, base))
+        return 0;
     }
   }
   return 1;
@@ -635,11 +803,84 @@ static int append_commit_line(CsemverBuffer *section,
       return 0;
   } else if (!csemver_buffer_appendf(section, " %s", short_hash))
     return 0;
+  if (!append_body_references(section, config, commit, base))
+    return 0;
   return csemver_buffer_append(section, "\n", 1);
 }
 
-static int append_breaking_notes(CsemverBuffer *notes, const char *body) {
-  const char *line = body;
+static int append_sorted_group(CsemverBuffer *section,
+                               const CsemverConfig *config,
+                               const CommitSortKey *keys, const Commit *commits,
+                               size_t commit_count, int type_index,
+                               const char *base) {
+  size_t order[COMMIT_MAX];
+  size_t count = 0, i;
+  if (commit_count > COMMIT_MAX)
+    return 0;
+  for (i = 0; i < commit_count; ++i)
+    if (keys[i].type_index == type_index)
+      order[count++] = i;
+  for (i = 1; i < count; ++i) {
+    size_t commit_index = order[i];
+    size_t j = i;
+    const char *key =
+        keys[commit_index].key.data == NULL ? "" : keys[commit_index].key.data;
+    while (j > 0) {
+      const char *previous = keys[order[j - 1]].key.data == NULL
+                                 ? ""
+                                 : keys[order[j - 1]].key.data;
+      if (strcmp(previous, key) <= 0)
+        break;
+      order[j] = order[j - 1];
+      --j;
+    }
+    order[j] = commit_index;
+  }
+  for (i = 0; i < count; ++i)
+    if (!append_commit_line(section, config, &commits[order[i]], base))
+      return 0;
+  return 1;
+}
+
+static int add_breaking_note(BreakingNote **notes, size_t *note_count,
+                             size_t *note_capacity, const Commit *commit,
+                             const char *text, size_t text_length) {
+  BreakingNote *grown;
+  size_t capacity;
+  if (*note_count == *note_capacity) {
+    capacity = *note_capacity == 0 ? 8 : *note_capacity * 2;
+    if (capacity < *note_capacity || capacity > SIZE_MAX / sizeof **notes)
+      return 0;
+    grown = realloc(*notes, capacity * sizeof **notes);
+    if (grown == NULL)
+      return 0;
+    *notes = grown;
+    *note_capacity = capacity;
+  }
+  (*notes)[*note_count].commit = commit;
+  (*notes)[*note_count].text = text;
+  (*notes)[*note_count].text_length = text_length;
+  ++*note_count;
+  return 1;
+}
+
+static int append_breaking_note(CsemverBuffer *notes,
+                                const BreakingNote *note) {
+  char type[128], scope[256];
+  const char *description;
+  if (!conventional_type(note->commit->subject, type, sizeof type, scope,
+                         sizeof scope, &description))
+    scope[0] = '\0';
+  if (!csemver_buffer_append(notes, "* ", 2) ||
+      (scope[0] != '\0' && !csemver_buffer_appendf(notes, "**%s:** ", scope)) ||
+      !csemver_buffer_append(notes, note->text, note->text_length))
+    return 0;
+  return csemver_buffer_append(notes, "\n", 1);
+}
+
+static int collect_breaking_notes(const Commit *commit, BreakingNote **notes,
+                                  size_t *note_count, size_t *note_capacity) {
+  const char *line = commit->body;
   while (*line != '\0') {
     const char *start = line;
     const char *note = NULL;
@@ -658,10 +899,8 @@ static int append_breaking_notes(CsemverBuffer *notes, const char *body) {
         end = note + strlen(note);
       while (end > note && (end[-1] == ' ' || end[-1] == '\r'))
         --end;
-      if (end > note &&
-          (!csemver_buffer_append(notes, "* ", 2) ||
-           !csemver_buffer_append(notes, note, (size_t)(end - note)) ||
-           !csemver_buffer_append(notes, "\n", 1)))
+      if (end > note && !add_breaking_note(notes, note_count, note_capacity,
+                                           commit, note, (size_t)(end - note)))
         return 0;
     }
     line = strchr(line, '\n');
@@ -672,35 +911,87 @@ static int append_breaking_notes(CsemverBuffer *notes, const char *body) {
   return 1;
 }
 
+static int compare_breaking_notes(const BreakingNote *left,
+                                  const BreakingNote *right) {
+  size_t common_length = left->text_length < right->text_length
+                             ? left->text_length
+                             : right->text_length;
+  int order = memcmp(left->text, right->text, common_length);
+  if (order != 0)
+    return order;
+  return left->text_length < right->text_length   ? -1
+         : left->text_length > right->text_length ? 1
+                                                  : 0;
+}
+
 static int changelog_section(const CsemverConfig *config, const Commit *commits,
                              size_t commit_count, CsemverBuffer *output) {
   CsemverBuffer groups[CSEMVER_MAX_TYPES];
   CsemverBuffer breaking;
+  CommitSortKey sort_keys[COMMIT_MAX];
+  BreakingNote *breaking_notes = NULL;
+  size_t breaking_note_count = 0, breaking_note_capacity = 0;
   bool used[CSEMVER_MAX_TYPES] = {false};
   char base[1024];
   size_t i;
+  if (commit_count > COMMIT_MAX)
+    return 0;
   csemver_buffer_init(&breaking);
   repository_base(base, sizeof base);
   for (i = 0; i < config->commit_type_count; ++i)
     csemver_buffer_init(&groups[i]);
   for (i = 0; i < commit_count; ++i) {
+    sort_keys[i].type_index = -1;
+    csemver_buffer_init(&sort_keys[i].key);
+  }
+  for (i = 0; i < commit_count; ++i) {
     char type[128], scope[256];
     const char *description;
     int index;
-    if (!append_breaking_notes(&breaking, commits[i].body))
+    int parsed = conventional_type(commits[i].subject, type, sizeof type, scope,
+                                   sizeof scope, &description);
+    bool has_breaking_note = body_has_breaking_note(commits[i].body);
+    if (!parsed)
+      scope[0] = '\0';
+    if (!collect_breaking_notes(&commits[i], &breaking_notes,
+                                &breaking_note_count, &breaking_note_capacity))
       goto fail;
-    if (!conventional_type(commits[i].subject, type, sizeof type, scope,
-                           sizeof scope, &description))
+    if (parsed && !has_breaking_note &&
+        commit_is_breaking(commits[i].subject, "") &&
+        !add_breaking_note(&breaking_notes, &breaking_note_count,
+                           &breaking_note_capacity, &commits[i], description,
+                           strlen(description)))
+      goto fail;
+    if (!parsed)
       continue;
-    (void)description;
     index = type_index(config, type);
     if (index < 0 || config->commit_types[index].hidden ||
         config->commit_types[index].section[0] == '\0')
       continue;
     used[index] = true;
-    if (!append_commit_line(&groups[index], config, &commits[i], base))
+    sort_keys[i].type_index = index;
+    if (strcmp(scope, "*") == 0)
+      scope[0] = '\0';
+    if (!csemver_buffer_append(&sort_keys[i].key, scope, strlen(scope)) ||
+        !append_issue_link(&sort_keys[i].key, config, description, base))
       goto fail;
   }
+  for (i = 1; i < breaking_note_count; ++i) {
+    BreakingNote note = breaking_notes[i];
+    size_t j = i;
+    while (j > 0 && compare_breaking_notes(&note, &breaking_notes[j - 1]) < 0) {
+      breaking_notes[j] = breaking_notes[j - 1];
+      --j;
+    }
+    breaking_notes[j] = note;
+  }
+  for (i = 0; i < breaking_note_count; ++i)
+    if (!append_breaking_note(&breaking, &breaking_notes[i]))
+      goto fail;
+  for (i = 0; i < config->commit_type_count; ++i)
+    if (used[i] && !append_sorted_group(&groups[i], config, sort_keys, commits,
+                                        commit_count, (int)i, base))
+      goto fail;
   if (breaking.length > 0) {
     if (!csemver_buffer_appendf(output, "### ⚠ BREAKING CHANGES\n\n") ||
         !csemver_buffer_append(output, breaking.data, breaking.length))
@@ -722,11 +1013,17 @@ static int changelog_section(const CsemverConfig *config, const Commit *commits,
   for (i = 0; i < config->commit_type_count; ++i)
     csemver_buffer_free(&groups[i]);
   csemver_buffer_free(&breaking);
+  for (i = 0; i < commit_count; ++i)
+    csemver_buffer_free(&sort_keys[i].key);
+  free(breaking_notes);
   return 1;
 fail:
   for (i = 0; i < config->commit_type_count; ++i)
     csemver_buffer_free(&groups[i]);
   csemver_buffer_free(&breaking);
+  for (i = 0; i < commit_count; ++i)
+    csemver_buffer_free(&sort_keys[i].key);
+  free(breaking_notes);
   return 0;
 }
 

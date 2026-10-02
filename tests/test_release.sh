@@ -140,17 +140,32 @@ git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
 git config commit.gpgSign false
 printf '1.2.3\n' > VERSION
+printf '{\n  "name": "breaking-change-fixture",\n  "version": "1.2.3",\n  "repository": {"type": "git", "url": "https://github.com/example/breaking.git"}\n}\n' > package.json
 cat > csemver.toml <<'TOML'
 packageFiles = [{ filename = "VERSION", type = "plain-text" }]
 bumpFiles = [{ filename = "VERSION", type = "plain-text" }]
 TOML
-git add VERSION csemver.toml
+git add VERSION csemver.toml package.json
 git commit -qm 'chore: initialize breaking-change fixture'
 printf 'breaking change\n' > api.txt
 git add api.txt
 git commit -qm 'feat(api)!: remove the legacy endpoint'
+printf 'breaking output change\n' > output.txt
+git add output.txt
+git commit -qm 'feat(cli)!: change output format #990' -m 'BREAKING CHANGE: scripts must update to the new output.' -m 'References #99' -m 'Fixes #98'
 "$bin" > /dev/null
 [ "$(cat VERSION)" = '2.0.0' ]
+grep -Fq '* **api:** remove the legacy endpoint' CHANGELOG.md
+grep -Fq '* **cli:** scripts must update to the new output.' CHANGELOG.md
+grep -Fq '* **cli:** change output format' CHANGELOG.md
+grep -Fq 'references [#99](https://github.com/example/breaking/issues/99)' CHANGELOG.md
+grep -Fq 'closes [#98](https://github.com/example/breaking/issues/98)' CHANGELOG.md
+api_note_line=$(grep -m 1 -nF '* **api:** remove the legacy endpoint' CHANGELOG.md | cut -d: -f1)
+cli_note_line=$(grep -m 1 -nF '* **cli:** scripts must update to the new output.' CHANGELOG.md | cut -d: -f1)
+test "$api_note_line" -lt "$cli_note_line"
+api_feature_line=$(grep -nF '* **api:** remove the legacy endpoint (' CHANGELOG.md | cut -d: -f1)
+cli_feature_line=$(grep -nF '* **cli:** change output format [#990]' CHANGELOG.md | cut -d: -f1)
+test "$api_feature_line" -lt "$cli_feature_line"
 printf 'breaking footer\n' > footer.txt
 git add footer.txt
 git commit -qm 'fix: preserve new API contract' -m 'BREAKING CHANGE: callers must migrate to the new API.'
