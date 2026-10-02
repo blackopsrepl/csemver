@@ -65,7 +65,7 @@ static void print_help(void) {
        "      --packageFiles FILE... Override package version files\n"
        "      --bumpFiles FILE...    Override files to update\n"
        "      --issuePrefixes PFX... Issue prefixes to link\n"
-       "      --release-count N      Changelog count (1 latest, 0 all)\n"
+       "      --release-count N      Changelog sections (0 all, N latest)\n"
        "  -s, --sign                 Sign release commit and tag\n"
        "      --signoff              Add a DCO signoff\n"
        "  -m, --message FORMAT       Deprecated; use --releaseCommitMessageFormat\n"
@@ -568,15 +568,24 @@ static int append_issue_link(CsemverBuffer *out, const CsemverConfig *config,
 static void repository_base(char *base, size_t base_size) {
   const char *args[] = {"config", "--get", "remote.origin.url", NULL};
   char *output = NULL;
-  char *url;
+  char package_url[1024];
+  char *package = NULL;
+  char *url = NULL;
   char *path;
   int status = 0;
   base[0] = '\0';
-  if (!run_git(args, &output, &status) || status != 0 || output == NULL) {
-    free(output);
-    return;
+  if (csemver_read_file("package.json", &package, NULL)) {
+    if (csemver_json_repository_url(package, package_url, sizeof package_url))
+      url = package_url;
+    free(package);
   }
-  url = trim(output);
+  if (url == NULL) {
+    if (!run_git(args, &output, &status) || status != 0 || output == NULL) {
+      free(output);
+      return;
+    }
+    url = trim(output);
+  }
   if (strncmp(url, "git@", 4) == 0) {
     char *colon = strchr(url, ':');
     if (colon != NULL) {
@@ -1308,16 +1317,26 @@ static int get_tag_date(const char *tag, char *date, size_t date_size) {
   return 1;
 }
 
+static int append_compare_heading(CsemverBuffer *output, const char *base,
+                                  const char *version, const char *previous_tag,
+                                  const char *tag, const char *date) {
+  if (base[0] != '\0')
+    return csemver_buffer_appendf(output,
+                                  "## [%s](%s/compare/%s...%s) (%s)\n\n",
+                                  version, base, previous_tag, tag, date);
+  return csemver_buffer_appendf(output, "## [%s](///compare/%s...%s) (%s)\n\n",
+                                version, previous_tag, tag, date);
+}
+
 static int append_release_heading(CsemverBuffer *output, const char *base,
                                   const char *version, const char *previous_tag,
                                   const char *tag, const char *date,
                                   bool initial_release) {
-  if (base[0] != '\0' && previous_tag != NULL)
-    return csemver_buffer_appendf(output,
-                                  "## [%s](%s/compare/%s...%s) (%s)\n\n",
-                                  version, base, previous_tag, tag, date);
+  if (previous_tag != NULL)
+    return append_compare_heading(output, base, version, previous_tag, tag,
+                                  date);
   if (initial_release)
-    return csemver_buffer_appendf(output, "## %s (%s)\n\n", version, date);
+    return csemver_buffer_appendf(output, "## %s (%s)\n", version, date);
   return csemver_buffer_appendf(output, "## [%s] (%s)\n\n", version, date);
 }
 
@@ -1330,11 +1349,11 @@ static int normalize_changelog_newlines(CsemverBuffer *output) {
 static int regenerate_all_changelogs(
     const CsemverConfig *config, const char *version, const char *previous_tag,
     const char *new_tag, const Commit *commits, size_t commit_count,
-    char tags[][SEMVER_TEXT_MAX], size_t tag_count, const char *date,
-    const char *base, CsemverBuffer *output) {
+    char tags[][SEMVER_TEXT_MAX], size_t tag_count, size_t history_limit,
+    const char *date, const char *base, CsemverBuffer *output) {
   Commit *historical = calloc(COMMIT_MAX, sizeof(*historical));
   bool wrote_section = false;
-  size_t i;
+  size_t i, history_count = 0;
   if (historical == NULL)
     return 0;
   if (previous_tag == NULL || strcmp(previous_tag, new_tag) != 0) {
@@ -1349,6 +1368,8 @@ static int regenerate_all_changelogs(
     char current_date[32];
     const char *older_tag = NULL;
     size_t j, historical_count = 0;
+    if (history_limit != 0 && history_count >= history_limit)
+      break;
     if (!stable_tag_version(config, tags[i], current_version,
                             sizeof current_version))
       continue;
@@ -1372,6 +1393,7 @@ static int regenerate_all_changelogs(
         !changelog_section(config, historical, historical_count, output))
       goto fail;
     wrote_section = true;
+    ++history_count;
   }
   free(historical);
   return 1;
@@ -1411,33 +1433,49 @@ static int render_changelog(const CsemverConfig *config, const char *version,
   }
   localtime_r(&now, &local);
   strftime(date, sizeof date, "%Y-%m-%d", &local);
-  if (!config->dry_run && config->header[0] != '\0' &&
-      (!csemver_buffer_append(output, config->header, strlen(config->header)) ||
-       !csemver_buffer_append(output, "\n", 1)))
+  if (!config->dry_run && ((config->header[0] != '\0' &&
+                            !csemver_buffer_append(output, config->header,
+                                                   strlen(config->header))) ||
+                           !csemver_buffer_append(output, "\n", 1)))
     goto fail;
   if (config->release_count == 0) {
     if ((!config->dry_run && !csemver_buffer_append(output, "\n", 1)) ||
         !regenerate_all_changelogs(config, version, previous_tag, new_tag,
-                                   commits, commit_count, tags, tag_count, date,
-                                   base, output) ||
+                                   commits, commit_count, tags, tag_count, 0,
+                                   date, base, output) ||
         !normalize_changelog_newlines(output))
       goto fail;
     free(old_content);
     return 1;
   }
-  if (!config->dry_run && !csemver_buffer_append(output, "\n", 1))
-    goto fail;
-  if (base[0] != '\0' && previous_tag != NULL) {
-    if (!csemver_buffer_appendf(output, "## [%s](%s/compare/%s...%s) (%s)\n\n",
-                                version, base, previous_tag, new_tag, date))
+  if (config->release_count > 1) {
+    size_t history_limit = (size_t)config->release_count - 1;
+    if (!regenerate_all_changelogs(config, version, previous_tag, new_tag,
+                                   commits, commit_count, tags, tag_count,
+                                   history_limit, date, base, output))
+      goto fail;
+    if (*old_body != '\0' &&
+        (!csemver_buffer_append(output, "\n", 1) ||
+         !csemver_buffer_append(output, old_body,
+                                old_length - (size_t)(old_body - old_content))))
+      goto fail;
+    if (!normalize_changelog_newlines(output))
+      goto fail;
+    free(old_content);
+    return 1;
+  }
+  if (previous_tag != NULL) {
+    if (!append_compare_heading(output, base, version, previous_tag, new_tag,
+                                date))
       goto fail;
   } else if (!csemver_buffer_appendf(output, "## [%s] (%s)\n\n", version, date))
     goto fail;
   if (!changelog_section(config, commits, commit_count, output))
     goto fail;
   if (*old_body != '\0' &&
-      !csemver_buffer_append(output, old_body,
-                             old_length - (size_t)(old_body - old_content)))
+      (!csemver_buffer_append(output, "\n", 1) ||
+       !csemver_buffer_append(output, old_body,
+                              old_length - (size_t)(old_body - old_content))))
     goto fail;
   if (!normalize_changelog_newlines(output))
     goto fail;

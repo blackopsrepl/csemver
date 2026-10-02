@@ -6,6 +6,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void test_repository_url_forms(void) {
+  const char *object_form =
+      "{\"name\":\"fixture\",\"repository\":{\"type\":\"git\","
+      "\"url\":\"https://github.com/example/project.git\"}}";
+  const char *string_form =
+      "{\"repository\":\"https://github.com/example/other.git\"}";
+  char url[256];
+
+  assert(csemver_json_repository_url(object_form, url, sizeof url));
+  assert(strcmp(url, "https://github.com/example/project.git") == 0);
+  assert(csemver_json_repository_url(string_form, url, sizeof url));
+  assert(strcmp(url, "https://github.com/example/other.git") == 0);
+}
+
 static void test_json_round_trip(void) {
   const char *input = "{\r\n\t\"name\": \"fixture\",\r\n"
                       "\t\"version\": \"1.2.3\",\r\n"
@@ -99,6 +113,7 @@ static void test_toml_and_yaml_surface(void) {
 }
 
 int main(void) {
+  test_repository_url_forms();
   test_json_round_trip();
   test_package_lock_updates_only_root_package();
   test_plain_text_preserves_upstream_write_semantics();

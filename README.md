@@ -83,7 +83,7 @@ Lifecycle commands run through `/bin/sh -c`; only use scripts from a trusted con
     --path PATH            Limit commit history to a path
     --packageFiles FILE... Override package version files
     --bumpFiles FILE...    Override version files to update
-    --release-count N      Use 1 (latest section) or 0 (rebuild all)
+    --release-count N      Set regenerated sections; 0 rebuilds all history
     --sign                 Sign the release commit and tag
     --signoff              Add a DCO signoff to the commit
 -m, --message FORMAT       Deprecated; use the TOML release message format
@@ -98,7 +98,7 @@ Lifecycle commands run through `/bin/sh -c`; only use scripts from a trusted con
     --silent               Suppress normal progress output
 ```
 
-`--release-as` accepts `major`, `minor`, `patch`, or an exact SemVer version without the tag prefix. `--skip STEP` can be repeated. CLI flags override the TOML values. `--dry-run` does not execute configured lifecycle scripts. Changelog counts other than `1` and `0` are not implemented yet.
+`--release-as` accepts `major`, `minor`, `patch`, or an exact SemVer version without the tag prefix. `--skip STEP` can be repeated. CLI flags override the TOML values. `--dry-run` does not execute configured lifecycle scripts. A positive `--release-count` regenerates that many recent release sections and retains older changelog content; `--release-count 0` rebuilds all tagged history.
 
 ## Release builds
 
@@ -111,7 +111,7 @@ make clean all CSEMVER_VERSION=1.2.3
 
 ## Compatibility status
 
-The implementation is pure C17 plus TOML configuration and the vendored C parser. It currently covers SemVer, common version files, conventional-commit bump selection, changelog generation, release lifecycle scripts, release commits, and annotated tags. Non-default changelog presets, Lerna package selection, and release counts other than `0` and `1` are not implemented. Byte-level comparison against upstream has passed for the default dry-run output and full changelog regeneration in tested fixtures; broad behavioral and byte-for-byte compatibility has **not** been established. The upstream Node project is used only as a test reference outside this repository.
+The implementation is pure C17 plus optional TOML configuration and an integrated C TOML parser. It currently covers SemVer, common version files, conventional-commit bump selection, changelog generation, release lifecycle scripts, release commits, and annotated tags. Non-default changelog presets and Lerna package selection are not implemented. Byte-level comparisons against upstream pass for release counts `0` through `4` in the tested fixtures, as well as the default dry-run fixture; broad behavioral and byte-for-byte compatibility has **not** been established. The upstream Node project is used only as a test reference outside this repository.
 
 The native CLI targets POSIX systems with `/bin/sh`, Git, and a C17 compiler. It never pushes to a remote; inspect the generated release and push the resulting branch and tag explicitly.
 

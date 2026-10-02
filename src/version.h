@@ -13,5 +13,7 @@ int csemver_version_update_text(const char *filename, const char *type,
                                 char **updated, size_t *updated_size,
                                 char *old_version, size_t old_version_size,
                                 char *error, size_t error_size);
+int csemver_json_repository_url(const char *content, char *url,
+                                size_t url_size);
 
 #endif

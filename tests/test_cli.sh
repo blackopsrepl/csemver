@@ -6,6 +6,7 @@ help=$($bin --help)
 printf '%s\n' "$help" | grep -Fq 'Usage: csemver [options]'
 printf '%s\n' "$help" | grep -q -- '--release-as'
 printf '%s\n' "$help" | grep -q -- '--dry-run'
+printf '%s\n' "$help" | grep -Fq 'Changelog sections (0 all, N latest)'
 for option in --first-release --packageFiles --bumpFiles --issuePrefixes \
     --tag-force --git-tag-fallback --noBumpWhenEmptyChanges; do
     if ! printf '%s\n' "$help" | grep -Fq -- "$option"; then

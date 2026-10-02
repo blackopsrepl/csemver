@@ -10,6 +10,7 @@ git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
 git config commit.gpgSign false
 printf '1.0.0\n' > VERSION
+printf '{\n  "name": "csemver-fixture",\n  "repository": {"type": "git", "url": "https://github.com/example/csemver.git"}\n}\n' > package.json
 cat > csemver.toml <<'TOML'
 packageFiles = [{ filename = "VERSION", type = "plain-text" }]
 bumpFiles = [{ filename = "VERSION", type = "plain-text" }]
@@ -17,6 +18,7 @@ TOML
 marker="$tmp/lifecycle.marker"
 printf '[scripts]\nprechangelog = "touch %s"\n' "$marker" >> csemver.toml
 git add VERSION csemver.toml
+git add package.json
 git commit -qm 'chore: seed release fixture'
 git tag -a v1.0.0 -m 'chore(release): 1.0.0'
 printf 'feature\n' > feature.txt
@@ -41,6 +43,8 @@ test -f "$marker"
 rm -f "$marker"
 [ "$(cat VERSION)" = '1.1.0' ]
 grep -q '^## \[1.1.0\]' CHANGELOG.md
+grep -q '^## \[1.1.0\](https://github.com/example/csemver/compare/v1.0.0...v1.1.0)' CHANGELOG.md
+grep -q 'https://github.com/example/csemver/commit/' CHANGELOG.md
 grep -q 'add a feature' CHANGELOG.md
 grep -q 'correct seed parsing' CHANGELOG.md
 grep -q '^chore(release): 1.1.0$' <<EOF
@@ -72,12 +76,15 @@ test -z "$(git status --porcelain)"
 printf 'new major feature\n' > major.txt
 git add major.txt
 git commit -qm 'feat: add the next generation'
-"$bin" --release-as 2.0.0 > /dev/null
+"$bin" --release-as 2.0.0 --release-count 2 > /dev/null
 test -f "$marker"
 rm -f "$marker"
 [ "$(cat VERSION)" = '2.0.0' ]
 test "$(git cat-file -t refs/tags/v2.0.0)" = tag
 grep -q '^## \[2.0.0\]' CHANGELOG.md
+grep -q '^## \[2.0.0\](https://github.com/example/csemver/compare/v1.1.1...v2.0.0)' CHANGELOG.md
+[ "$(grep -c '^## \[1.1.1\]' CHANGELOG.md)" -eq 2 ]
+grep -q '^## \[1.1.1\](https://github.com/example/csemver/compare/v1.1.0...v1.1.1)' CHANGELOG.md
 test -z "$(git status --porcelain)"
 printf 'metadata only\n' > metadata.txt
 git add metadata.txt
@@ -91,11 +98,22 @@ test "$(git cat-file -t refs/tags/v2.0.1)" = tag
 printf 'stale generated history\n' > CHANGELOG.md
 "$bin" --release-count 0 --skip bump --skip commit --skip tag > /dev/null
 grep -q '^## \[2.0.1\]' CHANGELOG.md
+header_line=$(grep -n 'for commit guidelines\.' CHANGELOG.md | cut -d: -f1)
+release_line=$(grep -n '^## \[2.0.1\]' CHANGELOG.md | cut -d: -f1)
+[ "$((release_line - header_line))" -eq 3 ]
 grep -q '^## \[2.0.0\]' CHANGELOG.md
 grep -q '^## \[1.1.1\]' CHANGELOG.md
 grep -q '^## \[1.1.0\]' CHANGELOG.md
 ! grep -q 'stale generated history' CHANGELOG.md
 rm -f "$marker"
+git checkout -- CHANGELOG.md
+
+"$bin" --release-count 6 --skip bump --skip commit --skip tag > /dev/null
+test -f "$marker"
+rm -f "$marker"
+initial_release_line=$(grep -n '^## 1\.0\.0 (' CHANGELOG.md | cut -d: -f1)
+preserved_release_line=$(grep -n '^## \[2\.0\.1\]' CHANGELOG.md | tail -n 1 | cut -d: -f1)
+[ "$((preserved_release_line - initial_release_line))" -eq 2 ]
 git checkout -- CHANGELOG.md
 
 test -z "$(git status --porcelain)"

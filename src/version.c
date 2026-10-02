@@ -228,6 +228,35 @@ static int copy_json_string(const char *text, Range range, char *out,
   return 1;
 }
 
+int csemver_json_repository_url(const char *content, char *url,
+                                size_t url_size) {
+  Scanner root;
+  Range repository;
+  int found;
+
+  if (content == NULL || url == NULL || url_size == 0)
+    return 0;
+  url[0] = '\0';
+  root.text = content;
+  root.position = 0;
+  root.length = strlen(content);
+  spaces(&root);
+  if (!object_field(&root, "repository", &repository, NULL, 0))
+    return 0;
+  root.position = repository.start;
+  if (content[repository.start] == '"')
+    found = string_value(&root, url, url_size, NULL);
+  else if (content[repository.start] == '{')
+    found = object_field(&root, "url", NULL, url, url_size);
+  else
+    found = 0;
+  if (!found || url[0] == '\0') {
+    url[0] = '\0';
+    return 0;
+  }
+  return 1;
+}
+
 static int line_version(const char *content, const char *key, bool colon,
                         Range *range, char *version, size_t version_size) {
   const char *line = content;
