@@ -1039,16 +1039,14 @@ int csemver_json_repository_url(const char *content, char *url,
   return 1;
 }
 
-int csemver_json_object_string(const char *content, const char *object_key,
-                               const char *field_key, char *value,
-                               size_t value_size) {
+static int json_config_field(const char *content, const char *object_key,
+                             const char *field_key, Range *range, char *decoded,
+                             size_t decoded_size) {
   Scanner root;
   Range object;
 
-  if (content == NULL || object_key == NULL || field_key == NULL ||
-      value == NULL || value_size == 0)
+  if (content == NULL || object_key == NULL || field_key == NULL)
     return 0;
-  value[0] = '\0';
   root.text = content;
   root.position = 0;
   root.length = strlen(content);
@@ -1058,7 +1056,37 @@ int csemver_json_object_string(const char *content, const char *object_key,
     return 0;
   root.position = object.start;
   root.length = object.end;
-  return object_field(&root, field_key, NULL, value, value_size);
+  return object_field(&root, field_key, range, decoded, decoded_size);
+}
+
+int csemver_json_object_string(const char *content, const char *object_key,
+                               const char *field_key, char *value,
+                               size_t value_size) {
+  if (value == NULL || value_size == 0)
+    return 0;
+  value[0] = '\0';
+  return json_config_field(content, object_key, field_key, NULL, value,
+                           value_size);
+}
+
+int csemver_json_object_boolean(const char *content, const char *object_key,
+                                const char *field_key, bool *value) {
+  Range field;
+  size_t length;
+
+  if (value == NULL ||
+      !json_config_field(content, object_key, field_key, &field, NULL, 0))
+    return 0;
+  length = field.end - field.start;
+  if (length == 4 && memcmp(content + field.start, "true", 4) == 0) {
+    *value = true;
+    return 1;
+  }
+  if (length == 5 && memcmp(content + field.start, "false", 5) == 0) {
+    *value = false;
+    return 1;
+  }
+  return 0;
 }
 
 static int line_version(const char *content, const char *key, bool colon,

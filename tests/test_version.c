@@ -40,6 +40,23 @@ static void test_json_package_config_strings(void) {
                                      value, sizeof value));
 }
 
+static void test_json_package_config_booleans(void) {
+  const char *package_json = "{\"commit-and-tag-version\":{\"dryRun\":true,"
+                             "\"silent\":false,\"invalid\":1}}";
+  bool value = false;
+
+  assert(csemver_json_object_boolean(package_json, "commit-and-tag-version",
+                                     "dryRun", &value));
+  assert(value);
+  assert(csemver_json_object_boolean(package_json, "commit-and-tag-version",
+                                     "silent", &value));
+  assert(!value);
+  value = true;
+  assert(!csemver_json_object_boolean(package_json, "commit-and-tag-version",
+                                      "invalid", &value));
+  assert(value);
+}
+
 static void test_json_round_trip(void) {
   const char *input = "{\r\n\t\"name\": \"fixture\",\r\n"
                       "\t\"version\": \"1.2.3\",\r\n"
@@ -292,6 +309,7 @@ static void test_toml_and_yaml_surface(void) {
 int main(void) {
   test_repository_url_forms();
   test_json_package_config_strings();
+  test_json_package_config_booleans();
   test_json_round_trip();
   test_json_compact_input_uses_default_upstream_indent();
   test_json_escape_sequences_normalize_like_upstream();

@@ -150,6 +150,10 @@ static int load_package_config(CsemverConfig *config) {
     const char *json_key;
     const char *config_key;
   } PackageStringOption;
+  typedef struct {
+    const char *json_key;
+    const char *config_key;
+  } PackageBooleanOption;
   static const char *const sections[] = {"commit-and-tag-version",
                                          "standard-version"};
   static const PackageStringOption options[] = {
@@ -178,6 +182,26 @@ static int load_package_config(CsemverConfig *config) {
       {"issue-url-format", "issue-url-format"},
       {"userUrlFormat", "userUrlFormat"},
       {"user-url-format", "user-url-format"}};
+  static const PackageBooleanOption boolean_options[] = {
+      {"first-release", "first-release"},
+      {"firstRelease", "firstRelease"},
+      {"sign", "sign"},
+      {"signoff", "signoff"},
+      {"no-verify", "no-verify"},
+      {"noVerify", "noVerify"},
+      {"commit-all", "commit-all"},
+      {"commitAll", "commitAll"},
+      {"silent", "silent"},
+      {"tag-force", "tag-force"},
+      {"tagForce", "tagForce"},
+      {"dry-run", "dry-run"},
+      {"dryRun", "dryRun"},
+      {"git-tag-fallback", "git-tag-fallback"},
+      {"gitTagFallback", "gitTagFallback"},
+      {"noBumpWhenEmptyChanges", "noBumpWhenEmptyChanges"},
+      {"no-bump-when-empty-changes", "no-bump-when-empty-changes"},
+      {"preMajor", "preMajor"},
+      {"pre-major", "pre-major"}};
   char *contents = NULL;
   char error[256] = {0};
   size_t section_index, option_index;
@@ -195,6 +219,22 @@ static int load_package_config(CsemverConfig *config) {
         continue;
       if (!csemver_config_set_string(config, options[option_index].config_key,
                                      value, error, sizeof error)) {
+        errorf("%s", error);
+        free(contents);
+        return 0;
+      }
+    }
+    for (option_index = 0;
+         option_index < sizeof boolean_options / sizeof boolean_options[0];
+         ++option_index) {
+      bool value;
+      if (!csemver_json_object_boolean(contents, sections[section_index],
+                                       boolean_options[option_index].json_key,
+                                       &value))
+        continue;
+      if (!csemver_config_set_bool(config,
+                                   boolean_options[option_index].config_key,
+                                   value, error, sizeof error)) {
         errorf("%s", error);
         free(contents);
         return 0;
@@ -2381,7 +2421,7 @@ static int append_release_heading(const CsemverConfig *config,
                                   version, date);
   if (initial_release)
     return csemver_buffer_appendf(output, "## %s (%s)\n", version, date);
-  return csemver_buffer_appendf(output, "## [%s] (%s)\n\n", version, date);
+  return csemver_buffer_appendf(output, "## %s (%s)\n\n", version, date);
 }
 
 static int normalize_changelog_newlines(CsemverBuffer *output) {

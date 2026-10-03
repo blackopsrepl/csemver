@@ -674,8 +674,40 @@ git tag -a release-1.0.0 -m 'release'
 git commit --allow-empty -qm 'feat: use package config'
 pkg_config_output=$("$bin" --skip.commit --skip.tag 2>&1)
 grep -Fq 'compare/legacy-1.0.0...legacy-1.1.0' CHANGELOG.md || {
-  printf 'package.json commit-and-tag-version config should set tagPrefix:\n%s\n' \
+  printf 'package.json config should preserve upstream section precedence:\n%s\n' \
     "$pkg_config_output" >&2
+  exit 1
+}
+
+mkdir "$tmp/pkg-bool-config"
+cd "$tmp/pkg-bool-config"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-bool-config-fixture",
+  "version": "1.0.0",
+  "commit-and-tag-version": {"dryRun": true}
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed package boolean config fixture'
+git commit --allow-empty -qm 'feat: verify package boolean config'
+package_bool_output=$("$bin" 2>&1)
+test ! -e CHANGELOG.md || {
+  printf 'package.json dryRun should prevent release writes:\n%s\n' \
+    "$package_bool_output" >&2
+  exit 1
+}
+printf '%s\n' "$package_bool_output" | grep -Fq '## 1.1.0 (' || {
+  printf 'release preview without a prior tag should omit compare-link brackets:\n%s\n' \
+    "$package_bool_output" >&2
+  exit 1
+}
+grep -Fq '"version": "1.0.0"' package.json || {
+  printf 'package.json dryRun should leave the package version unchanged:\n%s\n' \
+    "$package_bool_output" >&2
   exit 1
 }
 
