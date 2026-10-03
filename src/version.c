@@ -2607,40 +2607,83 @@ static int yaml_append_block_scalar_header(
     CsemverBuffer *output, const char *content, size_t header_start,
     size_t header_end, size_t style_position, const yaml_token_t *token) {
   size_t modifiers_end = style_position + 1;
-  size_t chomp_position = SIZE_MAX;
   size_t trailing_newlines = 0;
+  size_t explicit_indent = 0;
+  size_t body_line_start;
+  size_t first_body_indent = 0;
+  size_t content_length = strlen(content);
+  size_t header_line_start;
+  size_t header_line_indent = 0;
   char desired_chomp = '\0';
   size_t index;
+  bool retain_explicit_indent = false;
   while (modifiers_end < header_end && content[modifiers_end] != ' ' &&
          content[modifiers_end] != '\t' && content[modifiers_end] != '#') {
-    if (content[modifiers_end] == '+' || content[modifiers_end] == '-')
-      chomp_position = modifiers_end;
+    if (content[modifiers_end] >= '1' && content[modifiers_end] <= '9') {
+      explicit_indent = (size_t)(content[modifiers_end] - '0');
+    }
     ++modifiers_end;
   }
   for (index = token->data.scalar.length;
        index > 0 && token->data.scalar.value[index - 1] == '\n'; --index)
     ++trailing_newlines;
-  if (trailing_newlines == 0)
-    desired_chomp = '-';
-  else if (trailing_newlines > 1)
-    desired_chomp = '+';
-  if (chomp_position != SIZE_MAX) {
-    if (!csemver_buffer_append(output, content + header_start,
-                               chomp_position - header_start) ||
-        (desired_chomp != '\0' &&
-         !csemver_buffer_append(output, &desired_chomp, 1)) ||
-        !csemver_buffer_append(output, content + chomp_position + 1,
-                               header_end - chomp_position - 1))
-      return 0;
-  } else if (!csemver_buffer_append(output, content + header_start,
-                                    modifiers_end - header_start) ||
-             (desired_chomp != '\0' &&
-              !csemver_buffer_append(output, &desired_chomp, 1)) ||
-             !csemver_buffer_append(output, content + modifiers_end,
-                                    header_end - modifiers_end)) {
-    return 0;
+  if (token->data.scalar.length != 0) {
+    if (trailing_newlines == 0)
+      desired_chomp = '-';
+    else if (trailing_newlines > 1)
+      desired_chomp = '+';
   }
+  if (explicit_indent != 0) {
+    body_line_start = header_end;
+    while (
+        body_line_start < content_length &&
+        (content[body_line_start] == '\r' || content[body_line_start] == '\n'))
+      ++body_line_start;
+    while (body_line_start < content_length) {
+      size_t line_end = yaml_line_end(content, content_length, body_line_start);
+      first_body_indent = 0;
+      while (body_line_start + first_body_indent < line_end &&
+             (content[body_line_start + first_body_indent] == ' ' ||
+              content[body_line_start + first_body_indent] == '\t'))
+        ++first_body_indent;
+      if (body_line_start + first_body_indent < line_end)
+        break;
+      body_line_start = line_end;
+      while (body_line_start < content_length &&
+             (content[body_line_start] == '\r' ||
+              content[body_line_start] == '\n'))
+        ++body_line_start;
+    }
+    header_line_start = yaml_line_start(content, style_position);
+    while (header_line_start + header_line_indent < style_position &&
+           (content[header_line_start + header_line_indent] == ' ' ||
+            content[header_line_start + header_line_indent] == '\t'))
+      ++header_line_indent;
+    retain_explicit_indent =
+        first_body_indent > header_line_indent + explicit_indent;
+  }
+  if (!csemver_buffer_append(output, content + header_start,
+                             style_position + 1 - header_start) ||
+      (retain_explicit_indent && !csemver_buffer_append(output, "2", 1)) ||
+      (desired_chomp != '\0' &&
+       !csemver_buffer_append(output, &desired_chomp, 1)) ||
+      !csemver_buffer_append(output, content + modifiers_end,
+                             header_end - modifiers_end))
+    return 0;
   return 1;
+}
+
+static size_t yaml_block_scalar_indent_indicator(const char *content,
+                                                 size_t style_position,
+                                                 size_t header_end) {
+  size_t index = style_position + 1;
+  while (index < header_end && content[index] != ' ' &&
+         content[index] != '\t' && content[index] != '#') {
+    if (content[index] >= '1' && content[index] <= '9')
+      return (size_t)(content[index] - '0');
+    ++index;
+  }
+  return 0;
 }
 
 static int yaml_append_spaces(CsemverBuffer *output, size_t count) {
@@ -2655,15 +2698,19 @@ static int yaml_append_spaces(CsemverBuffer *output, size_t count) {
   return 1;
 }
 
-static int yaml_append_folded_block_scalar(
-    CsemverBuffer *output, const char *content, size_t header_end, size_t end,
-    const yaml_token_t *token, size_t dedent, bool has_explicit_indent) {
+static int yaml_append_folded_block_scalar(CsemverBuffer *output,
+                                           const char *content,
+                                           size_t header_end, size_t end,
+                                           const yaml_token_t *token,
+                                           size_t output_indentation,
+                                           size_t explicit_indent) {
   size_t newline_end = header_end;
   size_t newline_size = 1;
   const char *newline = "\n";
   size_t body_position;
   size_t source_indentation = 0;
-  size_t output_indentation;
+  size_t header_line_start;
+  size_t header_line_indentation = 0;
   size_t trailing_newlines = 0;
   size_t index;
   bool have_content = false;
@@ -2698,9 +2745,22 @@ static int yaml_append_folded_block_scalar(
     else if (index < end)
       ++index;
   }
-  output_indentation = source_indentation;
-  if (!has_explicit_indent && output_indentation >= dedent)
-    output_indentation -= dedent;
+  header_line_start = yaml_line_start(content, header_end);
+  while (header_line_start + header_line_indentation < header_end &&
+         (content[header_line_start + header_line_indentation] == ' ' ||
+          content[header_line_start + header_line_indentation] == '\t'))
+    ++header_line_indentation;
+  if (explicit_indent != 0) {
+    if (header_line_indentation > SIZE_MAX - explicit_indent)
+      return 0;
+    if (header_line_indentation + explicit_indent <= source_indentation)
+      source_indentation = header_line_indentation + explicit_indent;
+  }
+  if (output_indentation == SIZE_MAX) {
+    if (header_line_indentation > SIZE_MAX - 2)
+      return 0;
+    output_indentation = header_line_indentation + 2;
+  }
   for (index = token->data.scalar.length;
        index > 0 && token->data.scalar.value[index - 1] == '\n'; --index)
     ++trailing_newlines;
@@ -2722,7 +2782,8 @@ static int yaml_append_folded_block_scalar(
       if (!have_content) {
         size_t count;
         for (count = 0; count < pending_blank_lines; ++count)
-          if (!csemver_buffer_append(output, newline, newline_size))
+          if (!yaml_append_spaces(output, output_indentation) ||
+              !csemver_buffer_append(output, newline, newline_size))
             return 0;
         if (!yaml_append_spaces(output, output_indentation))
           return 0;
@@ -2757,6 +2818,82 @@ static int yaml_append_folded_block_scalar(
   for (index = 0; index < trailing_newlines; ++index)
     if (!csemver_buffer_append(output, newline, newline_size))
       return 0;
+  return 1;
+}
+
+static int yaml_rewrite_folded_scalars(const char *content, char **updated,
+                                       size_t *updated_size) {
+  size_t length = strlen(content);
+  size_t copy_position = 0;
+  bool changed = false;
+  bool failed = false;
+  yaml_parser_t parser;
+  CsemverBuffer rewritten;
+  *updated = NULL;
+  *updated_size = 0;
+  csemver_buffer_init(&rewritten);
+  if (!yaml_parser_initialize(&parser))
+    return 0;
+  yaml_parser_set_input_string(&parser, (const unsigned char *)content, length);
+  for (;;) {
+    yaml_token_t token;
+    yaml_token_type_t type;
+    bool done;
+    size_t start;
+    size_t end;
+    if (!yaml_parser_scan(&parser, &token)) {
+      failed = true;
+      break;
+    }
+    type = token.type;
+    done = type == YAML_STREAM_END_TOKEN;
+    if (type == YAML_SCALAR_TOKEN &&
+        token.data.scalar.style == YAML_FOLDED_SCALAR_STYLE) {
+      size_t header_start;
+      size_t header_end;
+      if (!yaml_mark_to_byte_offset(content, token.start_mark.index, &start) ||
+          !yaml_mark_to_byte_offset(content, token.end_mark.index, &end) ||
+          start < copy_position || end < start || end > length) {
+        failed = true;
+      } else {
+        header_start = yaml_line_start(content, start);
+        header_end = yaml_line_end(content, length, start);
+        if (start < header_start || header_end < start ||
+            !csemver_buffer_append(&rewritten, content + copy_position,
+                                   start - copy_position) ||
+            !yaml_append_block_scalar_header(&rewritten, content, start,
+                                             header_end, start, &token) ||
+            !yaml_append_folded_block_scalar(&rewritten, content, header_end,
+                                             end, &token, SIZE_MAX,
+                                             yaml_block_scalar_indent_indicator(
+                                                 content, start, header_end))) {
+          failed = true;
+        } else {
+          copy_position = end;
+          changed = true;
+        }
+      }
+    }
+    yaml_token_delete(&token);
+    if (failed || done)
+      break;
+  }
+  yaml_parser_delete(&parser);
+  if (!failed && changed &&
+      !csemver_buffer_append(&rewritten, content + copy_position,
+                             length - copy_position))
+    failed = true;
+  if (failed) {
+    csemver_buffer_free(&rewritten);
+    return 0;
+  }
+  if (!changed || (rewritten.length == length &&
+                   memcmp(rewritten.data, content, length) == 0)) {
+    csemver_buffer_free(&rewritten);
+    return 1;
+  }
+  *updated = rewritten.data;
+  *updated_size = rewritten.length;
   return 1;
 }
 
@@ -2842,7 +2979,7 @@ static int yaml_rewrite_block_sequence_comments(const char *content,
               type == YAML_SCALAR_TOKEN &&
               (token.data.scalar.style == YAML_LITERAL_SCALAR_STYLE ||
                token.data.scalar.style == YAML_FOLDED_SCALAR_STYLE);
-          bool has_explicit_indent = false;
+          size_t explicit_indent = 0;
           size_t comment_position;
           CsemverBuffer comments;
           bool valid = dash_line_start >= copy_position &&
@@ -2850,16 +2987,9 @@ static int yaml_rewrite_block_sequence_comments(const char *content,
                        node_content_start <= start && node_line_end >= start;
           if (is_block_scalar) {
             node_span_end = end;
-            for (comment_position = start + 1;
-                 comment_position < node_line_end &&
-                 content[comment_position] != ' ' &&
-                 content[comment_position] != '\t' &&
-                 content[comment_position] != '#';
-                 ++comment_position)
-              if (content[comment_position] >= '1' &&
-                  content[comment_position] <= '9')
-                has_explicit_indent = true;
-            if (!has_explicit_indent) {
+            explicit_indent = yaml_block_scalar_indent_indicator(content, start,
+                                                                 node_line_end);
+            if (explicit_indent == 0) {
               size_t body_position = node_line_end;
               size_t target_indent = indent_length + 2;
               while (body_position < node_span_end) {
@@ -2971,8 +3101,8 @@ static int yaml_rewrite_block_sequence_comments(const char *content,
                    !(token.data.scalar.style == YAML_FOLDED_SCALAR_STYLE
                          ? yaml_append_folded_block_scalar(
                                &rewritten, content, node_line_end,
-                               node_span_end, &token, dedent,
-                               has_explicit_indent)
+                               node_span_end, &token, indent_length + 2,
+                               explicit_indent)
                          : yaml_append_dedented_block_scalar(
                                &rewritten, content, node_line_end,
                                node_span_end, dedent)))) {
@@ -4537,6 +4667,17 @@ int csemver_version_update_text(const char *filename, const char *type,
     if (!yaml_normalize_version_line_spacing(&buffer,
                                              strcmp(kind, "openapi") == 0))
       goto allocation_error;
+    if (!yaml_rewrite_folded_scalars(buffer.data, &rewritten, &rewritten_size))
+      goto allocation_error;
+    if (rewritten != NULL) {
+      csemver_buffer_free(&buffer);
+      csemver_buffer_init(&buffer);
+      if (!csemver_buffer_append(&buffer, rewritten, rewritten_size)) {
+        free(rewritten);
+        goto allocation_error;
+      }
+      free(rewritten);
+    }
     if (!yaml_rewrite_block_sequence_comments(buffer.data, &rewritten,
                                               &rewritten_size))
       goto allocation_error;

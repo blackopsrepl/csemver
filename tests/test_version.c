@@ -1319,6 +1319,36 @@ test_yaml_block_sequence_comment_dedents_overindented_literal(void) {
   free(updated);
 }
 
+static void test_yaml_folded_scalar_serialization_matches_upstream(void) {
+  static const struct {
+    const char *input;
+    const char *expected;
+  } cases[] = {
+      {"version: \"1.2.3\"\ntext: >\n  hello\n  world\n",
+       "version: \"1.3.0\"\ntext: >\n  hello world\n"},
+      {"version: \"1.2.3\"\ntext: >\n\n  hello\n  world\n",
+       "version: \"1.3.0\"\ntext: >\n  \n  hello world\n"},
+      {"version: \"1.2.3\"\ntext: >2\n  hello\n  world\n",
+       "version: \"1.3.0\"\ntext: >\n  hello world\n"},
+      {"version: \"1.2.3\"\ntext: >-2\n    hello\n    world\n",
+       "version: \"1.3.0\"\ntext: >2-\n    hello\n    world\n"},
+      {"version: \"1.2.3\"\ntext: >\n", "version: \"1.3.0\"\ntext: >\n\n"},
+  };
+  size_t index;
+  for (index = 0; index < sizeof cases / sizeof cases[0]; ++index) {
+    char version[128];
+    char error[256];
+    char *updated = NULL;
+    size_t updated_size = 0;
+    assert(csemver_version_update_text(
+        "config.yaml", "yaml", cases[index].input, "1.3.0", &updated,
+        &updated_size, version, sizeof version, error, sizeof error));
+    assert(updated_size == strlen(cases[index].expected));
+    assert(memcmp(updated, cases[index].expected, updated_size) == 0);
+    free(updated);
+  }
+}
+
 static void test_yaml_no_newline_matches_upstream_output(void) {
   const char *input = "version: 1.2.3";
   const char *expected = "version: 1.3.0undefined";
@@ -1611,6 +1641,7 @@ int main(void) {
   test_yaml_block_sequence_comment_dedents_block_scalar();
   test_yaml_block_sequence_comment_scalar_styles();
   test_yaml_block_sequence_comment_dedents_overindented_literal();
+  test_yaml_folded_scalar_serialization_matches_upstream();
   test_yaml_no_newline_matches_upstream_output();
   test_yaml_mixed_newlines_match_upstream();
   test_yaml_updater_only_updates_root_version();
