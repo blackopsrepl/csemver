@@ -1197,6 +1197,40 @@ grep -Fq '"version": "1.0.0"' package.json || {
   exit 1
 }
 
+mkdir "$tmp/pkg-bumpfiles-mixed"
+cd "$tmp/pkg-bumpfiles-mixed"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-bumpfiles-mixed-fixture",
+  "version": "1.0.0",
+  "commit-and-tag-version": {
+    "bumpFiles": ["VERSION.txt", {"filename": "metadata.json", "type": "json"}]
+  }
+}
+JSON
+printf '1.0.0\n' > VERSION.txt
+printf '{"version":"1.0.0"}\n' > metadata.json
+git add package.json VERSION.txt metadata.json
+git commit -qm 'chore: seed mixed package bumpFiles fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: test mixed package bumpFiles'
+"$bin" --skip.changelog --skip.commit --skip.tag > /dev/null
+test "$(cat VERSION.txt)" = '1.1.0' || {
+  printf '%s\n' 'mixed package bumpFiles should update its inferred string target' >&2
+  exit 1
+}
+grep -Fq '"version": "1.0.0"' package.json || {
+  printf '%s\n' 'mixed package bumpFiles should not update package.json unless listed' >&2
+  exit 1
+}
+grep -Fq '"version": "1.1.0"' metadata.json || {
+  printf '%s\n' 'mixed package bumpFiles should apply the typed JSON updater' >&2
+  exit 1
+}
+
 mkdir "$tmp/pkg-bumpfiles-unsupported"
 cd "$tmp/pkg-bumpfiles-unsupported"
 git init -q -b master

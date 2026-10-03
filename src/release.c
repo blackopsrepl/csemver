@@ -556,7 +556,7 @@ static int load_package_config(CsemverConfig *config) {
       char types[CSEMVER_MAX_FILES][32];
       const char *value_pointers[CSEMVER_MAX_FILES];
       size_t value_count, value_index;
-      int typed_files = csemver_json_object_typed_file_array(
+      int typed_files = csemver_json_object_mixed_file_array(
           contents, sections[section_index], bump_file_options[option_index],
           &filenames[0][0], sizeof filenames[0], &types[0][0], sizeof types[0],
           CSEMVER_MAX_FILES, &value_count);
@@ -575,6 +575,13 @@ static int load_package_config(CsemverConfig *config) {
         }
       }
       for (value_index = 0; value_index < value_count; ++value_index) {
+        if (types[value_index][0] == '\0') {
+          const char *type =
+              package_bump_file_type_from_filename(filenames[value_index]);
+          if (type == NULL)
+            type = PACKAGE_UNSUPPORTED_FILENAME;
+          snprintf(types[value_index], sizeof types[value_index], "%s", type);
+        }
         if (strcmp(types[value_index], PACKAGE_UNSUPPORTED_FILENAME) != 0 &&
             !package_bump_file_type_supported(types[value_index])) {
           errorf("unsupported package bumpFiles updater type: %s",
