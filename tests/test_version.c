@@ -366,6 +366,52 @@ static void test_package_lock_rejects_non_json_values(void) {
   assert(strcmp(error, expected) == 0);
 }
 
+static void test_json_invalid_identifier_diagnostics_match_node(void) {
+  const struct {
+    const char *input;
+    const char *expected;
+  } cases[] = {
+      {"{\"name\":NaN}",
+       "Unexpected token 'N', \"{\"name\":NaN}\" is not valid JSON"},
+      {"{\"name\":foo}",
+       "Unexpected token 'o', \"{\"name\":foo}\" is not valid JSON"},
+  };
+  char version[128];
+  char error[256];
+  size_t i;
+
+  for (i = 0; i < sizeof cases / sizeof cases[0]; ++i) {
+    assert(!csemver_version_read_text("package-lock.json", "json",
+                                      cases[i].input, version, sizeof version,
+                                      NULL, error, sizeof error));
+    assert(strcmp(error, cases[i].expected) == 0);
+  }
+}
+
+static void test_json_trailing_comma_diagnostic_matches_node(void) {
+  const char *input = "{\"name\":\"x\",}";
+  const char *expected = "Expected double-quoted property name in JSON at "
+                         "position 12 (line 1 column 13)";
+  char version[128];
+  char error[256];
+
+  assert(!csemver_version_read_text("package-lock.json", "json", input, version,
+                                    sizeof version, NULL, error, sizeof error));
+  assert(strcmp(error, expected) == 0);
+}
+
+static void test_json_leading_zero_diagnostic_matches_node(void) {
+  const char *input = "{\"name\":01}";
+  const char *expected =
+      "Unexpected number in JSON at position 9 (line 1 column 10)";
+  char version[128];
+  char error[256];
+
+  assert(!csemver_version_read_text("package-lock.json", "json", input, version,
+                                    sizeof version, NULL, error, sizeof error));
+  assert(strcmp(error, expected) == 0);
+}
+
 static void test_package_lock_updates_only_root_package(void) {
   const char *input = "{\n  \"version\": \"1.0.0\",\n"
                       "  \"packages\": {\n    \"\": {\n"
@@ -498,6 +544,9 @@ int main(void) {
   test_json_version_with_embedded_nul_is_rejected();
   test_truncated_package_lock_reports_parse_error();
   test_package_lock_rejects_non_json_values();
+  test_json_invalid_identifier_diagnostics_match_node();
+  test_json_trailing_comma_diagnostic_matches_node();
+  test_json_leading_zero_diagnostic_matches_node();
   test_package_lock_updates_only_root_package();
   test_package_lock_adds_missing_root_package_version();
   test_package_lock_adds_missing_root_version_fields();

@@ -366,10 +366,97 @@ static int json_empty_root_object(const char *content, size_t *position) {
   return 1;
 }
 
-static int json_undefined_position(const char *content, size_t *position) {
-  bool in_string = false, escaped = false;
+static void json_position_to_line_column(const char *content, size_t position,
+                                         size_t *line, size_t *column) {
   size_t i;
-  for (i = 0; content[i] != '\0'; ++i) {
+  *line = 1;
+  *column = 1;
+  for (i = 0; i < position; ++i) {
+    if (content[i] == '\r') {
+      ++*line;
+      *column = 1;
+      if (i + 1 < position && content[i + 1] == '\n')
+        ++i;
+    } else if (content[i] == '\n') {
+      ++*line;
+      *column = 1;
+    } else {
+      ++*column;
+    }
+  }
+}
+
+static int json_trailing_object_comma_position(const char *content,
+                                               size_t *position) {
+  bool in_string = false, escaped = false;
+  size_t length = strlen(content), i;
+  for (i = 0; i < length; ++i) {
+    if (in_string) {
+      if (escaped)
+        escaped = false;
+      else if (content[i] == '\\')
+        escaped = true;
+      else if (content[i] == '"')
+        in_string = false;
+      continue;
+    }
+    if (content[i] == '"') {
+      in_string = true;
+      continue;
+    }
+    if (content[i] == ',') {
+      size_t next = i + 1;
+      while (next < length && (content[next] == ' ' || content[next] == '\t' ||
+                               content[next] == '\r' || content[next] == '\n'))
+        ++next;
+      if (next < length && content[next] == '}') {
+        *position = next;
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
+static int json_leading_zero_position(const char *content, size_t *position) {
+  bool in_string = false, escaped = false;
+  size_t length = strlen(content), i;
+  for (i = 0; i + 1 < length; ++i) {
+    if (in_string) {
+      if (escaped)
+        escaped = false;
+      else if (content[i] == '\\')
+        escaped = true;
+      else if (content[i] == '"')
+        in_string = false;
+      continue;
+    }
+    if (content[i] == '"') {
+      in_string = true;
+      continue;
+    }
+    if (content[i] == '0' && isdigit((unsigned char)content[i + 1])) {
+      size_t previous = i;
+      while (previous > 0 &&
+             (content[previous - 1] == ' ' || content[previous - 1] == '\t' ||
+              content[previous - 1] == '\r' || content[previous - 1] == '\n'))
+        --previous;
+      if (previous == 0 || content[previous - 1] == ':' ||
+          content[previous - 1] == ',' || content[previous - 1] == '[' ||
+          content[previous - 1] == '-') {
+        *position = i + 1;
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
+static int json_invalid_token_position(const char *content, size_t *position) {
+  bool in_string = false, escaped = false;
+  size_t i, length = strlen(content);
+  for (i = 0; i < length; ++i) {
+    unsigned char character = (unsigned char)content[i];
     if (in_string) {
       if (escaped) {
         escaped = false;
@@ -378,13 +465,45 @@ static int json_undefined_position(const char *content, size_t *position) {
       } else if (content[i] == '"') {
         in_string = false;
       }
-    } else if (content[i] == '"') {
-      in_string = true;
-    } else if (content[i] == 'u' &&
-               strncmp(content + i, "undefined", sizeof "undefined" - 1) == 0) {
-      *position = i;
-      return 1;
+      continue;
     }
+    if (content[i] == '"') {
+      in_string = true;
+      continue;
+    }
+    if (content[i] == '-' || isdigit(character)) {
+      Scanner number = {content, i, length};
+      if (skip_json_number(&number) && number.position > i)
+        i = number.position - 1;
+      continue;
+    }
+    if (!((character >= 'a' && character <= 'z') ||
+          (character >= 'A' && character <= 'Z')))
+      continue;
+    if (content[i] == 't' || content[i] == 'f' || content[i] == 'n') {
+      const char *literal = content[i] == 't'   ? "true"
+                            : content[i] == 'f' ? "false"
+                                                : "null";
+      size_t j, literal_size = strlen(literal);
+      for (j = 0; j < literal_size; ++j) {
+        size_t current = i + j;
+        if (current >= length || content[current] != literal[j]) {
+          if (current < length) {
+            *position = current;
+            return 1;
+          }
+          return 0;
+        }
+      }
+      i += literal_size - 1;
+      if (content[i + 1] != '\0' && !json_value_terminator(content[i + 1])) {
+        *position = i + 1;
+        return 1;
+      }
+      continue;
+    }
+    *position = i;
+    return 1;
   }
   return 0;
 }
@@ -406,26 +525,16 @@ static void json_unexpected_token_error(const char *content,
 static void json_parse_error(const char *content, char *error,
                              size_t error_size) {
   Scanner scanner = {content, 0, strlen(content)};
-  size_t position, line = 1, column = 1, i;
+  size_t position, line, column, invalid_position = 0, trailing_position = 0;
+  size_t leading_zero_position = 0;
+  bool has_invalid, has_trailing, has_leading_zero;
   spaces(&scanner);
   if (scanner.position >= scanner.length) {
     set_error(error, error_size, "Unexpected end of JSON input");
     return;
   }
   if (json_empty_root_object(content, &position)) {
-    for (i = 0; i < position; ++i) {
-      if (content[i] == '\r') {
-        ++line;
-        column = 1;
-        if (i + 1 < position && content[i + 1] == '\n')
-          ++i;
-      } else if (content[i] == '\n') {
-        ++line;
-        column = 1;
-      } else {
-        ++column;
-      }
-    }
+    json_position_to_line_column(content, position, &line, &column);
     if (error != NULL && error_size > 0)
       snprintf(error, error_size,
                "Expected property name or '}' in JSON at position %zu (line "
@@ -433,8 +542,34 @@ static void json_parse_error(const char *content, char *error,
                position, line, column);
     return;
   }
-  if (json_undefined_position(content, &position)) {
-    json_unexpected_token_error(content, position, error, error_size);
+  has_invalid = json_invalid_token_position(content, &invalid_position);
+  has_trailing =
+      json_trailing_object_comma_position(content, &trailing_position);
+  has_leading_zero =
+      json_leading_zero_position(content, &leading_zero_position);
+  if (has_leading_zero &&
+      (!has_invalid || leading_zero_position < invalid_position) &&
+      (!has_trailing || leading_zero_position < trailing_position)) {
+    json_position_to_line_column(content, leading_zero_position, &line,
+                                 &column);
+    if (error != NULL && error_size > 0)
+      snprintf(error, error_size,
+               "Unexpected number in JSON at position %zu (line %zu column "
+               "%zu)",
+               leading_zero_position, line, column);
+    return;
+  }
+  if (has_trailing && (!has_invalid || trailing_position < invalid_position)) {
+    json_position_to_line_column(content, trailing_position, &line, &column);
+    if (error != NULL && error_size > 0)
+      snprintf(error, error_size,
+               "Expected double-quoted property name in JSON at position %zu "
+               "(line %zu column %zu)",
+               trailing_position, line, column);
+    return;
+  }
+  if (has_invalid) {
+    json_unexpected_token_error(content, invalid_position, error, error_size);
     return;
   }
   set_error(error, error_size, "JSON version file has no root version string");
