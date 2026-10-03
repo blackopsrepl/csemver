@@ -1152,4 +1152,38 @@ for hook in prerelease prebump postbump prechangelog postchangelog precommit \
 done
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/normal-lifecycle-scripts"
+cd "$tmp/normal-lifecycle-scripts"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "normal-lifecycle-scripts-fixture",
+  "version": "1.0.0",
+  "commit-and-tag-version": {
+    "scripts": {
+      "prerelease": "true",
+      "prebump": "true",
+      "postbump": "true",
+      "prechangelog": "true",
+      "postchangelog": "true",
+      "precommit": "true",
+      "postcommit": "true",
+      "pretag": "true",
+      "posttag": "true"
+    }
+  }
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed normal lifecycle fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: exercise normal lifecycle scripts'
+normal_lifecycle_output=$("$bin")
+actual_normal_stages=$(printf '%s\n' "$normal_lifecycle_output" |
+  command grep -E 'Running lifecycle script|✔ committing|✔ tagging release|Run `git push')
+test "$actual_normal_stages" = "$expected_dry_run_stages"
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'

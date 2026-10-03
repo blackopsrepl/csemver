@@ -2285,6 +2285,15 @@ static int write_changelog(const CsemverConfig *config, const char *version,
   return ok;
 }
 
+static void
+print_commit_summary(const CsemverConfig *config,
+                     char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX],
+                     size_t path_count);
+static int
+print_publish_hint(const CsemverConfig *config, bool is_private,
+                   char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX],
+                   size_t path_count);
+
 static int commit_release(CsemverConfig *config, const char *version,
                           char *message, size_t message_size,
                           char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX],
@@ -2318,6 +2327,7 @@ static int commit_release(CsemverConfig *config, const char *version,
     }
   }
   free(hook_message);
+  print_commit_summary(config, paths, path_count);
   if (config->commit_all) {
     args[index++] = "add";
     args[index++] = "-A";
@@ -2357,7 +2367,9 @@ static int commit_release(CsemverConfig *config, const char *version,
 }
 
 static int tag_release(const CsemverConfig *config, const char *tag,
-                       const char *message) {
+                       const char *message, bool is_private,
+                       char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX],
+                       size_t path_count) {
   const char *args[8];
   size_t index = 0;
   int status = 0;
@@ -2365,6 +2377,8 @@ static int tag_release(const CsemverConfig *config, const char *tag,
     return 1;
   if (!run_lifecycle(config, "pretag"))
     return 0;
+  if (!config->silent)
+    printf("✔ tagging release %s\n", tag);
   args[index++] = "tag";
   if (config->tag_force)
     args[index++] = "--force";
@@ -2380,6 +2394,8 @@ static int tag_release(const CsemverConfig *config, const char *tag,
     errorf("git tag failed for %s", tag);
     return 0;
   }
+  if (!print_publish_hint(config, is_private, paths, path_count))
+    return 0;
   return run_lifecycle(config, "posttag");
 }
 
@@ -2637,7 +2653,8 @@ int csemver_main(int argc, char **argv) {
   if (!config.dry_run) {
     if (!commit_release(&config, next, message, sizeof message, paths,
                         path_count) ||
-        !tag_release(&config, new_tag, message)) {
+        !tag_release(&config, new_tag, message, is_private, paths,
+                     path_count)) {
       free(commits);
       return 1;
     }
@@ -2667,15 +2684,8 @@ int csemver_main(int argc, char **argv) {
       }
     }
   }
-  if (!config.dry_run) {
-    print_commit_summary(&config, paths, path_count);
-    if (!config.silent && !config.skip_tag)
-      printf("✔ tagging release %s\n", new_tag);
-    (void)print_publish_hint(&config, is_private, paths, path_count);
-  }
   free(commits);
   (void)tag_count;
-  (void)is_private;
   return 0;
 }
 
