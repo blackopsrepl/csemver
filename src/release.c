@@ -399,13 +399,6 @@ static int load_package_config(CsemverConfig *config) {
               memcpy(config->package_files[file_index].type,
                      file_types[value_index], sizeof file_types[value_index]);
           }
-          for (file_index = 0; file_index < config->bump_file_count;
-               ++file_index) {
-            if (strcmp(config->bump_files[file_index].filename,
-                       values[value_index]) == 0)
-              memcpy(config->bump_files[file_index].type,
-                     file_types[value_index], sizeof file_types[value_index]);
-          }
         }
       }
     }

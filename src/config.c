@@ -710,13 +710,6 @@ int csemver_config_set_array(CsemverConfig *config, const char *key,
                     values[index], NULL, error, error_size))
         return 0;
     }
-    if (!config->bump_files_explicit) {
-      for (index = 0; index < count; ++index) {
-        if (!add_file_if_missing(config->bump_files, &config->bump_file_count,
-                                 values[index], NULL, error, error_size))
-          return 0;
-      }
-    }
     return 1;
   }
   if (strcmp(key, "bumpFiles") == 0 || strcmp(key, "bump-files") == 0) {

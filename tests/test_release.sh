@@ -980,23 +980,39 @@ cat > package.json <<'JSON'
   "version": "1.0.0",
   "repository": {"type": "git", "url": "https://github.com/example/pkg-package-files-object.git"},
   "commit-and-tag-version": {
-    "packageFiles": [{"filename": "manifest.json", "type": "json"}]
+    "packageFiles": [{"filename": "manifest.data", "type": "json"}]
   }
 }
 JSON
-cat > manifest.json <<'JSON'
+cat > manifest.data <<'JSON'
 {
     "name": "manifest",
     "version": "2.3.4"
 }
 JSON
-git add package.json manifest.json
+git add package.json manifest.data
 git commit -qm 'chore: seed packageFiles object fixture'
 git tag -a v2.3.4 -m 'release 2.3.4'
 git commit --allow-empty -qm 'feat: update object package file'
 "$bin" --skip.commit --skip.tag >/dev/null
 grep -Fq '"version": "2.4.0"' package.json
-grep -Fq '"version": "2.4.0"' manifest.json
+grep -Fq '"version": "2.3.4"' manifest.data
+grep -Fq 'compare/v2.3.4...v2.4.0' CHANGELOG.md
+
+mkdir "$tmp/pkg-package-files-cli"
+cd "$tmp/pkg-package-files-cli"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+printf '%s\n' '{"name":"pkg-package-files-cli-fixture","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/pkg-package-files-cli.git"}}' > package.json
+printf '%s\n' '2.3.4' > VERSION.txt
+git add package.json VERSION.txt
+git commit -qm 'chore: seed packageFiles CLI fixture'
+git tag -a v2.3.4 -m 'release 2.3.4'
+git commit --allow-empty -qm 'feat: update command line package file'
+"$bin" --skip.commit --skip.tag --packageFiles VERSION.txt >/dev/null
+grep -Fq '"version": "2.4.0"' package.json
+test "$(cat VERSION.txt)" = '2.3.4'
 grep -Fq 'compare/v2.3.4...v2.4.0' CHANGELOG.md
 
 printf '%s\n' 'release workflow tests passed'
