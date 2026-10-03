@@ -53,6 +53,7 @@ typedef struct {
 } CommitSortKey;
 
 static char *trim(char *text);
+static int uses_plain_text_updater(const CsemverFile *file);
 static int render_changelog(const CsemverConfig *config, const char *version,
                             const char *previous_tag, const char *new_tag,
                             const Commit *commits, size_t commit_count,
@@ -2623,6 +2624,83 @@ static int ignore_path_pattern_matches(const char *pattern,
 
 static int ignore_pattern_matches(const char *pattern, const char *filename,
                                   int rooted) {
+  const char *open = NULL;
+  for (const char *cursor = pattern; *cursor != '\0'; ++cursor) {
+    if (*cursor == '\\' && cursor[1] != '\0') {
+      ++cursor;
+    } else if (*cursor == '{') {
+      open = cursor;
+      break;
+    }
+  }
+  if (open != NULL) {
+    const char *close = NULL;
+    size_t depth = 1;
+    int has_alternatives = 0;
+    for (const char *cursor = open + 1; *cursor != '\0'; ++cursor) {
+      if (*cursor == '\\' && cursor[1] != '\0') {
+        ++cursor;
+      } else if (*cursor == '{') {
+        ++depth;
+      } else if (*cursor == '}') {
+        if (--depth == 0) {
+          close = cursor;
+          break;
+        }
+      } else if (*cursor == ',' && depth == 1) {
+        has_alternatives = 1;
+      }
+    }
+    if (close != NULL && has_alternatives) {
+      size_t prefix_length = (size_t)(open - pattern);
+      size_t suffix_length = strlen(close + 1);
+      const char *alternative = open + 1;
+      depth = 1;
+      for (const char *cursor = alternative;; ++cursor) {
+        int delimiter = cursor == close;
+        if (!delimiter) {
+          if (*cursor == '\\' && cursor[1] != '\0') {
+            ++cursor;
+          } else if (*cursor == '{') {
+            ++depth;
+          } else if (*cursor == '}') {
+            --depth;
+          } else if (*cursor == ',' && depth == 1) {
+            delimiter = 1;
+          }
+        }
+        if (delimiter) {
+          size_t alternative_length = (size_t)(cursor - alternative);
+          size_t prefix_alternative_length;
+          size_t expanded_length;
+          char *expanded;
+          if (prefix_length > SIZE_MAX - alternative_length)
+            return 0;
+          prefix_alternative_length = prefix_length + alternative_length;
+          if (prefix_alternative_length == SIZE_MAX ||
+              suffix_length > SIZE_MAX - prefix_alternative_length - 1)
+            return 0;
+          expanded_length = prefix_alternative_length + suffix_length;
+          expanded = malloc(expanded_length + 1);
+          if (expanded == NULL)
+            return 0;
+          memcpy(expanded, pattern, prefix_length);
+          memcpy(expanded + prefix_length, alternative, alternative_length);
+          memcpy(expanded + prefix_alternative_length, close + 1,
+                 suffix_length);
+          expanded[expanded_length] = '\0';
+          int matches = ignore_pattern_matches(expanded, filename, rooted);
+          free(expanded);
+          if (matches)
+            return 1;
+          alternative = cursor + 1;
+        }
+        if (cursor == close)
+          break;
+      }
+      return 0;
+    }
+  }
   if (rooted)
     return ignore_path_pattern_matches(pattern, filename);
   for (;;) {
@@ -2768,6 +2846,13 @@ static int update_files(const CsemverConfig *config, const char *version,
       free(content);
       free(updated);
       continue;
+    }
+    if (!config->silent) {
+      const char *display_old = uses_plain_text_updater(&config->bump_files[i])
+                                    ? content
+                                    : old_version;
+      printf("✔ bumping version in %s from %s to %s\n",
+             config->bump_files[i].filename, display_old, version);
     }
     if (!dry_run && !csemver_write_file(config->bump_files[i].filename, updated,
                                         updated_size)) {
@@ -3175,30 +3260,8 @@ int csemver_main(int argc, char **argv) {
     errorf("release version or message is too long");
     return 1;
   }
-  if (!config.silent) {
-    if (config.first_release && !config.skip_bump)
-      puts("✖ skip version bump on first release");
-    else if (!config.skip_bump) {
-      for (size_t i = 0; i < config.bump_file_count; ++i) {
-        char *contents = NULL, old[SEMVER_TEXT_MAX], error[256];
-        if (file_is_gitignored(config.bump_files[i].filename))
-          continue;
-        if (bump_file_kind(config.bump_files[i].filename) != BUMP_FILE_REGULAR)
-          continue;
-        if (!csemver_read_file(config.bump_files[i].filename, &contents, NULL))
-          continue;
-        if (csemver_version_read_text(config.bump_files[i].filename,
-                                      config.bump_files[i].type, contents, old,
-                                      sizeof old, NULL, error, sizeof error)) {
-          const char *display_old =
-              uses_plain_text_updater(&config.bump_files[i]) ? contents : old;
-          printf("✔ bumping version in %s from %s to %s\n",
-                 config.bump_files[i].filename, display_old, next);
-        }
-        free(contents);
-      }
-    }
-  }
+  if (!config.silent && config.first_release && !config.skip_bump)
+    puts("✖ skip version bump on first release");
   if (!config.dry_run && !update_files(&config, next, release_as_null, paths,
                                        &path_count, false)) {
     free(commits);

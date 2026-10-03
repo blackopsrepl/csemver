@@ -1576,6 +1576,62 @@ test "$(git cat-file -t refs/tags/v1.1.0)" = tag
 test ! -e package.json
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/brace-ignore-bump-files"
+cd "$tmp/brace-ignore-bump-files"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email test@example.invalid
+git config commit.gpgSign false
+printf '*.{json,yml}\n' > .gitignore
+printf '{"name":"brace-ignore-bump-files","version":"1.0.0"}\n' > package.json
+printf '{"name":"brace-ignore-bump-files","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"brace-ignore-bump-files","version":"1.0.0"}}}\n' > package-lock.json
+git add .gitignore package.json package-lock.json
+git commit -qm 'chore: initialize brace ignore fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise brace ignore matching'
+cp package.json "$tmp/brace-ignore-package.expected"
+cp package-lock.json "$tmp/brace-ignore-lock.expected"
+brace_ignore_head=$(git rev-parse HEAD)
+brace_ignore_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
+expected_brace_ignore_output=$(printf '%s\n' \
+  "Not updating file 'package.json', as it is ignored in Git" \
+  "Not updating file 'bower.json', as it is ignored in Git" \
+  "Not updating file 'manifest.json', as it is ignored in Git" \
+  "Not updating file 'package-lock.json', as it is ignored in Git" \
+  "Not updating file 'npm-shrinkwrap.json', as it is ignored in Git")
+test "$brace_ignore_output" = "$expected_brace_ignore_output"
+cmp "$tmp/brace-ignore-package.expected" package.json
+cmp "$tmp/brace-ignore-lock.expected" package-lock.json
+test "$(git rev-parse HEAD)" = "$brace_ignore_head"
+test "$(git tag --list)" = v1.0.0
+test -z "$(git status --porcelain)"
+test ! -e CHANGELOG.md
+
+mkdir "$tmp/brace-ignore-order"
+cd "$tmp/brace-ignore-order"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email test@example.invalid
+git config commit.gpgSign false
+printf '{package,manifest,bower}.json\n' > .gitignore
+printf '{"name":"brace-ignore-order","version":"1.0.0"}\n' > package.json
+printf '{"name":"brace-ignore-order","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"brace-ignore-order","version":"1.0.0"}}}\n' > package-lock.json
+git add .gitignore package.json package-lock.json
+git commit -qm 'chore: initialize brace ignore order fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise bump output ordering'
+cp package.json "$tmp/brace-order-package.expected"
+brace_order_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
+expected_brace_order_output=$(printf '%s\n' \
+  "Not updating file 'package.json', as it is ignored in Git" \
+  "Not updating file 'bower.json', as it is ignored in Git" \
+  "Not updating file 'manifest.json', as it is ignored in Git" \
+  '✔ bumping version in package-lock.json from 1.0.0 to 1.0.1')
+test "$brace_order_output" = "$expected_brace_order_output"
+cmp "$tmp/brace-order-package.expected" package.json
+grep -q '"version": "1.0.1"' package-lock.json
+test "$(git status --porcelain)" = ' M package-lock.json'
+
 mkdir "$tmp/ignored-bump-files"
 cd "$tmp/ignored-bump-files"
 git init -q -b master
