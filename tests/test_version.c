@@ -789,6 +789,43 @@ static void test_yaml_multiline_nested_flow_comment_after_entry(void) {
   free(updated);
 }
 
+static void test_yaml_multiline_nested_flow_sequence_comment(void) {
+  const char *input = "{version: 1.2.3, other: [a, # item\nb]}\n";
+  const char *expected =
+      "{\n  version: 1.3.0,\n  other:\n    [\n      a, # item\n"
+      "      b\n    ]\n}\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void
+test_yaml_multiline_nested_flow_sequence_consecutive_comments(void) {
+  const char *input = "{version: 1.2.3, other: [a, # first\n# second\nb]}\n";
+  const char *expected =
+      "{\n  version: 1.3.0,\n  other:\n    [\n      a, # first\n"
+      "      # second\n      b\n    ]\n}\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
 static void test_yaml_no_newline_matches_upstream_output(void) {
   const char *input = "version: 1.2.3";
   const char *expected = "version: 1.3.0undefined";
@@ -1058,6 +1095,8 @@ int main(void) {
   test_yaml_multiline_flow_consecutive_comments_with_blank_line();
   test_yaml_multiline_nested_flow_comment_matches_upstream();
   test_yaml_multiline_nested_flow_comment_after_entry();
+  test_yaml_multiline_nested_flow_sequence_comment();
+  test_yaml_multiline_nested_flow_sequence_consecutive_comments();
   test_yaml_no_newline_matches_upstream_output();
   test_yaml_mixed_newlines_match_upstream();
   test_yaml_updater_only_updates_root_version();
