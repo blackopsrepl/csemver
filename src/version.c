@@ -2129,6 +2129,72 @@ static int yaml_has_multiple_documents(const char *content) {
   return status;
 }
 
+static int yaml_normalize_version_mapping_key(CsemverBuffer *buffer,
+                                              bool openapi) {
+  Range range;
+  yaml_scalar_style_t style;
+  size_t line_start;
+  size_t key_start;
+  size_t key_end;
+  size_t value_start;
+  size_t colon = SIZE_MAX;
+  size_t position;
+  CsemverBuffer normalized;
+  if (!yaml_version_range(buffer->data, openapi, &range, NULL, 0, NULL,
+                          &style) ||
+      range.start > buffer->length)
+    return 1;
+  value_start = range.start;
+  if (style == YAML_SINGLE_QUOTED_SCALAR_STYLE ||
+      style == YAML_DOUBLE_QUOTED_SCALAR_STYLE) {
+    if (value_start == 0 || (buffer->data[value_start - 1] != '\'' &&
+                             buffer->data[value_start - 1] != '"'))
+      return 1;
+    --value_start;
+  } else if (style != YAML_PLAIN_SCALAR_STYLE) {
+    return 1;
+  }
+  line_start = value_start;
+  while (line_start > 0 && buffer->data[line_start - 1] != '\n' &&
+         buffer->data[line_start - 1] != '\r')
+    --line_start;
+  for (position = line_start; position < value_start; ++position) {
+    if (buffer->data[position] == ':')
+      colon = position;
+  }
+  if (colon == SIZE_MAX)
+    return 1;
+  for (position = colon + 1; position < value_start; ++position) {
+    if (buffer->data[position] != ' ' && buffer->data[position] != '\t')
+      return 1;
+  }
+  key_start = line_start;
+  while (key_start < colon &&
+         (buffer->data[key_start] == ' ' || buffer->data[key_start] == '\t'))
+    ++key_start;
+  key_end = colon;
+  while (key_end > key_start && (buffer->data[key_end - 1] == ' ' ||
+                                 buffer->data[key_end - 1] == '\t'))
+    --key_end;
+  if (key_end - key_start != sizeof "version" - 1 ||
+      memcmp(buffer->data + key_start, "version", sizeof "version" - 1) != 0 ||
+      (colon == key_end && value_start == colon + 2 &&
+       buffer->data[colon + 1] == ' '))
+    return 1;
+  csemver_buffer_init(&normalized);
+  if (!csemver_buffer_append(&normalized, buffer->data, key_start) ||
+      !csemver_buffer_append(&normalized,
+                             "version: ", sizeof "version: " - 1) ||
+      !csemver_buffer_append(&normalized, buffer->data + value_start,
+                             buffer->length - value_start)) {
+    csemver_buffer_free(&normalized);
+    return 0;
+  }
+  csemver_buffer_free(buffer);
+  *buffer = normalized;
+  return 1;
+}
+
 static int yaml_normalize_version_line_spacing(CsemverBuffer *buffer,
                                                bool openapi) {
   size_t scalar_end;
@@ -2136,6 +2202,8 @@ static int yaml_normalize_version_line_spacing(CsemverBuffer *buffer,
   yaml_scalar_style_t style;
   bool before_comment;
   CsemverBuffer normalized;
+  if (!yaml_normalize_version_mapping_key(buffer, openapi))
+    return 0;
   if (!yaml_version_range(buffer->data, openapi, NULL, NULL, 0, &scalar_end,
                           &style) ||
       scalar_end > buffer->length ||

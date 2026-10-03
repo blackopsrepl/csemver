@@ -647,6 +647,8 @@ static void test_yaml_normalizes_trailing_spaces_around_version(void) {
   } cases[] = {
       {"version: \"1.2.3\"   \n", "version: \"1.3.0\"\n"},
       {"version: 1.2.3   # note\n", "version: 1.3.0 # note\n"},
+      {"version :   1.2.3   # tail\n", "version: 1.3.0 # tail\n"},
+      {"version :  \"1.2.3\"  # note\n", "version: \"1.3.0\" # note\n"},
   };
   char version[128];
   char error[256];
@@ -662,6 +664,22 @@ static void test_yaml_normalizes_trailing_spaces_around_version(void) {
     assert(memcmp(updated, cases[index].expected, updated_size) == 0);
     free(updated);
   }
+}
+
+static void test_openapi_normalizes_version_mapping_spacing(void) {
+  const char *input = "openapi: 3.1.0\ninfo:\n  version :  1.2.3   # note\n";
+  const char *expected = "openapi: 3.1.0\ninfo:\n  version: 1.3.0 # note\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("openapi.yaml", "openapi", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
 }
 
 static void test_yaml_updater_only_updates_root_version(void) {
@@ -1475,6 +1493,7 @@ int main(void) {
   test_yaml_separates_trailing_root_comments();
   test_yaml_removes_trailing_spaces_after_plain_version();
   test_yaml_normalizes_trailing_spaces_around_version();
+  test_openapi_normalizes_version_mapping_spacing();
   test_openapi_uses_info_version_not_nested_schema_version();
   test_openapi_flow_maps_match_upstream_spacing();
   test_openapi_multiline_flow_comment_matches_upstream();
