@@ -157,6 +157,38 @@ static int package_bump_file_type_supported(const char *type) {
   return 0;
 }
 
+static int package_path_ends_with(const char *path, const char *suffix) {
+  size_t path_length = strlen(path);
+  size_t suffix_length = strlen(suffix);
+  return path_length >= suffix_length &&
+         strcmp(path + path_length - suffix_length, suffix) == 0;
+}
+
+static const char *package_bump_file_type_from_filename(const char *filename) {
+  static const char *const json_filenames[] = {
+      "package.json", "bower.json", "manifest.json", "package-lock.json",
+      "npm-shrinkwrap.json"};
+  const char *base = strrchr(filename, '/');
+  size_t index;
+  base = base == NULL ? filename : base + 1;
+  for (index = 0; index < sizeof json_filenames / sizeof json_filenames[0];
+       ++index) {
+    if (strcmp(base, json_filenames[index]) == 0)
+      return "json";
+  }
+  if (strcmp(filename, "VERSION.txt") == 0 ||
+      strcmp(filename, "version.txt") == 0)
+    return "plain-text";
+  if (strstr(filename, "openapi.yaml") != NULL)
+    return "openapi";
+  if (strstr(filename, "pyproject.toml") != NULL)
+    return "python";
+  if (package_path_ends_with(filename, ".yaml") ||
+      package_path_ends_with(filename, ".yml"))
+    return "yaml";
+  return NULL;
+}
+
 static int load_package_config(CsemverConfig *config) {
   typedef struct {
     const char *json_key;
@@ -294,12 +326,28 @@ static int load_package_config(CsemverConfig *config) {
       char types[CSEMVER_MAX_FILES][32];
       const char *value_pointers[CSEMVER_MAX_FILES];
       size_t value_count, value_index;
-      if (!csemver_json_object_typed_file_array(
-              contents, sections[section_index],
-              bump_file_options[option_index], &filenames[0][0],
-              sizeof filenames[0], &types[0][0], sizeof types[0],
-              CSEMVER_MAX_FILES, &value_count))
-        continue;
+      int typed_files = csemver_json_object_typed_file_array(
+          contents, sections[section_index], bump_file_options[option_index],
+          &filenames[0][0], sizeof filenames[0], &types[0][0], sizeof types[0],
+          CSEMVER_MAX_FILES, &value_count);
+      if (!typed_files) {
+        if (!csemver_json_object_string_array(
+                contents, sections[section_index],
+                bump_file_options[option_index], &filenames[0][0],
+                sizeof filenames[0], CSEMVER_MAX_FILES, &value_count))
+          continue;
+        for (value_index = 0; value_index < value_count; ++value_index) {
+          const char *type =
+              package_bump_file_type_from_filename(filenames[value_index]);
+          if (type == NULL) {
+            errorf("unsupported package bumpFiles filename: %s",
+                   filenames[value_index]);
+            free(contents);
+            return 0;
+          }
+          snprintf(types[value_index], sizeof types[value_index], "%s", type);
+        }
+      }
       for (value_index = 0; value_index < value_count; ++value_index) {
         if (!package_bump_file_type_supported(types[value_index])) {
           errorf("unsupported package bumpFiles updater type: %s",

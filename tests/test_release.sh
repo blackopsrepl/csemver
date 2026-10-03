@@ -866,4 +866,34 @@ grep -Fq '"version": "1.0.0"' package.json || {
   exit 1
 }
 
+mkdir "$tmp/pkg-bumpfiles-strings"
+cd "$tmp/pkg-bumpfiles-strings"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-bumpfiles-strings-fixture",
+  "version": "1.0.0",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-strings.git"},
+  "commit-and-tag-version": {"bumpFiles": ["version.txt"]}
+}
+JSON
+printf '1.0.0\n' > version.txt
+git add package.json version.txt
+git commit -qm 'chore: seed package bumpFiles string fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+printf 'new feature\n' > feature.txt
+git add feature.txt
+git commit -qm 'feat: add configured string version file'
+"$bin" --skip.commit --skip.tag > /dev/null
+test "$(cat version.txt)" = '1.1.0' || {
+  printf '%s\n' 'package.json bumpFiles string should update its recognized plain-text file' >&2
+  exit 1
+}
+grep -Fq '"version": "1.0.0"' package.json || {
+  printf '%s\n' 'package.json bumpFiles string should not rewrite the package file' >&2
+  exit 1
+}
+
 printf '%s\n' 'release workflow tests passed'
