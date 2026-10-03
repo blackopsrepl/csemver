@@ -2993,7 +2993,7 @@ int csemver_main(int argc, char **argv) {
     return 1;
   }
   if (!config.silent) {
-    if (config.first_release)
+    if (config.first_release && !config.skip_bump)
       puts("✖ skip version bump on first release");
     else if (!config.skip_bump) {
       for (size_t i = 0; i < config.bump_file_count; ++i) {

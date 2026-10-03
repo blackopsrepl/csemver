@@ -182,6 +182,28 @@ printf '%s\n' "$first_release_output" | grep -q 'committing CHANGELOG.md'
 grep -q '"version": "0.5.0"' package.json
 test "$(git cat-file -t refs/tags/v0.5.0)" = tag
 
+mkdir "$tmp/first-release-skip-bump"
+cd "$tmp/first-release-skip-bump"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "first-release-skip-bump",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize first release skip-bump fixture'
+first_release_skip_bump_head=$(git rev-parse HEAD)
+if first_release_skip_bump_output=$("$bin" --first-release --skip.bump --skip.changelog --skip.commit --skip.tag 2>&1); then
+  first_release_skip_bump_status=0
+else
+  first_release_skip_bump_status=$?
+fi
+test "$first_release_skip_bump_status" -eq 0
+test -z "$first_release_skip_bump_output"
+test "$(git rev-parse HEAD)" = "$first_release_skip_bump_head"
+grep -q '"version": "1.0.0"' package.json
+test -z "$(git tag --list)"
+test -z "$(git status --porcelain)"
+
 mkdir "$tmp/breaking-changes"
 cd "$tmp/breaking-changes"
 git init -q -b master
