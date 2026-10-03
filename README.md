@@ -16,7 +16,10 @@ Requirements: a C17 compiler, GNU Make, and Git. The TOML parser is compiled dir
 make
 make test
 ./build/csemver --version
+./build/commit-and-tag-version --version
 ```
+
+`make` emits `build/commit-and-tag-version` as a symlink to the same native C binary, so existing scripts can invoke csemver under the upstream command name without a Node.js wrapper.
 
 `make test` exercises the SemVer and TOML code, version-file updates, CLI parsing, and release operations in isolated Git repositories. Set `TMPDIR` to a writable scratch directory if `/tmp` is unavailable.
 
