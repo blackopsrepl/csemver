@@ -2368,10 +2368,32 @@ static int resolve_unique_prerelease(const CsemverConfig *config,
   return semver_format(&proposed, version_text, version_size);
 }
 
+static int parse_release_as_version(const char *text, Semver *version) {
+  char normalized[SEMVER_TEXT_MAX];
+  const char *start = text;
+  const char *end;
+  size_t length;
+  if (text == NULL)
+    return 0;
+  while (isspace((unsigned char)*start))
+    ++start;
+  end = start + strlen(start);
+  while (end > start && isspace((unsigned char)end[-1]))
+    --end;
+  if (start < end && *start == 'v')
+    ++start;
+  length = (size_t)(end - start);
+  if (length == 0 || length >= sizeof normalized)
+    return 0;
+  memcpy(normalized, start, length);
+  normalized[length] = '\0';
+  return semver_parse(normalized, version);
+}
+
 static int validate_release_as_prerelease(const CsemverConfig *config) {
   Semver release_version;
   if (!config->has_prerelease || config->release_as[0] == '\0' ||
-      !semver_parse(config->release_as, &release_version))
+      !parse_release_as_version(config->release_as, &release_version))
     return 1;
   if (release_version.has_prerelease) {
     const char *last_separator = strrchr(release_version.prerelease, '.');
@@ -2436,7 +2458,7 @@ static int generate_version(const CsemverConfig *config, const char *current,
     return semver_format(&parsed, next, next_size);
   if (config->release_as[0] != '\0') {
     Semver release_version;
-    if (semver_parse(config->release_as, &release_version)) {
+    if (parse_release_as_version(config->release_as, &release_version)) {
       if (config->has_prerelease && !release_version.has_prerelease) {
         if (snprintf(release_version.prerelease,
                      sizeof release_version.prerelease, "%s.0",

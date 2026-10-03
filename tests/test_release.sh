@@ -299,6 +299,22 @@ grep -q '"version": "1.4.3-xyz.3"' package.json
 test "$(git tag --list v1.4.3-xyz.3)" = v1.4.3-xyz.3
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/release-as-leading-v"
+cd "$tmp/release-as-leading-v"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "release-as-leading-v",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize release-as leading-v fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git commit --allow-empty -qm 'fix: exercise v-prefixed release-as'
+"$bin" --release-as v2.0.0 > /dev/null
+grep -q '"version": "2.0.0"' package.json
+test "$(git tag --list v2.0.0)" = v2.0.0
+test -z "$(git status --porcelain)"
+
 mkdir "$tmp/release-as-prerelease"
 cd "$tmp/release-as-prerelease"
 git init -q -b master
