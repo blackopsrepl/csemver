@@ -1039,6 +1039,44 @@ test_yaml_and_openapi_multiple_documents_match_upstream_error(void) {
   }
 }
 
+static void test_yaml_normalizes_explicit_version_mapping_key(void) {
+  const struct {
+    const char *input;
+    const char *expected;
+  } cases[] = {
+      {"? version\n: 1.2.3\n", "version: 1.3.0\n"},
+      {"? \"version\"\n: 1.2.3\n", "\"version\": 1.3.0\n"},
+      {"? 'version'\n: 1.2.3\n", "'version': 1.3.0\n"},
+      {"? version\r\n: 1.2.3\r\n", "version: 1.3.0\r\n"},
+  };
+  char version[128];
+  char error[256];
+  size_t index;
+
+  for (index = 0; index < sizeof cases / sizeof cases[0]; ++index) {
+    char *updated = NULL;
+    size_t updated_size = 0;
+    assert(csemver_version_update_text(
+        "config.yaml", "yaml", cases[index].input, "1.3.0", &updated,
+        &updated_size, version, sizeof version, error, sizeof error));
+    assert(updated_size == strlen(cases[index].expected));
+    assert(memcmp(updated, cases[index].expected, updated_size) == 0);
+    free(updated);
+  }
+  {
+    const char *input = "openapi: 3.1.0\ninfo:\n  ? version\n  : 1.2.3\n";
+    const char *expected = "openapi: 3.1.0\ninfo:\n  version: 1.3.0\n";
+    char *updated = NULL;
+    size_t updated_size = 0;
+    assert(csemver_version_update_text(
+        "openapi.yaml", "openapi", input, "1.3.0", &updated, &updated_size,
+        version, sizeof version, error, sizeof error));
+    assert(updated_size == strlen(expected));
+    assert(memcmp(updated, expected, updated_size) == 0);
+    free(updated);
+  }
+}
+
 static void test_yaml_duplicate_version_key_reports_stringifier_error(void) {
   const char *yaml_inputs[] = {
       "version: 0.1.0\nversion: 1.2.3\n",
@@ -1544,6 +1582,7 @@ int main(void) {
   test_yaml_multiline_nested_flow_sequence_multiple_comments();
   test_yaml_leading_nested_flow_sequence_comment_matches_upstream_error();
   test_yaml_and_openapi_multiple_documents_match_upstream_error();
+  test_yaml_normalizes_explicit_version_mapping_key();
   test_yaml_duplicate_version_key_reports_stringifier_error();
   test_yaml_block_mapping_leading_flow_sequence_comment_matches_error();
   test_yaml_block_sequence_comment_moves_before_item();

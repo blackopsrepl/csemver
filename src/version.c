@@ -2138,6 +2138,63 @@ static int yaml_has_multiple_documents(const char *content) {
   return status;
 }
 
+static int yaml_previous_explicit_version_key(const char *content,
+                                              size_t line_start,
+                                              size_t key_start,
+                                              size_t *explicit_key_start,
+                                              size_t *version_key_start,
+                                              size_t *version_key_end) {
+  size_t previous_end = line_start;
+  size_t previous_start;
+  size_t previous_indent;
+  size_t current_indent_size = key_start - line_start;
+  size_t key_end;
+  size_t position;
+  while (previous_end > 0 && (content[previous_end - 1] == '\n' ||
+                              content[previous_end - 1] == '\r'))
+    --previous_end;
+  previous_start = previous_end;
+  while (previous_start > 0 && content[previous_start - 1] != '\n' &&
+         content[previous_start - 1] != '\r')
+    --previous_start;
+  previous_indent = previous_start;
+  while (previous_indent < previous_end &&
+         (content[previous_indent] == ' ' || content[previous_indent] == '\t'))
+    ++previous_indent;
+  if (previous_indent - previous_start != current_indent_size ||
+      memcmp(content + previous_start, content + line_start,
+             current_indent_size) != 0 ||
+      previous_indent == previous_end || content[previous_indent] != '?')
+    return 0;
+  position = previous_indent + 1;
+  if (position < previous_end && content[position] != ' ' &&
+      content[position] != '\t')
+    return 0;
+  while (position < previous_end &&
+         (content[position] == ' ' || content[position] == '\t'))
+    ++position;
+  key_end = previous_end;
+  while (key_end > position &&
+         (content[key_end - 1] == ' ' || content[key_end - 1] == '\t'))
+    --key_end;
+  if (key_end - position == sizeof "version" - 1 &&
+      memcmp(content + position, "version", sizeof "version" - 1) == 0) {
+    *version_key_start = position;
+    *version_key_end = key_end;
+  } else if (key_end - position == sizeof "\"version\"" - 1 &&
+             ((content[position] == '"' && content[key_end - 1] == '"') ||
+              (content[position] == '\'' && content[key_end - 1] == '\'')) &&
+             memcmp(content + position + 1, "version", sizeof "version" - 1) ==
+                 0) {
+    *version_key_start = position;
+    *version_key_end = key_end;
+  } else {
+    return 0;
+  }
+  *explicit_key_start = previous_indent;
+  return 1;
+}
+
 static int yaml_normalize_version_mapping_key(CsemverBuffer *buffer,
                                               bool openapi) {
   Range range;
@@ -2146,6 +2203,9 @@ static int yaml_normalize_version_mapping_key(CsemverBuffer *buffer,
   size_t key_start;
   size_t key_end;
   size_t value_start;
+  size_t explicit_key_start;
+  size_t version_key_start;
+  size_t version_key_end;
   size_t colon = SIZE_MAX;
   size_t position;
   CsemverBuffer normalized;
@@ -2185,6 +2245,24 @@ static int yaml_normalize_version_mapping_key(CsemverBuffer *buffer,
   while (key_end > key_start && (buffer->data[key_end - 1] == ' ' ||
                                  buffer->data[key_end - 1] == '\t'))
     --key_end;
+  if (key_end == key_start && colon == key_start &&
+      yaml_previous_explicit_version_key(
+          buffer->data, line_start, key_start, &explicit_key_start,
+          &version_key_start, &version_key_end)) {
+    csemver_buffer_init(&normalized);
+    if (!csemver_buffer_append(&normalized, buffer->data, explicit_key_start) ||
+        !csemver_buffer_append(&normalized, buffer->data + version_key_start,
+                               version_key_end - version_key_start) ||
+        !csemver_buffer_append(&normalized, ": ", 2) ||
+        !csemver_buffer_append(&normalized, buffer->data + value_start,
+                               buffer->length - value_start)) {
+      csemver_buffer_free(&normalized);
+      return 0;
+    }
+    csemver_buffer_free(buffer);
+    *buffer = normalized;
+    return 1;
+  }
   if (key_end - key_start != sizeof "version" - 1 ||
       memcmp(buffer->data + key_start, "version", sizeof "version" - 1) != 0 ||
       (colon == key_end && value_start == colon + 2 &&
