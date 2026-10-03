@@ -24,7 +24,7 @@ jobs:
           test "$(tr -d '\r\n' < VERSION)" = "$version"
           test "$(git log -1 --format=%s "$tag")" = "chore(release): $version"
           make clean test "CSEMVER_VERSION=$version"
-          test "$(./build/csemver --version)" = "csemver $version"
+          test "$(./build/csemver --version)" = "$version"
       - name: Extract notes from the tagged changelog
         shell: bash
         run: |
