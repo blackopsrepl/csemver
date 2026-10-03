@@ -254,6 +254,32 @@ grep -q '"version": "1.0.0"' package.json
 test ! -f CHANGELOG.md
 test -z "$(git tag --list 'v1.0.1')"
 test -z "$(git status --porcelain)"
+
+mkdir "$tmp/tag-force"
+cd "$tmp/tag-force"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "tag-force",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize tag-force fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+printf 'first change\n' > feature.txt
+git add feature.txt
+git commit -qm 'fix: first tag-force change'
+"$bin" --release-as 1.0.1 > /dev/null
+old_tag_target=$(git rev-parse 'refs/tags/v1.0.1^{}')
+printf 'second change\n' > followup.txt
+git add followup.txt
+git commit -qm 'fix: second tag-force change'
+"$bin" --skip bump --tag-force > /dev/null
+new_tag_target=$(git rev-parse 'refs/tags/v1.0.1^{}')
+[ "$new_tag_target" != "$old_tag_target" ]
+[ "$new_tag_target" = "$(git rev-parse HEAD)" ]
+[ "$(grep -c '"version": "1.0.1"' package.json)" -eq 1 ]
+test -z "$(git status --porcelain)"
+
 mkdir "$tmp/lifecycle"
 cd "$tmp/lifecycle"
 git init -q -b master
