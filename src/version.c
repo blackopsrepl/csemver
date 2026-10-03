@@ -2156,6 +2156,66 @@ static int yaml_append_normalized_flow_fragment(const char *content,
   return success;
 }
 
+static int yaml_flow_sequence_has_leading_comment(const char *content) {
+  size_t flow_depth = 0;
+  size_t sequence_depth = SIZE_MAX;
+  size_t sequence_open_end = 0;
+  size_t index;
+  bool sequence_pending = false;
+  bool failed = false;
+  yaml_parser_t parser;
+  if (!yaml_parser_initialize(&parser))
+    return -1;
+  yaml_parser_set_input_string(&parser, (const unsigned char *)content,
+                               strlen(content));
+  for (;;) {
+    yaml_token_t token;
+    yaml_token_type_t type;
+    bool done;
+    size_t start;
+    size_t end;
+    if (!yaml_parser_scan(&parser, &token)) {
+      failed = true;
+      break;
+    }
+    type = token.type;
+    done = type == YAML_STREAM_END_TOKEN;
+    if (!yaml_mark_to_byte_offset(content, token.start_mark.index, &start) ||
+        !yaml_mark_to_byte_offset(content, token.end_mark.index, &end)) {
+      failed = true;
+    } else {
+      if (sequence_pending && flow_depth == sequence_depth) {
+        for (index = sequence_open_end; index < start; ++index) {
+          if (content[index] == '#') {
+            yaml_token_delete(&token);
+            yaml_parser_delete(&parser);
+            return 1;
+          }
+        }
+        sequence_pending = false;
+      }
+      if (type == YAML_FLOW_MAPPING_START_TOKEN ||
+          type == YAML_FLOW_SEQUENCE_START_TOKEN) {
+        ++flow_depth;
+        if (type == YAML_FLOW_SEQUENCE_START_TOKEN) {
+          sequence_pending = true;
+          sequence_depth = flow_depth;
+          sequence_open_end = end;
+        }
+      } else if (type == YAML_FLOW_MAPPING_END_TOKEN ||
+                 type == YAML_FLOW_SEQUENCE_END_TOKEN) {
+        if (flow_depth > 0)
+          --flow_depth;
+      }
+    }
+    yaml_token_delete(&token);
+    if (failed || done)
+      break;
+  }
+  yaml_parser_delete(&parser);
+  return failed ? -1 : 0;
+}
+
 static int yaml_format_nested_flow_sequence(
     const char *fragment, size_t first_entry_start,
     size_t collection_close_start, const YamlFlowSeparator *separators,
@@ -3482,6 +3542,12 @@ int csemver_version_update_text(const char *filename, const char *type,
   if (strcmp(kind, "yaml") == 0 || strcmp(kind, "openapi") == 0) {
     char *normalized;
     size_t normalized_size;
+    if (yaml_flow_sequence_has_leading_comment(buffer.data) != 0) {
+      csemver_buffer_free(&buffer);
+      set_error(error, error_size,
+                "Document with errors cannot be stringified");
+      return 0;
+    }
     if (!yaml_normalize_single_line_flow(buffer.data, &normalized,
                                          &normalized_size))
       goto allocation_error;

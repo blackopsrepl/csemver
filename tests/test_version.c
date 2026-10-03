@@ -862,6 +862,36 @@ static void test_yaml_multiline_nested_flow_sequence_multiple_comments(void) {
   free(updated);
 }
 
+static void
+test_yaml_leading_nested_flow_sequence_comment_matches_upstream_error(void) {
+  const char *input = "{version: 1.2.3, other: [# lead\na, b]}\n";
+  char version[128];
+  char error[256] = "";
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(!csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                      &updated, &updated_size, version,
+                                      sizeof version, error, sizeof error));
+  assert(strcmp(error, "Document with errors cannot be stringified") == 0);
+  free(updated);
+}
+
+static void
+test_yaml_block_mapping_leading_flow_sequence_comment_matches_error(void) {
+  const char *input = "version: 1.2.3\nitems: [# lead\na, b]\n";
+  char version[128];
+  char error[256] = "";
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(!csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                      &updated, &updated_size, version,
+                                      sizeof version, error, sizeof error));
+  assert(strcmp(error, "Document with errors cannot be stringified") == 0);
+  free(updated);
+}
+
 static void test_yaml_no_newline_matches_upstream_output(void) {
   const char *input = "version: 1.2.3";
   const char *expected = "version: 1.3.0undefined";
@@ -1135,6 +1165,8 @@ int main(void) {
   test_yaml_multiline_nested_flow_sequence_consecutive_comments();
   test_yaml_multiline_nested_flow_sequence_three_items();
   test_yaml_multiline_nested_flow_sequence_multiple_comments();
+  test_yaml_leading_nested_flow_sequence_comment_matches_upstream_error();
+  test_yaml_block_mapping_leading_flow_sequence_comment_matches_error();
   test_yaml_no_newline_matches_upstream_output();
   test_yaml_mixed_newlines_match_upstream();
   test_yaml_updater_only_updates_root_version();
