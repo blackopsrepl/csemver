@@ -701,6 +701,23 @@ static void test_yaml_updater_only_updates_root_version(void) {
   free(updated);
 }
 
+static void test_yaml_version_alias_is_replaced_not_anchor_target(void) {
+  const char *input = "v: &ver 1.2.3\nversion: *ver\n";
+  const char *expected = "v: &ver 1.2.3\nversion: 1.3.0\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(strcmp(version, "1.2.3") == 0);
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
 static void test_openapi_uses_info_version_not_nested_schema_version(void) {
   const char *input =
       "openapi: 3.0.3\ncomponents:\n  schemas:\n    Widget:\n"
@@ -1597,6 +1614,7 @@ int main(void) {
   test_yaml_no_newline_matches_upstream_output();
   test_yaml_mixed_newlines_match_upstream();
   test_yaml_updater_only_updates_root_version();
+  test_yaml_version_alias_is_replaced_not_anchor_target();
   test_gradle_updater_matches_upstream();
   test_gradle_updater_handles_carriage_return_lines();
   test_csproj_updater_matches_upstream();

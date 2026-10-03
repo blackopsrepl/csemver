@@ -26,6 +26,12 @@ typedef struct {
   bool closes_as_mapping_key;
 } YamlFrame;
 typedef struct {
+  char *name;
+  size_t name_length;
+  char *value;
+  size_t value_length;
+} YamlScalarAnchor;
+typedef struct {
   size_t output_start;
 } YamlFlowFrame;
 typedef struct {
@@ -1960,6 +1966,87 @@ static int yaml_scalar_value_range(const char *content,
   return 1;
 }
 
+static void yaml_scalar_anchors_free(YamlScalarAnchor *anchors,
+                                     size_t anchor_count) {
+  size_t index;
+  for (index = 0; index < anchor_count; ++index) {
+    free(anchors[index].name);
+    free(anchors[index].value);
+  }
+  free(anchors);
+}
+
+static int yaml_scalar_anchor_store(YamlScalarAnchor **anchors,
+                                    size_t *anchor_count,
+                                    size_t *anchor_capacity,
+                                    const yaml_event_t *event) {
+  const char *anchor = (const char *)event->data.scalar.anchor;
+  size_t anchor_length = strlen(anchor);
+  size_t value_length = event->data.scalar.length;
+  size_t index;
+  char *name_copy = malloc(anchor_length + 1);
+  char *value_copy = malloc(value_length + 1);
+  if (name_copy == NULL || value_copy == NULL) {
+    free(name_copy);
+    free(value_copy);
+    return 0;
+  }
+  memcpy(name_copy, anchor, anchor_length + 1);
+  if (value_length != 0)
+    memcpy(value_copy, event->data.scalar.value, value_length);
+  value_copy[value_length] = '\0';
+  for (index = 0; index < *anchor_count; ++index) {
+    if ((*anchors)[index].name_length == anchor_length &&
+        memcmp((*anchors)[index].name, anchor, anchor_length) == 0)
+      break;
+  }
+  if (index == *anchor_count) {
+    if (*anchor_count == *anchor_capacity) {
+      size_t new_capacity = *anchor_capacity == 0 ? 8 : *anchor_capacity * 2;
+      YamlScalarAnchor *new_anchors;
+      if (new_capacity < *anchor_capacity ||
+          new_capacity > SIZE_MAX / sizeof **anchors) {
+        free(name_copy);
+        free(value_copy);
+        return 0;
+      }
+      new_anchors = realloc(*anchors, new_capacity * sizeof **anchors);
+      if (new_anchors == NULL) {
+        free(name_copy);
+        free(value_copy);
+        return 0;
+      }
+      *anchors = new_anchors;
+      *anchor_capacity = new_capacity;
+    }
+    ++*anchor_count;
+  } else {
+    free((*anchors)[index].name);
+    free((*anchors)[index].value);
+  }
+  (*anchors)[index] = (YamlScalarAnchor){
+      .name = name_copy,
+      .name_length = anchor_length,
+      .value = value_copy,
+      .value_length = value_length,
+  };
+  return 1;
+}
+
+static const YamlScalarAnchor *
+yaml_scalar_anchor_find(const YamlScalarAnchor *anchors, size_t anchor_count,
+                        const yaml_char_t *name) {
+  size_t name_length = strlen((const char *)name);
+  size_t index;
+  for (index = anchor_count; index > 0; --index) {
+    const YamlScalarAnchor *anchor = &anchors[index - 1];
+    if (anchor->name_length == name_length &&
+        memcmp(anchor->name, name, name_length) == 0)
+      return anchor;
+  }
+  return NULL;
+}
+
 static int yaml_version_range(const char *content, bool openapi, Range *range,
                               char *version, size_t version_size,
                               size_t *scalar_end,
@@ -1967,6 +2054,9 @@ static int yaml_version_range(const char *content, bool openapi, Range *range,
                               bool *duplicate_version_key) {
   yaml_parser_t parser;
   YamlFrame *frames = NULL;
+  YamlScalarAnchor *anchors = NULL;
+  size_t anchor_count = 0;
+  size_t anchor_capacity = 0;
   size_t depth = 0;
   size_t capacity = 0;
   bool found = false;
@@ -2043,6 +2133,10 @@ static int yaml_version_range(const char *content, bool openapi, Range *range,
       }
       break;
     case YAML_SCALAR_EVENT:
+      if (event.data.scalar.anchor != NULL &&
+          !yaml_scalar_anchor_store(&anchors, &anchor_count, &anchor_capacity,
+                                    &event))
+        failed = true;
       if (depth > 0 && frames[depth - 1].is_mapping) {
         YamlFrame *frame = &frames[depth - 1];
         if (frame->expect_key) {
@@ -2094,6 +2188,43 @@ static int yaml_version_range(const char *content, bool openapi, Range *range,
           frame->key_is_version = false;
           frame->expect_key = false;
         } else {
+          if (frame->key_is_version && !found &&
+              event.data.alias.anchor != NULL) {
+            const YamlScalarAnchor *anchor = yaml_scalar_anchor_find(
+                anchors, anchor_count, event.data.alias.anchor);
+            size_t start;
+            size_t end;
+            if (anchor != NULL &&
+                (version == NULL || anchor->value_length < version_size) &&
+                (range == NULL ||
+                 (yaml_mark_to_byte_offset(content, event.start_mark.index,
+                                           &start) &&
+                  yaml_mark_to_byte_offset(content, event.end_mark.index,
+                                           &end)))) {
+              if (version != NULL) {
+                if (anchor->value_length != 0)
+                  memcpy(version, anchor->value, anchor->value_length);
+                version[anchor->value_length] = '\0';
+              }
+              if (range != NULL) {
+                range->start = start;
+                range->end = end;
+                while (content[range->end] == ' ' ||
+                       content[range->end] == '\t')
+                  ++range->end;
+                if (content[range->end] != '\0' &&
+                    content[range->end] != '\r' && content[range->end] != '\n')
+                  range->end = end;
+              }
+              if (scalar_end != NULL &&
+                  !yaml_mark_to_byte_offset(content, event.end_mark.index,
+                                            scalar_end))
+                failed = true;
+              if (scalar_style != NULL)
+                *scalar_style = YAML_PLAIN_SCALAR_STYLE;
+              found = !failed;
+            }
+          }
           frame->expect_key = true;
           frame->key_is_info = false;
           frame->key_is_version = false;
@@ -2109,6 +2240,7 @@ static int yaml_version_range(const char *content, bool openapi, Range *range,
   }
   yaml_parser_delete(&parser);
   free(frames);
+  yaml_scalar_anchors_free(anchors, anchor_count);
   return found && !failed;
 }
 
