@@ -892,6 +892,164 @@ test_yaml_block_mapping_leading_flow_sequence_comment_matches_error(void) {
   free(updated);
 }
 
+static void test_yaml_block_sequence_comment_moves_before_item(void) {
+  const char *input =
+      "version: 1.2.3\nitems:\n  - # first\n\n    # second\n    a\n  - b\n";
+  const char *expected = "version: 1.3.0\nitems:\n  # first\n\n  # second\n"
+                         "  - a\n  - b\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_yaml_block_sequence_comments_normalize_indentation(void) {
+  const char *input = "version: 1.2.3\nitems:\n      - # item\n        value\n";
+  const char *expected = "version: 1.3.0\nitems:\n  # item\n  - value\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_yaml_zero_indented_sequence_comments_normalize(void) {
+  const char *input = "version: 1.2.3\nitems:\n- # item\n  value\n";
+  const char *expected = "version: 1.3.0\nitems:\n  # item\n  - value\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_yaml_empty_block_sequence_comment_spacing(void) {
+  const char *input = "version: 1.2.3\nitems:\n  -    # item\n  - b\n";
+  const char *expected = "version: 1.3.0\nitems:\n  -  # item\n  - b\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_yaml_empty_sequence_comment_normalizes_next_item(void) {
+  const char *input =
+      "version: 1.2.3\nitems:\n      -    # item\n      - next\n";
+  const char *expected = "version: 1.3.0\nitems:\n  -  # item\n  - next\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_yaml_final_empty_block_sequence_comment_spacing(void) {
+  const char *input = "version: 1.2.3\nitems:\n  - # item\n";
+  const char *expected = "version: 1.3.0\nitems:\n  -  # item\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_yaml_block_sequence_comment_dedents_block_scalar(void) {
+  const char *input = "version: 1.2.3\nitems:\n  - # item\n    |-\n"
+                      "      alpha\n      beta\n";
+  const char *expected = "version: 1.3.0\nitems:\n  # item\n  - |-\n"
+                         "    alpha\n    beta\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_yaml_block_sequence_comment_scalar_styles(void) {
+  static const struct {
+    const char *input;
+    const char *expected;
+  } cases[] = {
+      {"version: 1.2.3\nitems:\n  - # item\n    >-\n"
+       "      alpha\n      beta\n",
+       "version: 1.3.0\nitems:\n  # item\n  - >-\n    alpha beta\n"},
+      {"version: 1.2.3\nitems:\n  - # item\n    >-\n"
+       "      alpha\n\n      beta\n",
+       "version: 1.3.0\nitems:\n  # item\n  - >-\n"
+       "    alpha\n\n    beta\n"},
+      {"version: 1.2.3\nitems:\n  - # item\n    |+\n"
+       "      alpha\n\n      beta\n",
+       "version: 1.3.0\nitems:\n  # item\n  - |\n"
+       "    alpha\n\n    beta\n"},
+      {"version: 1.2.3\nitems:\n  - # item\n    >-\n"
+       "      alpha\n        indented\n      beta\n",
+       "version: 1.3.0\nitems:\n  # item\n  - >-\n"
+       "    alpha\n      indented\n    beta\n"},
+      {"version: 1.2.3\nitems:\n  - # item\n    |2-\n"
+       "        alpha\n        beta\n",
+       "version: 1.3.0\nitems:\n  # item\n  - |2-\n"
+       "        alpha\n        beta\n"},
+  };
+  char version[128];
+  char error[256];
+  size_t index;
+
+  for (index = 0; index < sizeof cases / sizeof cases[0]; ++index) {
+    char *updated = NULL;
+    size_t updated_size = 0;
+    assert(csemver_version_update_text(
+        "config.yaml", "yaml", cases[index].input, "1.3.0", &updated,
+        &updated_size, version, sizeof version, error, sizeof error));
+    assert(updated_size == strlen(cases[index].expected));
+    assert(memcmp(updated, cases[index].expected, updated_size) == 0);
+    free(updated);
+  }
+}
+
 static void test_yaml_no_newline_matches_upstream_output(void) {
   const char *input = "version: 1.2.3";
   const char *expected = "version: 1.3.0undefined";
@@ -1167,6 +1325,14 @@ int main(void) {
   test_yaml_multiline_nested_flow_sequence_multiple_comments();
   test_yaml_leading_nested_flow_sequence_comment_matches_upstream_error();
   test_yaml_block_mapping_leading_flow_sequence_comment_matches_error();
+  test_yaml_block_sequence_comment_moves_before_item();
+  test_yaml_block_sequence_comments_normalize_indentation();
+  test_yaml_zero_indented_sequence_comments_normalize();
+  test_yaml_empty_block_sequence_comment_spacing();
+  test_yaml_empty_sequence_comment_normalizes_next_item();
+  test_yaml_final_empty_block_sequence_comment_spacing();
+  test_yaml_block_sequence_comment_dedents_block_scalar();
+  test_yaml_block_sequence_comment_scalar_styles();
   test_yaml_no_newline_matches_upstream_output();
   test_yaml_mixed_newlines_match_upstream();
   test_yaml_updater_only_updates_root_version();

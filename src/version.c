@@ -2216,6 +2216,468 @@ static int yaml_flow_sequence_has_leading_comment(const char *content) {
   return failed ? -1 : 0;
 }
 
+static size_t yaml_line_start(const char *content, size_t position) {
+  while (position > 0 && content[position - 1] != '\n' &&
+         content[position - 1] != '\r')
+    --position;
+  return position;
+}
+
+static size_t yaml_line_end(const char *content, size_t length,
+                            size_t position) {
+  while (position < length && content[position] != '\n' &&
+         content[position] != '\r')
+    ++position;
+  return position;
+}
+
+static int yaml_append_block_scalar_header(
+    CsemverBuffer *output, const char *content, size_t header_start,
+    size_t header_end, size_t style_position, const yaml_token_t *token) {
+  size_t modifiers_end = style_position + 1;
+  size_t chomp_position = SIZE_MAX;
+  size_t trailing_newlines = 0;
+  char desired_chomp = '\0';
+  size_t index;
+  while (modifiers_end < header_end && content[modifiers_end] != ' ' &&
+         content[modifiers_end] != '\t' && content[modifiers_end] != '#') {
+    if (content[modifiers_end] == '+' || content[modifiers_end] == '-')
+      chomp_position = modifiers_end;
+    ++modifiers_end;
+  }
+  for (index = token->data.scalar.length;
+       index > 0 && token->data.scalar.value[index - 1] == '\n'; --index)
+    ++trailing_newlines;
+  if (trailing_newlines == 0)
+    desired_chomp = '-';
+  else if (trailing_newlines > 1)
+    desired_chomp = '+';
+  if (chomp_position != SIZE_MAX) {
+    if (!csemver_buffer_append(output, content + header_start,
+                               chomp_position - header_start) ||
+        (desired_chomp != '\0' &&
+         !csemver_buffer_append(output, &desired_chomp, 1)) ||
+        !csemver_buffer_append(output, content + chomp_position + 1,
+                               header_end - chomp_position - 1))
+      return 0;
+  } else if (!csemver_buffer_append(output, content + header_start,
+                                    modifiers_end - header_start) ||
+             (desired_chomp != '\0' &&
+              !csemver_buffer_append(output, &desired_chomp, 1)) ||
+             !csemver_buffer_append(output, content + modifiers_end,
+                                    header_end - modifiers_end)) {
+    return 0;
+  }
+  return 1;
+}
+
+static int yaml_append_spaces(CsemverBuffer *output, size_t count) {
+  static const char spaces[] =
+      "                                                                ";
+  while (count > 0) {
+    size_t chunk = count < sizeof spaces - 1 ? count : sizeof spaces - 1;
+    if (!csemver_buffer_append(output, spaces, chunk))
+      return 0;
+    count -= chunk;
+  }
+  return 1;
+}
+
+static int yaml_append_folded_block_scalar(
+    CsemverBuffer *output, const char *content, size_t header_end, size_t end,
+    const yaml_token_t *token, size_t dedent, bool has_explicit_indent) {
+  size_t newline_end = header_end;
+  size_t newline_size = 1;
+  const char *newline = "\n";
+  size_t body_position;
+  size_t source_indentation = 0;
+  size_t output_indentation;
+  size_t trailing_newlines = 0;
+  size_t index;
+  bool have_content = false;
+  size_t pending_blank_lines = 0;
+  bool previous_more_indented = false;
+  while (newline_end < end && content[newline_end] != '\n' &&
+         content[newline_end] != '\r')
+    ++newline_end;
+  if (newline_end < end) {
+    if (content[newline_end] == '\r' && newline_end + 1 < end &&
+        content[newline_end + 1] == '\n')
+      newline_size = 2;
+    newline = content + newline_end;
+  }
+  if (!csemver_buffer_append(output, newline, newline_size))
+    return 0;
+  body_position = newline_end + newline_size;
+  for (index = body_position; index < end;) {
+    size_t line_end = yaml_line_end(content, end, index);
+    size_t leading = 0;
+    while (index + leading < line_end && (content[index + leading] == ' ' ||
+                                          content[index + leading] == '\t'))
+      ++leading;
+    if (index + leading < line_end) {
+      source_indentation = leading;
+      break;
+    }
+    index = line_end;
+    if (index < end && content[index] == '\r' && index + 1 < end &&
+        content[index + 1] == '\n')
+      index += 2;
+    else if (index < end)
+      ++index;
+  }
+  output_indentation = source_indentation;
+  if (!has_explicit_indent && output_indentation >= dedent)
+    output_indentation -= dedent;
+  for (index = token->data.scalar.length;
+       index > 0 && token->data.scalar.value[index - 1] == '\n'; --index)
+    ++trailing_newlines;
+  index = body_position;
+  while (index < end) {
+    size_t line_end = yaml_line_end(content, end, index);
+    size_t leading = 0;
+    size_t content_offset;
+    bool more_indented;
+    while (index + leading < line_end && (content[index + leading] == ' ' ||
+                                          content[index + leading] == '\t'))
+      ++leading;
+    content_offset =
+        leading < source_indentation ? leading : source_indentation;
+    if (index + content_offset == line_end) {
+      ++pending_blank_lines;
+    } else {
+      more_indented = leading > source_indentation;
+      if (!have_content) {
+        size_t count;
+        for (count = 0; count < pending_blank_lines; ++count)
+          if (!csemver_buffer_append(output, newline, newline_size))
+            return 0;
+        if (!yaml_append_spaces(output, output_indentation))
+          return 0;
+      } else if (pending_blank_lines > 0 || previous_more_indented ||
+                 more_indented) {
+        size_t count;
+        size_t line_breaks = pending_blank_lines + 1;
+        for (count = 0; count < line_breaks; ++count)
+          if (!csemver_buffer_append(output, newline, newline_size))
+            return 0;
+        if (!yaml_append_spaces(output, output_indentation))
+          return 0;
+      } else if (!csemver_buffer_append(output, " ", 1)) {
+        return 0;
+      }
+      if (!csemver_buffer_append(output, content + index + content_offset,
+                                 line_end - index - content_offset))
+        return 0;
+      have_content = true;
+      previous_more_indented = more_indented;
+      pending_blank_lines = 0;
+    }
+    index = line_end;
+    if (index < end && content[index] == '\r' && index + 1 < end &&
+        content[index + 1] == '\n')
+      index += 2;
+    else if (index < end)
+      ++index;
+  }
+  if (trailing_newlines == 0)
+    trailing_newlines = 1;
+  for (index = 0; index < trailing_newlines; ++index)
+    if (!csemver_buffer_append(output, newline, newline_size))
+      return 0;
+  return 1;
+}
+
+static int yaml_append_dedented_block_scalar(CsemverBuffer *output,
+                                             const char *content, size_t start,
+                                             size_t end, size_t dedent) {
+  size_t position = start;
+  while (position < end) {
+    if (content[position] == '\r' || content[position] == '\n') {
+      size_t newline_end = position + 1;
+      if (content[position] == '\r' && newline_end < end &&
+          content[newline_end] == '\n')
+        ++newline_end;
+      if (!csemver_buffer_append(output, content + position,
+                                 newline_end - position))
+        return 0;
+      position = newline_end;
+    } else {
+      size_t line_end = yaml_line_end(content, end, position);
+      size_t indentation = 0;
+      while (position + indentation < line_end && indentation < dedent &&
+             (content[position + indentation] == ' ' ||
+              content[position + indentation] == '\t'))
+        ++indentation;
+      if (!csemver_buffer_append(output, content + position + indentation,
+                                 line_end - position - indentation))
+        return 0;
+      position = line_end;
+    }
+  }
+  return 1;
+}
+
+static int yaml_rewrite_block_sequence_comments(const char *content,
+                                                char **updated,
+                                                size_t *updated_size) {
+  size_t length = strlen(content);
+  size_t copy_position = 0;
+  size_t pending_start = SIZE_MAX;
+  size_t pending_end = 0;
+  size_t pending_line = 0;
+  size_t pending_column = 0;
+  size_t pending_output_column = 0;
+  size_t block_depth = 0;
+  bool changed = false;
+  bool failed = false;
+  yaml_parser_t parser;
+  CsemverBuffer rewritten;
+  *updated = NULL;
+  *updated_size = 0;
+  csemver_buffer_init(&rewritten);
+  if (!yaml_parser_initialize(&parser))
+    return 0;
+  yaml_parser_set_input_string(&parser, (const unsigned char *)content, length);
+  for (;;) {
+    yaml_token_t token;
+    yaml_token_type_t type;
+    bool done;
+    size_t start;
+    size_t end;
+    if (!yaml_parser_scan(&parser, &token)) {
+      failed = true;
+      break;
+    }
+    type = token.type;
+    done = type == YAML_STREAM_END_TOKEN;
+    if (!yaml_mark_to_byte_offset(content, token.start_mark.index, &start) ||
+        !yaml_mark_to_byte_offset(content, token.end_mark.index, &end)) {
+      failed = true;
+    } else {
+      if (pending_start != SIZE_MAX) {
+        if (start >= copy_position && token.start_mark.line > pending_line &&
+            token.start_mark.column > pending_column) {
+          size_t first_comment = SIZE_MAX;
+          size_t dash_line_start = yaml_line_start(content, pending_start);
+          size_t node_line_start = yaml_line_start(content, start);
+          size_t node_content_start = node_line_start;
+          size_t node_line_end = yaml_line_end(content, length, start);
+          size_t node_span_end = node_line_end;
+          size_t indent_length = pending_output_column;
+          size_t dedent = token.start_mark.column - pending_output_column;
+          bool is_block_scalar =
+              type == YAML_SCALAR_TOKEN &&
+              (token.data.scalar.style == YAML_LITERAL_SCALAR_STYLE ||
+               token.data.scalar.style == YAML_FOLDED_SCALAR_STYLE);
+          bool has_explicit_indent = false;
+          size_t comment_position;
+          CsemverBuffer comments;
+          bool valid = dash_line_start >= copy_position &&
+                       node_line_start > dash_line_start &&
+                       node_content_start <= start && node_line_end >= start;
+          if (is_block_scalar) {
+            node_span_end = end;
+            for (comment_position = start + 1;
+                 comment_position < node_line_end &&
+                 content[comment_position] != ' ' &&
+                 content[comment_position] != '\t' &&
+                 content[comment_position] != '#';
+                 ++comment_position)
+              if (content[comment_position] >= '1' &&
+                  content[comment_position] <= '9')
+                has_explicit_indent = true;
+            if (has_explicit_indent)
+              dedent = 0;
+          }
+          for (comment_position = dash_line_start;
+               valid && comment_position < pending_start; ++comment_position)
+            if (content[comment_position] != ' ' &&
+                content[comment_position] != '\t')
+              valid = false;
+          while (node_content_start < start &&
+                 (content[node_content_start] == ' ' ||
+                  content[node_content_start] == '\t'))
+            ++node_content_start;
+          if (node_content_start != start)
+            valid = false;
+          for (comment_position = pending_end;
+               valid && comment_position < start; ++comment_position)
+            if (content[comment_position] == '#') {
+              first_comment = comment_position;
+              break;
+            }
+          csemver_buffer_init(&comments);
+          if (valid && first_comment != SIZE_MAX) {
+            size_t line_position = dash_line_start;
+            bool have_comment = false;
+            while (line_position < node_line_start) {
+              size_t line_end = yaml_line_end(content, length, line_position);
+              size_t text_start = line_position;
+              if (line_position == dash_line_start) {
+                text_start = pending_end;
+                while (text_start < line_end && (content[text_start] == ' ' ||
+                                                 content[text_start] == '\t'))
+                  ++text_start;
+              } else {
+                while (text_start < line_end && (content[text_start] == ' ' ||
+                                                 content[text_start] == '\t'))
+                  ++text_start;
+              }
+              if (text_start < line_end && content[text_start] == '#') {
+                if (!yaml_append_spaces(&comments, indent_length) ||
+                    !csemver_buffer_append(&comments, content + text_start,
+                                           line_end - text_start) ||
+                    !csemver_buffer_append(&comments, "\n", 1)) {
+                  failed = true;
+                  break;
+                }
+                have_comment = true;
+              } else if (text_start == line_end && have_comment) {
+                if (!csemver_buffer_append(&comments, "\n", 1)) {
+                  failed = true;
+                  break;
+                }
+              } else if (text_start != line_end) {
+                valid = false;
+                break;
+              }
+              line_position = line_end;
+              if (line_position < node_line_start) {
+                if (content[line_position] == '\r' &&
+                    line_position + 1 < length &&
+                    content[line_position + 1] == '\n')
+                  line_position += 2;
+                else
+                  ++line_position;
+              }
+            }
+            if (valid && have_comment && !failed) {
+              if (!csemver_buffer_append(&rewritten, content + copy_position,
+                                         dash_line_start - copy_position) ||
+                  !csemver_buffer_append(&rewritten, comments.data,
+                                         comments.length) ||
+                  !yaml_append_spaces(&rewritten, indent_length) ||
+                  !csemver_buffer_append(&rewritten, "- ", 2) ||
+                  !(is_block_scalar
+                        ? yaml_append_block_scalar_header(
+                              &rewritten, content, node_content_start,
+                              node_line_end, start, &token)
+                        : csemver_buffer_append(
+                              &rewritten, content + node_content_start,
+                              node_line_end - node_content_start)) ||
+                  (is_block_scalar &&
+                   !(token.data.scalar.style == YAML_FOLDED_SCALAR_STYLE
+                         ? yaml_append_folded_block_scalar(
+                               &rewritten, content, node_line_end,
+                               node_span_end, &token, dedent,
+                               has_explicit_indent)
+                         : yaml_append_dedented_block_scalar(
+                               &rewritten, content, node_line_end,
+                               node_span_end, dedent)))) {
+                failed = true;
+              } else {
+                copy_position = node_span_end;
+                changed = true;
+              }
+            }
+          }
+          csemver_buffer_free(&comments);
+        } else if (start >= copy_position &&
+                   ((type == YAML_BLOCK_ENTRY_TOKEN &&
+                     token.start_mark.line > pending_line &&
+                     token.start_mark.column == pending_column) ||
+                    (type == YAML_BLOCK_END_TOKEN &&
+                     token.start_mark.line > pending_line &&
+                     token.start_mark.column <= pending_column))) {
+          size_t dash_line_start = yaml_line_start(content, pending_start);
+          size_t line_end = yaml_line_end(content, length, pending_end);
+          size_t comment_start;
+          for (comment_start = pending_end; comment_start < line_end;
+               ++comment_start)
+            if (content[comment_start] == '#')
+              break;
+          if (comment_start < line_end) {
+            size_t scan;
+            bool valid_comment = true;
+            for (scan = pending_end; scan < comment_start; ++scan)
+              if (content[scan] != ' ' && content[scan] != '\t')
+                valid_comment = false;
+            if (valid_comment) {
+              if (dash_line_start < copy_position ||
+                  !csemver_buffer_append(&rewritten, content + copy_position,
+                                         dash_line_start - copy_position) ||
+                  !yaml_append_spaces(&rewritten, pending_output_column) ||
+                  !csemver_buffer_append(&rewritten, "-  ", 3)) {
+                failed = true;
+              } else {
+                copy_position = comment_start;
+                changed = true;
+              }
+            }
+          }
+        }
+        pending_start = SIZE_MAX;
+      }
+      if (type == YAML_BLOCK_END_TOKEN && block_depth > 0)
+        --block_depth;
+      else if (type == YAML_BLOCK_MAPPING_START_TOKEN ||
+               type == YAML_BLOCK_SEQUENCE_START_TOKEN)
+        ++block_depth;
+      if (type == YAML_BLOCK_ENTRY_TOKEN && start >= copy_position) {
+        size_t line_start = yaml_line_start(content, start);
+        size_t output_column =
+            block_depth == 1 ? 2
+                             : (block_depth > 1 ? (block_depth - 1) * 2 : 0);
+        if (changed && line_start >= copy_position) {
+          size_t source_column = start - line_start;
+          size_t line_end = yaml_line_end(content, length, start);
+          size_t value_start = end;
+          while (value_start < line_end &&
+                 (content[value_start] == ' ' || content[value_start] == '\t'))
+            ++value_start;
+          if (source_column != output_column && value_start < line_end &&
+              content[value_start] != '#' && content[value_start] != '|' &&
+              content[value_start] != '>') {
+            if (!csemver_buffer_append(&rewritten, content + copy_position,
+                                       line_start - copy_position) ||
+                !yaml_append_spaces(&rewritten, output_column)) {
+              failed = true;
+            } else {
+              copy_position = start;
+            }
+          }
+        }
+        pending_start = start;
+        pending_end = end;
+        pending_line = token.start_mark.line;
+        pending_column = token.start_mark.column;
+        pending_output_column = output_column;
+      }
+    }
+    yaml_token_delete(&token);
+    if (failed || done)
+      break;
+  }
+  yaml_parser_delete(&parser);
+  if (failed) {
+    csemver_buffer_free(&rewritten);
+    return 0;
+  }
+  if (!changed) {
+    csemver_buffer_free(&rewritten);
+    return 1;
+  }
+  if (!csemver_buffer_append(&rewritten, content + copy_position,
+                             length - copy_position)) {
+    csemver_buffer_free(&rewritten);
+    return 0;
+  }
+  *updated = rewritten.data;
+  *updated_size = rewritten.length;
+  return 1;
+}
+
 static int yaml_format_nested_flow_sequence(
     const char *fragment, size_t first_entry_start,
     size_t collection_close_start, const YamlFlowSeparator *separators,
@@ -3540,8 +4002,22 @@ int csemver_version_update_text(const char *filename, const char *type,
   if (!csemver_buffer_append(&buffer, content + pos, length - pos))
     goto allocation_error;
   if (strcmp(kind, "yaml") == 0 || strcmp(kind, "openapi") == 0) {
+    char *rewritten;
+    size_t rewritten_size;
     char *normalized;
     size_t normalized_size;
+    if (!yaml_rewrite_block_sequence_comments(buffer.data, &rewritten,
+                                              &rewritten_size))
+      goto allocation_error;
+    if (rewritten != NULL) {
+      csemver_buffer_free(&buffer);
+      csemver_buffer_init(&buffer);
+      if (!csemver_buffer_append(&buffer, rewritten, rewritten_size)) {
+        free(rewritten);
+        goto allocation_error;
+      }
+      free(rewritten);
+    }
     if (yaml_flow_sequence_has_leading_comment(buffer.data) != 0) {
       csemver_buffer_free(&buffer);
       set_error(error, error_size,
