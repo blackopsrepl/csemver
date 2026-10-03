@@ -51,6 +51,21 @@ static int add_file(CsemverFile *files, size_t *count, const char *filename,
   return 1;
 }
 
+static int add_file_if_missing(CsemverFile *files, size_t *count,
+                               const char *filename, const char *type,
+                               char *error, size_t error_size) {
+  size_t index;
+  for (index = 0; index < *count; ++index) {
+    if (strcmp(files[index].filename, filename) == 0) {
+      if (type != NULL && type[0] != '\0')
+        return copy_text(files[index].type, sizeof files[index].type, type,
+                         error, error_size);
+      return 1;
+    }
+  }
+  return add_file(files, count, filename, type, error, error_size);
+}
+
 static void add_default_type(CsemverConfig *config, const char *type,
                              const char *section, bool hidden) {
   CsemverCommitType *entry = &config->commit_types[config->commit_type_count++];
@@ -499,12 +514,12 @@ int csemver_config_parse(CsemverConfig *config, const char *toml, char *error,
   if (config->package_files_explicit && !config->bump_files_explicit) {
     config->bump_file_count = old_bump_count;
     for (index = 0; index < config->package_file_count; ++index) {
-      if (!add_file(config->bump_files, &config->bump_file_count,
-                    config->package_files[index].filename,
-                    config->package_files[index].type[0] == '\0'
-                        ? NULL
-                        : config->package_files[index].type,
-                    error, error_size))
+      if (!add_file_if_missing(config->bump_files, &config->bump_file_count,
+                               config->package_files[index].filename,
+                               config->package_files[index].type[0] == '\0'
+                                   ? NULL
+                                   : config->package_files[index].type,
+                               error, error_size))
         goto fail;
     }
   }
@@ -696,8 +711,8 @@ int csemver_config_set_array(CsemverConfig *config, const char *key,
     }
     if (!config->bump_files_explicit) {
       for (index = 0; index < count; ++index) {
-        if (!add_file(config->bump_files, &config->bump_file_count,
-                      values[index], NULL, error, error_size))
+        if (!add_file_if_missing(config->bump_files, &config->bump_file_count,
+                                 values[index], NULL, error, error_size))
           return 0;
       }
     }

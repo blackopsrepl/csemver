@@ -556,4 +556,71 @@ printf '%s\n' "$explicit_pre_major_preview" | \
     exit 1
   }
 
+mkdir "$tmp/repeated-bump-files"
+cd "$tmp/repeated-bump-files"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "repeated-bump-files",\n  "version": "1.0.0"\n}\n' > package.json
+printf '{\n  "name": "repeated-bump-files",\n  "version": "1.0.0"\n}\n' > bower.json
+git add package.json bower.json
+git commit -qm 'chore: initialize repeated bump files fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git commit --allow-empty -qm 'feat: exercise repeated bumpFiles flags GH-42 #8'
+repeated_bump_preview=$("$bin" --dry-run --bumpFiles package.json --bumpFiles bower.json)
+printf '%s\n' "$repeated_bump_preview" | \
+  grep -q 'bumping version in package.json from 1.0.0 to 1.1.0' || {
+    printf 'repeated bumpFiles options should retain the first file:\n%s\n' \
+      "$repeated_bump_preview" >&2
+    exit 1
+  }
+printf '%s\n' "$repeated_bump_preview" | \
+  grep -q 'bumping version in bower.json from 1.0.0 to 1.1.0' || {
+    printf 'repeated bumpFiles options should retain the second file:\n%s\n' \
+      "$repeated_bump_preview" >&2
+    exit 1
+  }
+repeated_prefix_preview=$("$bin" --dry-run --issuePrefixes GH- --issuePrefixes '#' \
+  --issueUrlFormat='https://issues.example/{{id}}')
+for issue_url in 'https://issues.example/42' 'https://issues.example/8'; do
+  printf '%s\n' "$repeated_prefix_preview" | grep -Fq "$issue_url" || {
+    printf 'repeated issuePrefixes options should retain both prefixes (%s):\n%s\n' \
+      "$issue_url" "$repeated_prefix_preview" >&2
+    exit 1
+  }
+done
+
+mkdir "$tmp/repeated-package-files"
+cd "$tmp/repeated-package-files"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "repeated-package-files",\n  "version": "1.0.0"\n}\n' > package.json
+printf '{\n  "name": "repeated-package-files",\n  "version": "2.0.0"\n}\n' > bower.json
+git add package.json bower.json
+git commit -qm 'chore: initialize repeated package files fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git commit --allow-empty -qm 'feat: test repeated packageFiles'
+repeated_package_preview=$("$bin" --dry-run --packageFiles package.json --packageFiles bower.json)
+printf '%s\n' "$repeated_package_preview" | \
+  grep -q 'bumping version in package.json from 1.0.0 to 1.1.0' || {
+    printf 'repeated packageFiles should read the first package version:\n%s\n' \
+      "$repeated_package_preview" >&2
+    exit 1
+  }
+printf '%s\n' "$repeated_package_preview" | \
+  grep -q 'bumping version in bower.json from 2.0.0 to 1.1.0' || {
+    printf 'repeated packageFiles should update the second package file:\n%s\n' \
+      "$repeated_package_preview" >&2
+    exit 1
+  }
+printf '%s\n' "$repeated_package_preview" | \
+  grep -Fq '✔ committing bower.json and package.json and CHANGELOG.md' || {
+    printf 'commit path summary should reverse updated files before the changelog:\n%s\n' \
+      "$repeated_package_preview" >&2
+    exit 1
+  }
+
 printf '%s\n' 'release workflow tests passed'

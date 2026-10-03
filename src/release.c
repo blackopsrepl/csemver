@@ -170,6 +170,15 @@ static int set_negated_boolean_option(CsemverConfig *config, const char *key) {
 
 static int parse_args(int argc, char **argv, CsemverConfig *config,
                       const char **config_path) {
+  const char *cli_package_files[CSEMVER_MAX_FILES];
+  const char *cli_bump_files[CSEMVER_MAX_FILES];
+  const char *cli_issue_prefixes[CSEMVER_MAX_PREFIXES];
+  size_t cli_package_file_count = 0;
+  size_t cli_bump_file_count = 0;
+  size_t cli_issue_prefix_count = 0;
+  bool cli_package_files_set = false;
+  bool cli_bump_files_set = false;
+  bool cli_issue_prefixes_set = false;
   int i;
   for (i = 1; i < argc; ++i) {
     const char *arg = argv[i];
@@ -307,8 +316,38 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
         }
         values[count++] = argv[++i];
       }
-      if (!csemver_config_set_array(config, name, values, count, error,
-                                    sizeof error)) {
+      if (strcmp(key, "--packageFiles") == 0 ||
+          strcmp(key, "--package-files") == 0) {
+        if (count > CSEMVER_MAX_FILES - cli_package_file_count) {
+          errorf("too many values for %s", key);
+          return 2;
+        }
+        memcpy(cli_package_files + cli_package_file_count, values,
+               count * sizeof values[0]);
+        cli_package_file_count += count;
+        cli_package_files_set = true;
+      } else if (strcmp(key, "--bumpFiles") == 0 ||
+                 strcmp(key, "--bump-files") == 0) {
+        if (count > CSEMVER_MAX_FILES - cli_bump_file_count) {
+          errorf("too many values for %s", key);
+          return 2;
+        }
+        memcpy(cli_bump_files + cli_bump_file_count, values,
+               count * sizeof values[0]);
+        cli_bump_file_count += count;
+        cli_bump_files_set = true;
+      } else if (strcmp(key, "--issuePrefixes") == 0 ||
+                 strcmp(key, "--issue-prefixes") == 0) {
+        if (count > CSEMVER_MAX_PREFIXES - cli_issue_prefix_count) {
+          errorf("too many issue prefixes");
+          return 2;
+        }
+        memcpy(cli_issue_prefixes + cli_issue_prefix_count, values,
+               count * sizeof values[0]);
+        cli_issue_prefix_count += count;
+        cli_issue_prefixes_set = true;
+      } else if (!csemver_config_set_array(config, name, values, count, error,
+                                           sizeof error)) {
         errorf("%s", error);
         return 2;
       }
@@ -402,6 +441,32 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
       continue;
     /* Upstream yargs accepts unknown flags and positional arguments. */
     continue;
+  }
+  if (cli_package_files_set) {
+    char error[256] = {0};
+    if (!csemver_config_set_array(config, "packageFiles", cli_package_files,
+                                  cli_package_file_count, error,
+                                  sizeof error)) {
+      errorf("%s", error);
+      return 2;
+    }
+  }
+  if (cli_bump_files_set) {
+    char error[256] = {0};
+    if (!csemver_config_set_array(config, "bumpFiles", cli_bump_files,
+                                  cli_bump_file_count, error, sizeof error)) {
+      errorf("%s", error);
+      return 2;
+    }
+  }
+  if (cli_issue_prefixes_set) {
+    char error[256] = {0};
+    if (!csemver_config_set_array(config, "issuePrefixes", cli_issue_prefixes,
+                                  cli_issue_prefix_count, error,
+                                  sizeof error)) {
+      errorf("%s", error);
+      return 2;
+    }
   }
   return 0;
 }
@@ -2139,12 +2204,21 @@ int csemver_main(int argc, char **argv) {
       fputs("✔ committing ", stdout);
       if (config.commit_all)
         fputs("all staged files", stdout);
-      else
-        for (size_t i = 0; i < path_count; ++i) {
-          if (i != 0)
+      else {
+        bool has_changelog = !config.skip_changelog && path_count > 0 &&
+                             strcmp(paths[path_count - 1], config.infile) == 0;
+        size_t version_path_count = path_count - (has_changelog ? 1 : 0);
+        for (size_t i = version_path_count; i > 0; --i) {
+          if (i != version_path_count)
             fputs(" and ", stdout);
-          fputs(paths[i], stdout);
+          fputs(paths[i - 1], stdout);
         }
+        if (has_changelog) {
+          if (version_path_count != 0)
+            fputs(" and ", stdout);
+          fputs(paths[path_count - 1], stdout);
+        }
+      }
       fputc('\n', stdout);
     }
     if (!config.skip_tag)

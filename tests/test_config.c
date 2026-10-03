@@ -60,6 +60,20 @@ int main(void) {
                                     sizeof error));
     assert(config.bump_files_explicit && config.bump_file_count == 2);
   }
+  {
+    const char *package_files_only = "packageFiles = [\"package.json\"]\n";
+    size_t package_bump_entries = 0;
+    size_t index;
+    csemver_config_defaults(&config);
+    assert(
+        csemver_config_parse(&config, package_files_only, error, sizeof error));
+    assert(config.package_file_count == 1);
+    assert(config.bump_file_count == 5);
+    for (index = 0; index < config.bump_file_count; ++index)
+      if (strcmp(config.bump_files[index].filename, "package.json") == 0)
+        ++package_bump_entries;
+    assert(package_bump_entries == 1);
+  }
   assert(!csemver_config_parse(&config, "releaseAs = [", error, sizeof error));
   assert(strstr(error, "invalid TOML:") == error);
   puts("configuration tests passed");
