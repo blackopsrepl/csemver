@@ -2270,6 +2270,140 @@ static int yaml_has_multiple_documents(const char *content) {
   return status;
 }
 
+static bool yaml_bare_cr_precedes_key(const char *content, size_t key_start) {
+  while (key_start > 0 &&
+         (content[key_start - 1] == ' ' || content[key_start - 1] == '\t'))
+    --key_start;
+  return key_start > 0 && content[key_start - 1] == '\r' &&
+         (key_start < 2 || content[key_start - 2] != '\n');
+}
+
+static bool yaml_block_scalar_has_bare_cr(const char *content, size_t start,
+                                          size_t end) {
+  size_t position;
+  for (position = start; position < end; ++position)
+    if (content[position] == '\r' &&
+        (position + 1 == end || content[position + 1] != '\n'))
+      return true;
+  return false;
+}
+
+static int yaml_has_bare_cr_stringifier_error(const char *content) {
+  yaml_parser_t parser;
+  YamlFrame *frames = NULL;
+  size_t depth = 0;
+  size_t capacity = 0;
+  bool stringifier_error = false;
+  bool failed = false;
+  if (!yaml_parser_initialize(&parser))
+    return -1;
+  yaml_parser_set_input_string(&parser, (const unsigned char *)content,
+                               strlen(content));
+  for (;;) {
+    yaml_event_t event;
+    bool stream_end;
+    if (!yaml_parser_parse(&parser, &event)) {
+      failed = true;
+      break;
+    }
+    switch (event.type) {
+    case YAML_MAPPING_START_EVENT:
+    case YAML_SEQUENCE_START_EVENT: {
+      bool is_mapping = event.type == YAML_MAPPING_START_EVENT;
+      bool closes_as_mapping_key = depth > 0 && frames[depth - 1].is_mapping &&
+                                   frames[depth - 1].expect_key;
+      if (depth > 0 && frames[depth - 1].is_mapping &&
+          !frames[depth - 1].expect_key)
+        frames[depth - 1].expect_key = true;
+      if (depth == capacity) {
+        size_t new_capacity = capacity == 0 ? 16 : capacity * 2;
+        YamlFrame *new_frames;
+        if (new_capacity < capacity ||
+            new_capacity > SIZE_MAX / sizeof *frames) {
+          failed = true;
+          break;
+        }
+        new_frames = realloc(frames, new_capacity * sizeof *frames);
+        if (new_frames == NULL) {
+          failed = true;
+          break;
+        }
+        frames = new_frames;
+        capacity = new_capacity;
+      }
+      frames[depth++] = (YamlFrame){
+          .is_mapping = is_mapping,
+          .expect_key = true,
+          .closes_as_mapping_key = closes_as_mapping_key,
+      };
+      break;
+    }
+    case YAML_MAPPING_END_EVENT:
+    case YAML_SEQUENCE_END_EVENT:
+      if (depth > 0) {
+        bool closes_as_mapping_key = frames[depth - 1].closes_as_mapping_key;
+        --depth;
+        if (closes_as_mapping_key && depth > 0 && frames[depth - 1].is_mapping)
+          frames[depth - 1].expect_key = false;
+      }
+      break;
+    case YAML_SCALAR_EVENT:
+      if (event.data.scalar.style == YAML_LITERAL_SCALAR_STYLE ||
+          event.data.scalar.style == YAML_FOLDED_SCALAR_STYLE) {
+        size_t start;
+        size_t end;
+        if (!yaml_mark_to_byte_offset(content, event.start_mark.index,
+                                      &start) ||
+            !yaml_mark_to_byte_offset(content, event.end_mark.index, &end)) {
+          failed = true;
+        } else if (yaml_block_scalar_has_bare_cr(content, start, end)) {
+          stringifier_error = true;
+        }
+      }
+      if (depth > 0 && frames[depth - 1].is_mapping) {
+        YamlFrame *frame = &frames[depth - 1];
+        if (frame->expect_key) {
+          size_t key_start;
+          if (!yaml_mark_to_byte_offset(content, event.start_mark.index,
+                                        &key_start))
+            failed = true;
+          else if (yaml_bare_cr_precedes_key(content, key_start))
+            stringifier_error = true;
+          frame->expect_key = false;
+        } else {
+          frame->expect_key = true;
+        }
+      }
+      break;
+    case YAML_ALIAS_EVENT:
+      if (depth > 0 && frames[depth - 1].is_mapping) {
+        YamlFrame *frame = &frames[depth - 1];
+        if (frame->expect_key) {
+          size_t key_start;
+          if (!yaml_mark_to_byte_offset(content, event.start_mark.index,
+                                        &key_start))
+            failed = true;
+          else if (yaml_bare_cr_precedes_key(content, key_start))
+            stringifier_error = true;
+          frame->expect_key = false;
+        } else {
+          frame->expect_key = true;
+        }
+      }
+      break;
+    default:
+      break;
+    }
+    stream_end = event.type == YAML_STREAM_END_EVENT;
+    yaml_event_delete(&event);
+    if (failed || stringifier_error || stream_end)
+      break;
+  }
+  yaml_parser_delete(&parser);
+  free(frames);
+  return stringifier_error ? 1 : (failed ? -1 : 0);
+}
+
 static int yaml_previous_explicit_version_key(const char *content,
                                               size_t line_start,
                                               size_t key_start,
@@ -4532,6 +4666,11 @@ int csemver_version_update_text(const char *filename, const char *type,
       !csemver_version_read_text(filename, type, content, old_version,
                                  old_version_size, NULL, error, error_size))
     return 0;
+  if ((strcmp(kind, "yaml") == 0 || strcmp(kind, "openapi") == 0) &&
+      yaml_has_bare_cr_stringifier_error(content) > 0) {
+    set_error(error, error_size, "Document with errors cannot be stringified");
+    return 0;
+  }
   if (strcmp(kind, "gradle") == 0) {
     static const char prefix[] = "version = \"";
     Range gradle_range;
