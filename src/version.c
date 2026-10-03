@@ -661,6 +661,7 @@ typedef struct {
   const Range *insert_version_objects;
   size_t version_count, insert_version_object_count;
   const char *replacement;
+  bool replacement_is_null;
   char indent_char;
   size_t indent_size;
   const char *newline;
@@ -1101,10 +1102,13 @@ static int json_print_object(JsonPrinter *printer, size_t depth) {
         !csemver_buffer_append(output, ": ", 2))
       goto fail;
     if (properties[i].is_replacement) {
-      if (!csemver_buffer_append(output, "\"", 1) ||
-          !csemver_buffer_append(output, printer->replacement,
-                                 strlen(printer->replacement)) ||
-          !csemver_buffer_append(output, "\"", 1))
+      if (printer->replacement_is_null) {
+        if (!csemver_buffer_append(output, "null", 4))
+          goto fail;
+      } else if (!csemver_buffer_append(output, "\"", 1) ||
+                 !csemver_buffer_append(output, printer->replacement,
+                                        strlen(printer->replacement)) ||
+                 !csemver_buffer_append(output, "\"", 1))
         goto fail;
     } else {
       scanner->position = properties[i].value.start;
@@ -1297,13 +1301,14 @@ static int json_print_value(JsonPrinter *printer, size_t depth) {
   start = scanner->position;
   for (i = 0; i < printer->version_count; ++i)
     if (printer->versions[i].start == start) {
-      if (!skip_value(scanner, NULL) ||
-          !csemver_buffer_append(printer->output, "\"", 1) ||
-          !csemver_buffer_append(printer->output, printer->replacement,
-                                 strlen(printer->replacement)) ||
-          !csemver_buffer_append(printer->output, "\"", 1))
+      if (!skip_value(scanner, NULL))
         return 0;
-      return 1;
+      if (printer->replacement_is_null)
+        return csemver_buffer_append(printer->output, "null", 4);
+      return csemver_buffer_append(printer->output, "\"", 1) &&
+             csemver_buffer_append(printer->output, printer->replacement,
+                                   strlen(printer->replacement)) &&
+             csemver_buffer_append(printer->output, "\"", 1);
     }
   first = scanner->text[start];
   if (first == '{')
@@ -1322,6 +1327,7 @@ static int json_print_value(JsonPrinter *printer, size_t depth) {
 
 static int json_update_formatted(const char *content, const Range *versions,
                                  size_t version_count, const char *new_version,
+                                 bool replacement_is_null,
                                  const Range *insert_version_objects,
                                  size_t insert_version_object_count,
                                  char **updated, size_t *updated_size) {
@@ -1341,6 +1347,7 @@ static int json_update_formatted(const char *content, const Range *versions,
   printer.insert_version_object_count = insert_version_object_count;
   printer.version_count = version_count;
   printer.replacement = new_version;
+  printer.replacement_is_null = replacement_is_null;
   printer.newline = newline;
   printer.newline_size = newline_size;
   csemver_buffer_init(&output);
@@ -1854,6 +1861,8 @@ int csemver_version_update_text(const char *filename, const char *type,
                      strstr(filename, ".yml") != NULL
                  ? "yaml"
                  : "plain-text");
+  const bool replacement_is_null = new_version == NULL;
+  const char *replacement = replacement_is_null ? "null" : new_version;
   Range ranges[3];
   Range insertions[2];
   size_t count = 0, insertion_count = 0, i, j, pos = 0,
@@ -1874,8 +1883,9 @@ int csemver_version_update_text(const char *filename, const char *type,
       ranges[count++] = fields.lock_package_version;
     else if (fields.has_lock_package)
       insertions[insertion_count++] = fields.lock_package_object;
-    if (!json_update_formatted(content, ranges, count, new_version, insertions,
-                               insertion_count, updated, updated_size)) {
+    if (!json_update_formatted(content, ranges, count, replacement,
+                               replacement_is_null, insertions, insertion_count,
+                               updated, updated_size)) {
       set_error(error, error_size,
                 "malformed JSON or out of memory updating version file");
       return 0;
@@ -1908,7 +1918,7 @@ int csemver_version_update_text(const char *filename, const char *type,
     if (ranges[i].start < pos || ranges[i].end > length ||
         !csemver_buffer_append(&buffer, content + pos, ranges[i].start - pos))
       goto allocation_error;
-    if (!csemver_buffer_append(&buffer, new_version, strlen(new_version)))
+    if (!csemver_buffer_append(&buffer, replacement, strlen(replacement)))
       goto allocation_error;
     pos = ranges[i].end;
   }

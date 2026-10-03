@@ -2407,6 +2407,31 @@ static int release_as_is_valid(const char *release_as) {
          strcmp(release_type, "patch") == 0;
 }
 
+/* Upstream validates these types case-insensitively but later passes the
+ * original spelling to semver.inc, which yields null for mixed-case values.
+ */
+static int release_as_type_case_mismatch(const char *release_as) {
+  static const char *const release_types[] = {"major", "minor", "patch"};
+  size_t type_index;
+  size_t release_as_length = strlen(release_as);
+  for (type_index = 0;
+       type_index < sizeof release_types / sizeof release_types[0];
+       ++type_index) {
+    const char *release_type = release_types[type_index];
+    size_t index;
+    if (strlen(release_type) != release_as_length ||
+        strcmp(release_type, release_as) == 0)
+      continue;
+    for (index = 0; index < release_as_length; ++index)
+      if (release_type[index] !=
+          (char)tolower((unsigned char)release_as[index]))
+        break;
+    if (index == release_as_length)
+      return 1;
+  }
+  return 0;
+}
+
 static int validate_release_as_prerelease(const CsemverConfig *config) {
   Semver release_version;
   if (!config->has_prerelease || config->release_as[0] == '\0' ||
@@ -2530,6 +2555,7 @@ static int generate_version(const CsemverConfig *config, const char *current,
 }
 
 static int update_files(const CsemverConfig *config, const char *version,
+                        bool version_is_null,
                         char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX],
                         size_t *path_count, bool dry_run) {
   size_t i;
@@ -2552,8 +2578,8 @@ static int update_files(const CsemverConfig *config, const char *version,
       continue;
     if (!csemver_version_update_text(
             config->bump_files[i].filename, config->bump_files[i].type, content,
-            version, &updated, &updated_size, old_version, sizeof old_version,
-            error, sizeof error)) {
+            version_is_null ? NULL : version, &updated, &updated_size,
+            old_version, sizeof old_version, error, sizeof error)) {
       fflush(stdout);
       fprintf(stderr, "%s\n", error);
       free(content);
@@ -2841,6 +2867,7 @@ int csemver_main(int argc, char **argv) {
   char message[CSEMVER_VALUE_MAX];
   bool is_private = false;
   bool lerna_bump = false;
+  bool release_as_null = false;
   size_t tag_count = 0, commit_count = 0, path_count = 0;
   Commit *commits = NULL;
   char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX];
@@ -2941,15 +2968,18 @@ int csemver_main(int argc, char **argv) {
   } else {
     if (config.release_as[0] == '\0' && bump == 0)
       bump = 1;
-    if (!generate_version(&config, current, bump, stable_version, next,
-                          sizeof next)) {
+    if (release_as_type_case_mismatch(config.release_as)) {
+      snprintf(next, sizeof next, "null");
+      release_as_null = true;
+    } else if (!generate_version(&config, current, bump, stable_version, next,
+                                 sizeof next)) {
       free(commits);
       errorf(
           "no releasable conventional commits found, or invalid release type");
       return 1;
     }
-    if (!resolve_unique_prerelease(&config, tags, tag_count, next,
-                                   sizeof next)) {
+    if (!release_as_null && !resolve_unique_prerelease(&config, tags, tag_count,
+                                                       next, sizeof next)) {
       free(commits);
       errorf("cannot resolve unique prerelease version");
       return 1;
@@ -2982,10 +3012,20 @@ int csemver_main(int argc, char **argv) {
       }
     }
   }
-  if (!config.dry_run &&
-      !update_files(&config, next, paths, &path_count, false)) {
+  if (!config.dry_run && !update_files(&config, next, release_as_null, paths,
+                                       &path_count, false)) {
     free(commits);
     return 1;
+  }
+  if (release_as_null) {
+    if (config.dry_run && (!update_files(&config, next, release_as_null, paths,
+                                         &path_count, true) ||
+                           !run_lifecycle(&config, "postbump"))) {
+      free(commits);
+      return 1;
+    }
+    free(commits);
+    return 0;
   }
   if ((!config.dry_run || lerna_bump) &&
       !read_commits(&config, latest_tag[0] == '\0' ? NULL : latest_tag, commits,
@@ -2996,7 +3036,7 @@ int csemver_main(int argc, char **argv) {
     return 1;
   }
   if (config.dry_run && !config.skip_bump && !config.first_release &&
-      !update_files(&config, next, paths, &path_count, true)) {
+      !update_files(&config, next, false, paths, &path_count, true)) {
     free(commits);
     return 1;
   }

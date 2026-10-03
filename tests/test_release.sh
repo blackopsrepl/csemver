@@ -351,6 +351,38 @@ test -z "$silent_invalid_release_output"
 test "$(git rev-parse HEAD)" = "$invalid_release_head"
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/release-as-uppercase"
+cd "$tmp/release-as-uppercase"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{"name":"release-as-uppercase","version":"1.0.0"}\n' > package.json
+printf '{"name":"release-as-uppercase","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"release-as-uppercase","version":"1.0.0"}}}\n' > package-lock.json
+git add package.json package-lock.json
+git commit -qm 'chore: initialize uppercase release-as fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git commit --allow-empty -qm 'fix: exercise uppercase release-as'
+uppercase_release_head=$(git rev-parse HEAD)
+if uppercase_release_output=$("$bin" --release-as MAJOR 2>&1); then
+  uppercase_release_status=0
+else
+  uppercase_release_status=$?
+fi
+test "$uppercase_release_status" -eq 0
+expected_uppercase_release_output=$(printf '%s\n%s' \
+  '✔ bumping version in package.json from 1.0.0 to null' \
+  '✔ bumping version in package-lock.json from 1.0.0 to null')
+test "$uppercase_release_output" = "$expected_uppercase_release_output"
+printf '{\n  "name": "release-as-uppercase",\n  "version": null\n}\n' > "$tmp/release-as-uppercase.expected"
+cmp "$tmp/release-as-uppercase.expected" package.json
+printf '{\n  "name": "release-as-uppercase",\n  "version": null,\n  "lockfileVersion": 3,\n  "packages": {\n    "": {\n      "name": "release-as-uppercase",\n      "version": null\n    }\n  }\n}\n' > "$tmp/release-as-uppercase-lock.expected"
+cmp "$tmp/release-as-uppercase-lock.expected" package-lock.json
+test "$(git rev-parse HEAD)" = "$uppercase_release_head"
+test "$(git tag --list)" = v1.0.0
+test "$(git status --porcelain)" = ' M package-lock.json
+ M package.json'
+
 mkdir "$tmp/release-as-prerelease"
 cd "$tmp/release-as-prerelease"
 git init -q -b master
