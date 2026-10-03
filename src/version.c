@@ -25,6 +25,9 @@ typedef struct {
   bool closes_as_mapping_key;
 } YamlFrame;
 typedef struct {
+  size_t output_start;
+} YamlFlowFrame;
+typedef struct {
   const char *text;
   size_t position, length;
 } Scanner;
@@ -2078,6 +2081,160 @@ static int yaml_version_range(const char *content, bool openapi, Range *range,
   return found && !failed;
 }
 
+static void yaml_trim_trailing_horizontal_space(CsemverBuffer *buffer) {
+  while (buffer->length > 0 && (buffer->data[buffer->length - 1] == ' ' ||
+                                buffer->data[buffer->length - 1] == '\t'))
+    --buffer->length;
+  if (buffer->data != NULL)
+    buffer->data[buffer->length] = '\0';
+}
+
+static int yaml_normalize_single_line_flow(const char *content, char **output,
+                                           size_t *output_size) {
+  size_t length = strlen(content);
+  size_t line_length = length;
+  size_t position = 0;
+  size_t depth = 0;
+  size_t capacity = 0;
+  bool failed = false;
+  yaml_parser_t parser;
+  YamlFlowFrame *frames = NULL;
+  CsemverBuffer buffer;
+  if (line_length > 0 && content[line_length - 1] == '\n') {
+    --line_length;
+    if (line_length > 0 && content[line_length - 1] == '\r')
+      --line_length;
+  }
+  if (memchr(content, '\n', line_length) != NULL ||
+      memchr(content, '\r', line_length) != NULL) {
+    csemver_buffer_init(&buffer);
+    if (!csemver_buffer_append(&buffer, content, length)) {
+      csemver_buffer_free(&buffer);
+      return 0;
+    }
+    *output = buffer.data;
+    *output_size = buffer.length;
+    return 1;
+  }
+  if (!yaml_parser_initialize(&parser))
+    return 0;
+  yaml_parser_set_input_string(&parser, (const unsigned char *)content, length);
+  csemver_buffer_init(&buffer);
+  for (;;) {
+    yaml_token_t token;
+    yaml_token_type_t type;
+    bool done;
+    if (!yaml_parser_scan(&parser, &token)) {
+      failed = true;
+      break;
+    }
+    type = token.type;
+    done = type == YAML_STREAM_END_TOKEN;
+    if (type == YAML_FLOW_MAPPING_START_TOKEN ||
+        type == YAML_FLOW_SEQUENCE_START_TOKEN) {
+      size_t start;
+      size_t end;
+      char opener = type == YAML_FLOW_MAPPING_START_TOKEN ? '{' : '[';
+      char closer = type == YAML_FLOW_MAPPING_START_TOKEN ? '}' : ']';
+      size_t next;
+      bool empty;
+      if (!yaml_mark_to_byte_offset(content, token.start_mark.index, &start) ||
+          !yaml_mark_to_byte_offset(content, token.end_mark.index, &end) ||
+          start < position || end < start ||
+          !csemver_buffer_append(&buffer, content + position,
+                                 start - position) ||
+          !csemver_buffer_append(&buffer, &opener, 1)) {
+        failed = true;
+      } else {
+        if (depth == capacity) {
+          size_t new_capacity = capacity == 0 ? 16 : capacity * 2;
+          YamlFlowFrame *new_frames;
+          if (new_capacity < capacity ||
+              new_capacity > SIZE_MAX / sizeof *frames) {
+            failed = true;
+          } else {
+            new_frames = realloc(frames, new_capacity * sizeof *frames);
+            if (new_frames == NULL)
+              failed = true;
+            else {
+              frames = new_frames;
+              capacity = new_capacity;
+            }
+          }
+        }
+        if (!failed) {
+          frames[depth++].output_start = buffer.length - 1;
+          position = end;
+          next = position;
+          while (next < line_length &&
+                 (content[next] == ' ' || content[next] == '\t'))
+            ++next;
+          empty = next < line_length && content[next] == closer;
+          position = next;
+          if (!empty && !csemver_buffer_append(&buffer, " ", 1))
+            failed = true;
+        }
+      }
+    } else if (type == YAML_FLOW_MAPPING_END_TOKEN ||
+               type == YAML_FLOW_SEQUENCE_END_TOKEN) {
+      size_t start;
+      size_t end;
+      char closer = type == YAML_FLOW_MAPPING_END_TOKEN ? '}' : ']';
+      if (depth == 0 ||
+          !yaml_mark_to_byte_offset(content, token.start_mark.index, &start) ||
+          !yaml_mark_to_byte_offset(content, token.end_mark.index, &end) ||
+          start < position || end < start ||
+          !csemver_buffer_append(&buffer, content + position,
+                                 start - position)) {
+        failed = true;
+      } else {
+        yaml_trim_trailing_horizontal_space(&buffer);
+        if (buffer.length > frames[depth - 1].output_start + 1 &&
+            !csemver_buffer_append(&buffer, " ", 1))
+          failed = true;
+        if (!failed && !csemver_buffer_append(&buffer, &closer, 1))
+          failed = true;
+        position = end;
+        --depth;
+      }
+    } else if ((type == YAML_FLOW_ENTRY_TOKEN || type == YAML_VALUE_TOKEN) &&
+               depth > 0) {
+      size_t start;
+      size_t end;
+      char separator = type == YAML_FLOW_ENTRY_TOKEN ? ',' : ':';
+      if (!yaml_mark_to_byte_offset(content, token.start_mark.index, &start) ||
+          !yaml_mark_to_byte_offset(content, token.end_mark.index, &end) ||
+          start < position || end < start ||
+          !csemver_buffer_append(&buffer, content + position,
+                                 start - position)) {
+        failed = true;
+      } else {
+        yaml_trim_trailing_horizontal_space(&buffer);
+        if (!csemver_buffer_append(&buffer, &separator, 1) ||
+            !csemver_buffer_append(&buffer, " ", 1))
+          failed = true;
+        position = end;
+        while (position < line_length &&
+               (content[position] == ' ' || content[position] == '\t'))
+          ++position;
+      }
+    }
+    yaml_token_delete(&token);
+    if (failed || done)
+      break;
+  }
+  yaml_parser_delete(&parser);
+  free(frames);
+  if (failed || depth != 0 ||
+      !csemver_buffer_append(&buffer, content + position, length - position)) {
+    csemver_buffer_free(&buffer);
+    return 0;
+  }
+  *output = buffer.data;
+  *output_size = buffer.length;
+  return 1;
+}
+
 static int python_version_range(const char *content, Range *range,
                                 char *version, size_t version_size) {
   static const char keyword[] = "version";
@@ -2504,6 +2661,17 @@ int csemver_version_update_text(const char *filename, const char *type,
   }
   if (!csemver_buffer_append(&buffer, content + pos, length - pos))
     goto allocation_error;
+  if (strcmp(kind, "yaml") == 0 || strcmp(kind, "openapi") == 0) {
+    char *normalized;
+    size_t normalized_size;
+    if (!yaml_normalize_single_line_flow(buffer.data, &normalized,
+                                         &normalized_size))
+      goto allocation_error;
+    csemver_buffer_free(&buffer);
+    *updated = normalized;
+    *updated_size = normalized_size;
+    return 1;
+  }
   *updated = buffer.data;
   *updated_size = buffer.length;
   return 1;
