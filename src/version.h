@@ -25,5 +25,7 @@ int csemver_json_object_string_array(const char *content,
                                      const char *field_key, char *values,
                                      size_t value_stride, size_t max_values,
                                      size_t *value_count);
+int csemver_json_object_unsigned(const char *content, const char *object_key,
+                                 const char *field_key, unsigned *value);
 
 #endif

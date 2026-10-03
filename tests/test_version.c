@@ -79,6 +79,26 @@ static void test_json_package_config_string_arrays(void) {
   assert(count == 0);
 }
 
+static void test_json_package_config_unsigned(void) {
+  const char *package_json = "{\"commit-and-tag-version\":{\"releaseCount\":0,"
+                             "\"release-count\":12,\"fraction\":1.5,"
+                             "\"tooLarge\":18446744073709551616}}";
+  unsigned value = 7;
+
+  assert(csemver_json_object_unsigned(package_json, "commit-and-tag-version",
+                                      "releaseCount", &value));
+  assert(value == 0);
+  assert(csemver_json_object_unsigned(package_json, "commit-and-tag-version",
+                                      "release-count", &value));
+  assert(value == 12);
+  assert(!csemver_json_object_unsigned(package_json, "commit-and-tag-version",
+                                       "fraction", &value));
+  assert(value == 12);
+  assert(!csemver_json_object_unsigned(package_json, "commit-and-tag-version",
+                                       "tooLarge", &value));
+  assert(value == 12);
+}
+
 static void test_json_round_trip(void) {
   const char *input = "{\r\n\t\"name\": \"fixture\",\r\n"
                       "\t\"version\": \"1.2.3\",\r\n"
@@ -333,6 +353,7 @@ int main(void) {
   test_json_package_config_strings();
   test_json_package_config_booleans();
   test_json_package_config_string_arrays();
+  test_json_package_config_unsigned();
   test_json_round_trip();
   test_json_compact_input_uses_default_upstream_indent();
   test_json_escape_sequences_normalize_like_upstream();

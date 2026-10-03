@@ -212,6 +212,8 @@ static int load_package_config(CsemverConfig *config) {
       {"package-files", "package-files", CSEMVER_MAX_FILES},
       {"issuePrefixes", "issuePrefixes", CSEMVER_MAX_PREFIXES},
       {"issue-prefixes", "issue-prefixes", CSEMVER_MAX_PREFIXES}};
+  static const char *const numeric_options[] = {"releaseCount",
+                                                "release-count"};
   char *contents = NULL;
   char error[256] = {0};
   size_t section_index, option_index;
@@ -271,6 +273,14 @@ static int load_package_config(CsemverConfig *config) {
         free(contents);
         return 0;
       }
+    }
+    for (option_index = 0;
+         option_index < sizeof numeric_options / sizeof numeric_options[0];
+         ++option_index) {
+      unsigned value;
+      if (csemver_json_object_unsigned(contents, sections[section_index],
+                                       numeric_options[option_index], &value))
+        config->release_count = value;
     }
   }
   free(contents);

@@ -791,4 +791,47 @@ grep -Fq '"version": "1.0.0"' package.json || {
   exit 1
 }
 
+mkdir "$tmp/pkg-number-config"
+cd "$tmp/pkg-number-config"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-number-config-fixture",
+  "version": "1.0.0",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-number-config.git"},
+  "commit-and-tag-version": {"releaseCount": 0}
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed package number config fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-number-config-fixture",
+  "version": "1.1.0",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-number-config.git"},
+  "commit-and-tag-version": {"releaseCount": 0}
+}
+JSON
+git add package.json
+git commit -qm 'feat: release 1.1.0'
+git tag -a v1.1.0 -m 'release 1.1.0'
+git commit --allow-empty -qm 'fix: current change'
+"$bin" --skip.commit --skip.tag > /dev/null
+grep -Fq '## 1.0.0 (' CHANGELOG.md || {
+  printf '%s\n' 'package.json releaseCount should retain full history' >&2
+  exit 1
+}
+package_header_gap=$(awk '
+  /^All notable changes/ { in_header = 1; next }
+  in_header && NF == 0 { blanks++; next }
+  in_header { print blanks; exit }
+' CHANGELOG.md)
+test "$package_header_gap" -eq 2 || {
+  printf '%s\n' 'releaseCount=0 should leave two blank lines before the first heading' >&2
+  exit 1
+}
+
 printf '%s\n' 'release workflow tests passed'

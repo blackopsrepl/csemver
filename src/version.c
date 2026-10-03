@@ -3,6 +3,7 @@
 #include "common.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1133,6 +1134,30 @@ int csemver_json_object_string_array(const char *content,
   if (array.position != array.length)
     return 0;
   *value_count = count;
+  return 1;
+}
+
+int csemver_json_object_unsigned(const char *content, const char *object_key,
+                                 const char *field_key, unsigned *value) {
+  Range field;
+  unsigned number = 0;
+  size_t position;
+
+  if (value == NULL ||
+      !json_config_field(content, object_key, field_key, &field, NULL, 0) ||
+      field.start >= field.end)
+    return 0;
+  for (position = field.start; position < field.end; ++position) {
+    unsigned char character = (unsigned char)content[position];
+    unsigned digit;
+    if (character < '0' || character > '9')
+      return 0;
+    digit = (unsigned)(character - '0');
+    if (number > (UINT_MAX - digit) / 10)
+      return 0;
+    number = number * 10 + digit;
+  }
+  *value = number;
   return 1;
 }
 
