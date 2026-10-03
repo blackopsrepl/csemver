@@ -1619,6 +1619,29 @@ test ! -s "$tmp/lifecycle-failure-silent.stderr"
 test -z "$(git status --porcelain)"
 test "$(git tag --list 'v1.1.0')" = ''
 
+mkdir "$tmp/lifecycle-stream-fds"
+cd "$tmp/lifecycle-stream-fds"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "lifecycle-stream-fds-fixture",
+  "version": "1.0.0",
+  "commit-and-tag-version": {
+    "scripts": {
+      "prerelease": "if test -S /proc/self/fd/1 && test -S /proc/self/fd/2; then yes x | head -c 262144; yes y | head -c 262144 >&2; else printf non-socket >&2; fi"
+    }
+  }
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed lifecycle stream descriptor fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: inspect lifecycle output descriptors'
+timeout 30 "$bin" --skip.changelog --skip.commit --skip.tag > "$tmp/lifecycle-stream-fds.stdout" 2> "$tmp/lifecycle-stream-fds.stderr"
+test "$(wc -c < "$tmp/lifecycle-stream-fds.stderr")" -eq 262145
+
 mkdir "$tmp/no-package-fallback-disabled"
 cd "$tmp/no-package-fallback-disabled"
 git init -q -b master
