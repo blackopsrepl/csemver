@@ -1317,6 +1317,26 @@ if printf '%s\n' "$skip_bump_preview" | grep -Fq 'exercise disabled tag fallback
   exit 1
 fi
 
+mkdir "$tmp/tag-fallback-enabled"
+cd "$tmp/tag-fallback-enabled"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+git remote add origin https://github.com/example/csemver.git
+printf 'seed\n' > README.md
+git add README.md
+git commit -qm 'chore: seed without a version file'
+git tag -a android/production/v1.0.0 -m 'release 1.0.0'
+git tag -a android/production/v1.2.0 -m 'release 1.2.0'
+git commit --allow-empty -qm 'feat: release from the latest prefixed tag'
+"$bin" --tag-prefix android/production/v > /dev/null
+test "$(git tag --list 'android/production/v1.3.0')" = 'android/production/v1.3.0'
+test "$(git rev-parse 'refs/tags/android/production/v1.3.0^{}')" = "$(git rev-parse HEAD)"
+test ! -e package.json
+grep -Fq '## [1.3.0](https://github.com/example/csemver/compare/android/production/v1.2.0...android/production/v1.3.0)' CHANGELOG.md
+test -z "$(git status --porcelain)"
+
 mkdir "$tmp/malformed-package-lock"
 cd "$tmp/malformed-package-lock"
 git init -q -b master
