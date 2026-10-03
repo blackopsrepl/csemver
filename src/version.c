@@ -1902,6 +1902,62 @@ static int gradle_version_range(const char *content, Range *range,
   return 0;
 }
 
+static int csproj_version_range(const char *content, Range *range,
+                                char *version, size_t version_size) {
+  static const char open_tag[] = "<Version>";
+  static const char close_tag[] = "</Version>";
+  const char *line = content;
+  while (*line != '\0') {
+    const char *end = strpbrk(line, "\r\n");
+    const char *limit = end == NULL ? line + strlen(line) : end;
+    const char *start = NULL;
+    const char *scan;
+    for (scan = line; (size_t)(limit - scan) >= sizeof open_tag - 1; ++scan) {
+      if (memcmp(scan, open_tag, sizeof open_tag - 1) == 0) {
+        start = scan;
+        break;
+      }
+    }
+    if (start != NULL) {
+      const char *value_start = start + sizeof open_tag - 1;
+      const char *close = NULL;
+      for (scan = value_start; (size_t)(limit - scan) >= sizeof close_tag - 1;
+           ++scan) {
+        if (memcmp(scan, close_tag, sizeof close_tag - 1) == 0)
+          close = scan;
+      }
+      if (close != NULL) {
+        size_t version_length = (size_t)(close - value_start);
+        if (version != NULL) {
+          if (version_length >= version_size)
+            return 0;
+          memcpy(version, value_start, version_length);
+          version[version_length] = '\0';
+        }
+        if (range != NULL) {
+          range->start = (size_t)(start - content);
+          range->end = (size_t)(close + sizeof close_tag - 1 - content);
+        }
+        return 1;
+      }
+    }
+    if (end == NULL)
+      break;
+    line = end + 1;
+    if (*end == '\r' && *line == '\n')
+      ++line;
+  }
+  return 0;
+}
+
+static int version_filename_ends_with(const char *filename,
+                                      const char *suffix) {
+  size_t filename_length = strlen(filename);
+  size_t suffix_length = strlen(suffix);
+  return filename_length >= suffix_length &&
+         strcmp(filename + filename_length - suffix_length, suffix) == 0;
+}
+
 int csemver_version_read_text(const char *filename, const char *type,
                               const char *content, char *version,
                               size_t version_size, bool *is_private,
@@ -1909,10 +1965,11 @@ int csemver_version_read_text(const char *filename, const char *type,
   const char *kind =
       type != NULL && type[0] != '\0'
           ? type
-          : (strstr(filename, ".json") != NULL            ? "json"
-             : strstr(filename, "pyproject.toml") != NULL ? "python"
-             : strstr(filename, ".toml") != NULL          ? "toml"
-             : strstr(filename, "build.gradle") != NULL   ? "gradle"
+          : (strstr(filename, ".json") != NULL                 ? "json"
+             : strstr(filename, "pyproject.toml") != NULL      ? "python"
+             : strstr(filename, ".toml") != NULL               ? "toml"
+             : strstr(filename, "build.gradle") != NULL        ? "gradle"
+             : version_filename_ends_with(filename, ".csproj") ? "csproj"
              : strstr(filename, ".yaml") != NULL ||
                      strstr(filename, ".yml") != NULL
                  ? "yaml"
@@ -1953,6 +2010,14 @@ int csemver_version_read_text(const char *filename, const char *type,
               "present?");
     return 0;
   }
+  if (strcmp(kind, "csproj") == 0) {
+    if (csproj_version_range(content, NULL, version, version_size))
+      return 1;
+    set_error(error, error_size,
+              "Failed to read the Version field in your csproj file - is it "
+              "present?");
+    return 0;
+  }
   if ((strcmp(kind, "python") == 0 || strcmp(kind, "toml") == 0) &&
       line_version(content, "version", false, NULL, version, version_size))
     return 1;
@@ -1990,10 +2055,11 @@ int csemver_version_update_text(const char *filename, const char *type,
   const char *kind =
       type != NULL && type[0] != '\0'
           ? type
-          : (strstr(filename, ".json") != NULL            ? "json"
-             : strstr(filename, "pyproject.toml") != NULL ? "python"
-             : strstr(filename, ".toml") != NULL          ? "toml"
-             : strstr(filename, "build.gradle") != NULL   ? "gradle"
+          : (strstr(filename, ".json") != NULL                 ? "json"
+             : strstr(filename, "pyproject.toml") != NULL      ? "python"
+             : strstr(filename, ".toml") != NULL               ? "toml"
+             : strstr(filename, "build.gradle") != NULL        ? "gradle"
+             : version_filename_ends_with(filename, ".csproj") ? "csproj"
              : strstr(filename, ".yaml") != NULL ||
                      strstr(filename, ".yml") != NULL
                  ? "yaml"
@@ -2029,6 +2095,31 @@ int csemver_version_update_text(const char *filename, const char *type,
     }
     *updated = gradle_buffer.data;
     *updated_size = gradle_buffer.length;
+    return 1;
+  }
+  if (strcmp(kind, "csproj") == 0) {
+    static const char open_tag[] = "<Version>";
+    static const char close_tag[] = "</Version>";
+    Range csproj_range;
+    CsemverBuffer csproj_buffer;
+    if (!csproj_version_range(content, &csproj_range, NULL, 0))
+      goto bad_format;
+    csemver_buffer_init(&csproj_buffer);
+    if (!csemver_buffer_append(&csproj_buffer, content, csproj_range.start) ||
+        !csemver_buffer_append(&csproj_buffer, open_tag, sizeof open_tag - 1) ||
+        !csemver_buffer_append(&csproj_buffer, replacement,
+                               strlen(replacement)) ||
+        !csemver_buffer_append(&csproj_buffer, close_tag,
+                               sizeof close_tag - 1) ||
+        !csemver_buffer_append(&csproj_buffer, content + csproj_range.end,
+                               length - csproj_range.end) ||
+        !csemver_buffer_append(&csproj_buffer, "", 0)) {
+      csemver_buffer_free(&csproj_buffer);
+      set_error(error, error_size, "out of memory updating version file");
+      return 0;
+    }
+    *updated = csproj_buffer.data;
+    *updated_size = csproj_buffer.length;
     return 1;
   }
   if (strcmp(kind, "json") == 0) {

@@ -610,6 +610,29 @@ static void test_gradle_updater_handles_carriage_return_lines(void) {
   free(updated);
 }
 
+static void test_csproj_updater_matches_upstream(void) {
+  const char *input =
+      "<Project>\n    <PropertyGroup>\n        <Version>6.3.1</Version>\n"
+      "    </PropertyGroup>\n</Project>\n";
+  const char *expected =
+      "<Project>\n    <PropertyGroup>\n        <Version>6.4.0</Version>\n"
+      "    </PropertyGroup>\n</Project>\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_read_text("Project.csproj", "csproj", input, version,
+                                   sizeof version, NULL, error, sizeof error));
+  assert(strcmp(version, "6.3.1") == 0);
+  assert(csemver_version_update_text("Project.csproj", "csproj", input, "6.4.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
 int main(void) {
   test_repository_url_forms();
   test_json_package_config_strings();
@@ -642,6 +665,7 @@ int main(void) {
   test_toml_and_yaml_surface();
   test_gradle_updater_matches_upstream();
   test_gradle_updater_handles_carriage_return_lines();
+  test_csproj_updater_matches_upstream();
   puts("version file tests passed");
   return 0;
 }

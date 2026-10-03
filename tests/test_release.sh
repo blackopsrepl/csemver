@@ -1771,6 +1771,84 @@ GRADLE
 cmp "$tmp/gradle-updater.expected" build.gradle.kts
 test "$(git tag --list 'v6.4.0')" = ''
 
+mkdir "$tmp/csproj-updater"
+cd "$tmp/csproj-updater"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "csproj-updater-fixture",
+  "commit-and-tag-version": {
+    "packageFiles": [{"filename": "Project.csproj", "type": "csproj"}],
+    "bumpFiles": ["Project.csproj"]
+  }
+}
+JSON
+cat > Project.csproj <<'CSPROJ'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net7.0</TargetFramework>
+    <Version>6.3.1</Version>
+  </PropertyGroup>
+</Project>
+CSPROJ
+git add package.json Project.csproj
+git commit -qm 'chore: seed C# project updater fixture'
+git tag -a v6.3.1 -m 'release 6.3.1'
+git commit --allow-empty -qm 'feat: add C# project feature'
+csproj_output=$("$bin" --skip.changelog --skip.commit --skip.tag)
+printf '%s\n' "$csproj_output" | grep -Fq '✔ bumping version in Project.csproj from 6.3.1 to 6.4.0'
+cat > "$tmp/csproj-updater.expected" <<'CSPROJ'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net7.0</TargetFramework>
+    <Version>6.4.0</Version>
+  </PropertyGroup>
+</Project>
+CSPROJ
+cmp "$tmp/csproj-updater.expected" Project.csproj
+test "$(git tag --list 'v6.4.0')" = ''
+
+mkdir "$tmp/csproj-invalid-version"
+cd "$tmp/csproj-invalid-version"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "csproj-invalid-version-fixture",
+  "commit-and-tag-version": {
+    "packageFiles": [{"filename": "Project.csproj", "type": "csproj"}],
+    "bumpFiles": [{"filename": "Project.csproj", "type": "csproj"}]
+  }
+}
+JSON
+printf '%s\n' '<Project><Version>not a version</Version></Project>' > Project.csproj
+git add package.json Project.csproj
+git commit -qm 'chore: seed invalid C# project version'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: test invalid C# project version'
+if "$bin" --skip.changelog --skip.commit --skip.tag > "$tmp/csproj-invalid.stdout" 2> "$tmp/csproj-invalid.stderr"; then
+  exit 1
+else
+  csproj_invalid_status=$?
+fi
+test "$csproj_invalid_status" -eq 1
+printf '%s\n' 'Invalid Version: not a version' > "$tmp/csproj-invalid.expected"
+cmp "$tmp/csproj-invalid.expected" "$tmp/csproj-invalid.stderr"
+test ! -s "$tmp/csproj-invalid.stdout"
+if "$bin" --skip.changelog --skip.commit --skip.tag --silent > "$tmp/csproj-invalid-silent.stdout" 2> "$tmp/csproj-invalid-silent.stderr"; then
+  exit 1
+else
+  csproj_invalid_silent_status=$?
+fi
+test "$csproj_invalid_silent_status" -eq 1
+test ! -s "$tmp/csproj-invalid-silent.stdout"
+test ! -s "$tmp/csproj-invalid-silent.stderr"
+test -z "$(git status --porcelain)"
+test "$(git tag --list)" = 'v1.0.0'
+
 mkdir "$tmp/no-package-fallback-disabled"
 cd "$tmp/no-package-fallback-disabled"
 git init -q -b master
