@@ -1300,6 +1300,34 @@ grep -Fq '"version": "2.4.0"' package.json
 grep -Fq '"version": "2.3.4"' manifest.data
 grep -Fq 'compare/v2.3.4...v2.4.0' CHANGELOG.md
 
+mkdir "$tmp/pkg-package-files-mixed"
+cd "$tmp/pkg-package-files-mixed"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-package-files-mixed-fixture",
+  "version": "1.0.0",
+  "commit-and-tag-version": {
+    "packageFiles": ["VERSION.txt", {"filename": "metadata.json", "type": "json"}]
+  }
+}
+JSON
+printf '2.0.0\n' > VERSION.txt
+printf '{"version":"2.0.0"}\n' > metadata.json
+git add package.json VERSION.txt metadata.json
+git commit -qm 'chore: seed mixed packageFiles fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: test mixed packageFiles'
+mixed_package_files_preview=$("$bin" --dry-run 2>&1)
+printf '%s\n' "$mixed_package_files_preview" | \
+  grep -Fq 'bumping version in package.json from 1.0.0 to 2.1.0' || {
+    printf 'mixed string/object packageFiles should retain their configured source version:\n%s\n' \
+      "$mixed_package_files_preview" >&2
+    exit 1
+  }
+
 mkdir "$tmp/pkg-package-files-cli"
 cd "$tmp/pkg-package-files-cli"
 git init -q -b master

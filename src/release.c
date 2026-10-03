@@ -510,7 +510,7 @@ static int load_package_config(CsemverConfig *config) {
             (strcmp(array_options[option_index].config_key, "package-files") !=
              0))
           continue;
-        if (!csemver_json_object_typed_file_array(
+        if (!csemver_json_object_mixed_file_array(
                 contents, sections[section_index],
                 array_options[option_index].json_key, &values[0][0],
                 sizeof values[0], &file_types[0][0], sizeof file_types[0],
@@ -519,7 +519,7 @@ static int load_package_config(CsemverConfig *config) {
         typed_package_files = 1;
       }
       for (value_index = 0; value_index < value_count; ++value_index) {
-        if (typed_package_files &&
+        if (typed_package_files && file_types[value_index][0] != '\0' &&
             !package_bump_file_type_supported(file_types[value_index])) {
           errorf("unsupported packageFiles updater type: %s",
                  file_types[value_index]);
@@ -541,7 +541,8 @@ static int load_package_config(CsemverConfig *config) {
           for (file_index = 0; file_index < config->package_file_count;
                ++file_index) {
             if (strcmp(config->package_files[file_index].filename,
-                       values[value_index]) == 0)
+                       values[value_index]) == 0 &&
+                file_types[value_index][0] != '\0')
               memcpy(config->package_files[file_index].type,
                      file_types[value_index], sizeof file_types[value_index]);
           }

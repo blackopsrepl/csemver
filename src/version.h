@@ -47,5 +47,11 @@ int csemver_json_object_typed_file_array(const char *content,
                                          size_t filename_stride, char *types,
                                          size_t type_stride, size_t max_values,
                                          size_t *file_count);
+int csemver_json_object_mixed_file_array(const char *content,
+                                         const char *object_key,
+                                         const char *field_key, char *filenames,
+                                         size_t filename_stride, char *types,
+                                         size_t type_stride, size_t max_values,
+                                         size_t *file_count);
 
 #endif

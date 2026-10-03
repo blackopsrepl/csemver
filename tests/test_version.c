@@ -161,6 +161,10 @@ static void test_json_package_config_typed_file_array(void) {
       "{\"commit-and-tag-version\":{\"bumpFiles\":["
       "{\"filename\":\"VERSION\",\"type\":\"plain-text\","
       "\"updater\":\"custom.js\"}]}}";
+  const char *mixed_package_files =
+      "{\"commit-and-tag-version\":{\"packageFiles\":["
+      "\"VERSION.txt\",{\"filename\":\"metadata.json\","
+      "\"type\":\"json\"}]}}";
   char filenames[2][128];
   char types[2][32];
   size_t count = 0;
@@ -177,6 +181,20 @@ static void test_json_package_config_typed_file_array(void) {
       custom_updater, "commit-and-tag-version", "bumpFiles", &filenames[0][0],
       sizeof filenames[0], &types[0][0], sizeof types[0], 2, &count));
   assert(count == 0);
+  assert(!csemver_json_object_typed_file_array(
+      mixed_package_files, "commit-and-tag-version", "packageFiles",
+      &filenames[0][0], sizeof filenames[0], &types[0][0], sizeof types[0], 2,
+      &count));
+  assert(count == 0);
+  assert(csemver_json_object_mixed_file_array(
+      mixed_package_files, "commit-and-tag-version", "packageFiles",
+      &filenames[0][0], sizeof filenames[0], &types[0][0], sizeof types[0], 2,
+      &count));
+  assert(count == 2);
+  assert(strcmp(filenames[0], "VERSION.txt") == 0);
+  assert(types[0][0] == '\0');
+  assert(strcmp(filenames[1], "metadata.json") == 0);
+  assert(strcmp(types[1], "json") == 0);
 }
 
 static void test_json_round_trip(void) {
