@@ -2156,6 +2156,85 @@ static int yaml_append_normalized_flow_fragment(const char *content,
   return success;
 }
 
+static int yaml_format_nested_flow_sequence(
+    const char *fragment, size_t first_entry_start,
+    size_t collection_close_start, const YamlFlowSeparator *separators,
+    size_t separator_count, char **formatted, size_t *formatted_size) {
+  CsemverBuffer sequence;
+  size_t item_start = first_entry_start;
+  size_t separator_index;
+  csemver_buffer_init(&sequence);
+  if (!csemver_buffer_append(&sequence, "[\n  ", 4))
+    goto fail;
+  for (separator_index = 0; separator_index < separator_count;
+       ++separator_index) {
+    const YamlFlowSeparator *separator = &separators[separator_index];
+    size_t comment_start = SIZE_MAX;
+    size_t comment_end;
+    size_t index;
+    bool comment_on_new_line = false;
+    if (separator->start < item_start || separator->end < separator->start ||
+        separator->next_start < separator->end ||
+        separator->next_start > collection_close_start ||
+        !yaml_append_normalized_flow_fragment(fragment, item_start,
+                                              separator->start, &sequence) ||
+        !csemver_buffer_append(&sequence, ",", 1))
+      goto fail;
+    for (index = separator->end; index < separator->next_start; ++index) {
+      if (fragment[index] == '#') {
+        comment_start = index;
+        break;
+      }
+    }
+    if (comment_start == SIZE_MAX) {
+      for (index = separator->end; index < separator->next_start; ++index) {
+        if (!yaml_flow_whitespace(fragment[index]))
+          goto fail;
+      }
+    } else {
+      for (index = separator->end; index < comment_start; ++index) {
+        if (!yaml_flow_whitespace(fragment[index]))
+          goto fail;
+        if (fragment[index] == '\r' || fragment[index] == '\n')
+          comment_on_new_line = true;
+      }
+      index = comment_start;
+      for (;;) {
+        while (index < separator->next_start && fragment[index] != '\r' &&
+               fragment[index] != '\n')
+          ++index;
+        comment_end = index;
+        while (index < separator->next_start &&
+               yaml_flow_whitespace(fragment[index]))
+          ++index;
+        if (index < separator->next_start && fragment[index] == '#')
+          continue;
+        if (index < separator->next_start)
+          goto fail;
+        break;
+      }
+      if (!yaml_append_flow_comment_block(&sequence, fragment, comment_start,
+                                          comment_end - comment_start,
+                                          comment_on_new_line))
+        goto fail;
+    }
+    if (!csemver_buffer_append(&sequence, "\n  ", 3))
+      goto fail;
+    item_start = separator->next_start;
+  }
+  if (item_start >= collection_close_start ||
+      !yaml_append_normalized_flow_fragment(
+          fragment, item_start, collection_close_start, &sequence) ||
+      !csemver_buffer_append(&sequence, "\n]", 2))
+    goto fail;
+  *formatted = sequence.data;
+  *formatted_size = sequence.length;
+  return 1;
+fail:
+  csemver_buffer_free(&sequence);
+  return 0;
+}
+
 static int yaml_format_multiline_root_flow(const char *content, char **output,
                                            size_t *output_size, bool *handled);
 
@@ -2170,9 +2249,8 @@ static int yaml_append_nested_flow_comment_fragment(const char *content,
   size_t first_entry_start = SIZE_MAX;
   size_t collection_close_start = SIZE_MAX;
   size_t collection_close_end = SIZE_MAX;
-  size_t separator_start = SIZE_MAX;
-  size_t separator_end = SIZE_MAX;
-  size_t separator_next_start = SIZE_MAX;
+  YamlFlowSeparator *sequence_separators = NULL;
+  size_t sequence_separator_capacity = 0;
   size_t separator_count = 0;
   size_t comment_start = SIZE_MAX;
   size_t comment_end;
@@ -2222,7 +2300,8 @@ static int yaml_append_nested_flow_comment_fragment(const char *content,
           type != YAML_FLOW_ENTRY_TOKEN &&
           type != YAML_FLOW_MAPPING_END_TOKEN &&
           type != YAML_FLOW_SEQUENCE_END_TOKEN && !done) {
-        separator_next_start = token_start;
+        if (collection_is_sequence)
+          sequence_separators[separator_count - 1].next_start = token_start;
         separator_pending = false;
       }
       if (collection_start != SIZE_MAX && flow_depth == 1 &&
@@ -2232,12 +2311,38 @@ static int yaml_append_nested_flow_comment_fragment(const char *content,
         first_entry_start = token_start;
       if (collection_start != SIZE_MAX && flow_depth == 1 &&
           type == YAML_FLOW_ENTRY_TOKEN) {
-        ++separator_count;
-        if (separator_count == 1) {
-          separator_start = token_start;
-          separator_end = token_end;
-          separator_pending = true;
+        size_t separator_position = separator_count++;
+        if (collection_is_sequence) {
+          if (separator_count > sequence_separator_capacity) {
+            size_t new_capacity = sequence_separator_capacity == 0
+                                      ? 8
+                                      : sequence_separator_capacity * 2;
+            YamlFlowSeparator *new_separators;
+            if (new_capacity < sequence_separator_capacity ||
+                new_capacity > SIZE_MAX / sizeof *sequence_separators) {
+              failed = true;
+            } else {
+              new_separators =
+                  realloc(sequence_separators,
+                          new_capacity * sizeof *sequence_separators);
+              if (new_separators == NULL)
+                failed = true;
+              else {
+                sequence_separators = new_separators;
+                sequence_separator_capacity = new_capacity;
+              }
+            }
+          }
+          if (!failed) {
+            sequence_separators[separator_position].start = token_start;
+            sequence_separators[separator_position].end = token_end;
+            sequence_separators[separator_position].next_start = SIZE_MAX;
+            sequence_separators[separator_position].comment_start = SIZE_MAX;
+            sequence_separators[separator_position].comment_length = 0;
+            sequence_separators[separator_position].comment_on_new_line = false;
+          }
         }
+        separator_pending = true;
       }
       if (type == YAML_FLOW_MAPPING_START_TOKEN ||
           type == YAML_FLOW_SEQUENCE_START_TOKEN) {
@@ -2273,84 +2378,41 @@ static int yaml_append_nested_flow_comment_fragment(const char *content,
       has_nested_collection || collection_start < 1 ||
       collection_open_end > first_entry_start ||
       first_entry_start > collection_close_start ||
-      collection_close_end > length)
+      collection_close_end > length) {
+    free(sequence_separators);
     return 0;
+  }
   prefix_end = collection_start;
   while (prefix_end > 0 &&
          (fragment[prefix_end - 1] == ' ' || fragment[prefix_end - 1] == '\t'))
     --prefix_end;
-  if (prefix_end == 0 || fragment[prefix_end - 1] != ':')
+  if (prefix_end == 0 || fragment[prefix_end - 1] != ':') {
+    free(sequence_separators);
     return 0;
+  }
   for (index = collection_close_end; index < length; ++index) {
-    if (!yaml_flow_whitespace(fragment[index]))
+    if (!yaml_flow_whitespace(fragment[index])) {
+      free(sequence_separators);
       return 0;
+    }
   }
   if (separator_count > 0) {
     char *formatted_collection = NULL;
     size_t formatted_collection_size = 0;
     size_t position = 0;
-    if (!has_comment)
+    if (!has_comment) {
+      free(sequence_separators);
       return 0;
+    }
     if (collection_is_sequence) {
-      size_t sequence_comment_start = SIZE_MAX;
-      size_t sequence_comment_end;
-      size_t second_entry_start = separator_next_start;
-      bool comment_on_new_line = false;
-      CsemverBuffer sequence;
-      if (separator_count != 1 || separator_start == SIZE_MAX ||
-          separator_end == SIZE_MAX || second_entry_start == SIZE_MAX ||
-          first_entry_start > separator_start ||
-          separator_end > second_entry_start ||
-          second_entry_start > collection_close_start)
+      int formatted = yaml_format_nested_flow_sequence(
+          fragment, first_entry_start, collection_close_start,
+          sequence_separators, separator_count, &formatted_collection,
+          &formatted_collection_size);
+      free(sequence_separators);
+      sequence_separators = NULL;
+      if (!formatted)
         return 0;
-      for (index = separator_end; index < second_entry_start; ++index) {
-        if (fragment[index] == '#') {
-          sequence_comment_start = index;
-          break;
-        }
-      }
-      if (sequence_comment_start == SIZE_MAX)
-        return 0;
-      for (index = separator_end; index < sequence_comment_start; ++index) {
-        if (!yaml_flow_whitespace(fragment[index]))
-          return 0;
-        if (fragment[index] == '\r' || fragment[index] == '\n')
-          comment_on_new_line = true;
-      }
-      index = sequence_comment_start;
-      for (;;) {
-        while (index < second_entry_start && fragment[index] != '\r' &&
-               fragment[index] != '\n')
-          ++index;
-        sequence_comment_end = index;
-        while (index < second_entry_start &&
-               yaml_flow_whitespace(fragment[index]))
-          ++index;
-        if (index < second_entry_start && fragment[index] == '#')
-          continue;
-        if (index < second_entry_start)
-          return 0;
-        break;
-      }
-      csemver_buffer_init(&sequence);
-      if (!csemver_buffer_append(&sequence, "[\n  ", 4) ||
-          !yaml_append_normalized_flow_fragment(fragment, first_entry_start,
-                                                separator_start, &sequence) ||
-          !csemver_buffer_append(&sequence, ",", 1) ||
-          !yaml_append_flow_comment_block(
-              &sequence, fragment, sequence_comment_start,
-              sequence_comment_end - sequence_comment_start,
-              comment_on_new_line) ||
-          !csemver_buffer_append(&sequence, "\n  ", 3) ||
-          !yaml_append_normalized_flow_fragment(fragment, second_entry_start,
-                                                collection_close_start,
-                                                &sequence) ||
-          !csemver_buffer_append(&sequence, "\n]", 2)) {
-        csemver_buffer_free(&sequence);
-        return 0;
-      }
-      formatted_collection = sequence.data;
-      formatted_collection_size = sequence.length;
     } else {
       char *nested_input;
       size_t nested_length = collection_close_end - collection_start;
