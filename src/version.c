@@ -2103,6 +2103,32 @@ static int yaml_version_range(const char *content, bool openapi, Range *range,
   return found && !failed;
 }
 
+static int yaml_has_multiple_documents(const char *content) {
+  yaml_parser_t parser;
+  size_t documents = 0;
+  int status = 0;
+  if (!yaml_parser_initialize(&parser))
+    return -1;
+  yaml_parser_set_input_string(&parser, (const unsigned char *)content,
+                               strlen(content));
+  for (;;) {
+    yaml_event_t event;
+    bool stream_end;
+    if (!yaml_parser_parse(&parser, &event)) {
+      status = -1;
+      break;
+    }
+    if (event.type == YAML_DOCUMENT_START_EVENT && ++documents > 1)
+      status = 1;
+    stream_end = event.type == YAML_STREAM_END_EVENT;
+    yaml_event_delete(&event);
+    if (status != 0 || stream_end)
+      break;
+  }
+  yaml_parser_delete(&parser);
+  return status;
+}
+
 static int yaml_normalize_version_line_spacing(CsemverBuffer *buffer,
                                                bool openapi) {
   size_t scalar_end;
@@ -4201,6 +4227,12 @@ int csemver_version_update_text(const char *filename, const char *type,
     size_t rewritten_size;
     char *normalized;
     size_t normalized_size;
+    if (yaml_has_multiple_documents(buffer.data) != 0) {
+      csemver_buffer_free(&buffer);
+      set_error(error, error_size,
+                "Document with errors cannot be stringified");
+      return 0;
+    }
     if (!yaml_normalize_version_line_spacing(&buffer,
                                              strcmp(kind, "openapi") == 0))
       goto allocation_error;

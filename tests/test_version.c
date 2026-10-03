@@ -974,6 +974,54 @@ test_yaml_leading_nested_flow_sequence_comment_matches_upstream_error(void) {
 }
 
 static void
+test_yaml_and_openapi_multiple_documents_match_upstream_error(void) {
+  const char *multiple_documents[] = {
+      "version: 1.2.3\n---\nother: value\n",
+      "version: 1.2.3\n...\n---\nother: value\n",
+  };
+  const char *single_document = "---\nversion: 1.2.3\n";
+  const char *single_expected = "---\nversion: 1.3.0\n";
+  char version[128];
+  char error[256];
+  size_t index;
+
+  for (index = 0;
+       index < sizeof multiple_documents / sizeof multiple_documents[0];
+       ++index) {
+    char *updated = NULL;
+    size_t updated_size = 0;
+    error[0] = '\0';
+    assert(!csemver_version_update_text(
+        "config.yaml", "yaml", multiple_documents[index], "1.3.0", &updated,
+        &updated_size, version, sizeof version, error, sizeof error));
+    assert(strcmp(error, "Document with errors cannot be stringified") == 0);
+    free(updated);
+  }
+  {
+    char *updated = NULL;
+    size_t updated_size = 0;
+    assert(csemver_version_update_text(
+        "config.yaml", "yaml", single_document, "1.3.0", &updated,
+        &updated_size, version, sizeof version, error, sizeof error));
+    assert(updated_size == strlen(single_expected));
+    assert(memcmp(updated, single_expected, updated_size) == 0);
+    free(updated);
+  }
+  {
+    const char *openapi_multiple =
+        "openapi: 3.1.0\ninfo:\n  version: 1.2.3\n---\nother: value\n";
+    char *updated = NULL;
+    size_t updated_size = 0;
+    error[0] = '\0';
+    assert(!csemver_version_update_text(
+        "openapi.yaml", "openapi", openapi_multiple, "1.3.0", &updated,
+        &updated_size, version, sizeof version, error, sizeof error));
+    assert(strcmp(error, "Document with errors cannot be stringified") == 0);
+    free(updated);
+  }
+}
+
+static void
 test_yaml_block_mapping_leading_flow_sequence_comment_matches_error(void) {
   const char *input = "version: 1.2.3\nitems: [# lead\na, b]\n";
   char version[128];
@@ -1443,6 +1491,7 @@ int main(void) {
   test_yaml_multiline_nested_flow_sequence_three_items();
   test_yaml_multiline_nested_flow_sequence_multiple_comments();
   test_yaml_leading_nested_flow_sequence_comment_matches_upstream_error();
+  test_yaml_and_openapi_multiple_documents_match_upstream_error();
   test_yaml_block_mapping_leading_flow_sequence_comment_matches_error();
   test_yaml_block_sequence_comment_moves_before_item();
   test_yaml_block_sequence_comments_normalize_indentation();
