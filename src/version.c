@@ -2093,6 +2093,33 @@ static bool yaml_flow_whitespace(char byte) {
   return byte == ' ' || byte == '\t' || byte == '\r' || byte == '\n';
 }
 
+static int yaml_append_flow_comment_block(CsemverBuffer *output,
+                                          const char *content, size_t start,
+                                          size_t length,
+                                          bool first_on_new_line) {
+  size_t end = start + length;
+  size_t position = start;
+  bool first = true;
+  while (position < end) {
+    size_t line_end = position;
+    const char *prefix = first && !first_on_new_line ? " " : "\n  ";
+    size_t prefix_length = first && !first_on_new_line ? 1 : 3;
+    while (line_end < end && content[line_end] != '\r' &&
+           content[line_end] != '\n')
+      ++line_end;
+    if (!csemver_buffer_append(output, prefix, prefix_length) ||
+        !csemver_buffer_append(output, content + position, line_end - position))
+      return 0;
+    position = line_end;
+    while (position < end && yaml_flow_whitespace(content[position]))
+      ++position;
+    if (position < end && content[position] != '#')
+      return 0;
+    first = false;
+  }
+  return 1;
+}
+
 static int yaml_append_normalized_flow_fragment(const char *content,
                                                 size_t start, size_t end,
                                                 CsemverBuffer *output) {
@@ -2337,16 +2364,19 @@ static int yaml_format_multiline_root_flow(const char *content, char **output,
          ++position) {
       if (content[position] == '#') {
         size_t comment_end = position;
+        size_t scan = position;
         size_t trailing;
-        while (comment_end < separator->next_start &&
-               content[comment_end] != '\r' && content[comment_end] != '\n')
-          ++comment_end;
-        for (trailing = comment_end; trailing < separator->next_start;
-             ++trailing) {
-          if (content[trailing] == '#') {
-            free(separators);
-            return 1;
-          }
+        while (scan < separator->next_start) {
+          while (scan < separator->next_start && content[scan] != '\r' &&
+                 content[scan] != '\n')
+            ++scan;
+          comment_end = scan;
+          while (scan < separator->next_start &&
+                 yaml_flow_whitespace(content[scan]))
+            ++scan;
+          if (scan < separator->next_start && content[scan] == '#')
+            continue;
+          break;
         }
         separator->comment_start = position;
         separator->comment_length = comment_end - position;
@@ -2394,18 +2424,11 @@ static int yaml_format_multiline_root_flow(const char *content, char **output,
       YamlFlowSeparator *separator = &separators[index];
       if (!csemver_buffer_append(&formatted, ",", 1))
         goto allocation_error;
-      if (separator->comment_length > 0) {
-        if (separator->comment_on_new_line) {
-          if (!csemver_buffer_append(&formatted, "\n  ", 3))
-            goto allocation_error;
-        } else if (!csemver_buffer_append(&formatted, " ", 1)) {
-          goto allocation_error;
-        }
-        if (!csemver_buffer_append(&formatted,
-                                   content + separator->comment_start,
-                                   separator->comment_length))
-          goto allocation_error;
-      }
+      if (separator->comment_length > 0 &&
+          !yaml_append_flow_comment_block(
+              &formatted, content, separator->comment_start,
+              separator->comment_length, separator->comment_on_new_line))
+        goto allocation_error;
     }
     if (has_inline_comment && !csemver_buffer_append(&formatted, "\n", 1))
       goto allocation_error;
