@@ -1161,6 +1161,71 @@ int csemver_json_object_unsigned(const char *content, const char *object_key,
   return 1;
 }
 
+int csemver_json_object_typed_file_array(const char *content,
+                                         const char *object_key,
+                                         const char *field_key, char *filenames,
+                                         size_t filename_stride, char *types,
+                                         size_t type_stride, size_t max_values,
+                                         size_t *file_count) {
+  Range field;
+  Scanner array;
+  size_t count = 0;
+
+  if (file_count != NULL)
+    *file_count = 0;
+  if (filenames == NULL || filename_stride == 0 || types == NULL ||
+      type_stride == 0 || file_count == NULL ||
+      max_values > SIZE_MAX / filename_stride ||
+      max_values > SIZE_MAX / type_stride ||
+      !json_config_field(content, object_key, field_key, &field, NULL, 0) ||
+      field.start >= field.end || content[field.start] != '[')
+    return 0;
+  array.text = content;
+  array.position = field.start + 1;
+  array.length = field.end;
+  spaces(&array);
+  while (array.position < array.length && array.text[array.position] != ']') {
+    Range item;
+    Range updater;
+    Scanner object;
+    char *filename;
+    char *type;
+    if (count >= max_values || array.text[array.position] != '{' ||
+        !skip_value(&array, &item))
+      return 0;
+    filename = filenames + count * filename_stride;
+    type = types + count * type_stride;
+    object.text = array.text;
+    object.position = item.start;
+    object.length = item.end;
+    if (!object_field(&object, "filename", NULL, filename, filename_stride))
+      return 0;
+    object.position = item.start;
+    if (!object_field(&object, "type", NULL, type, type_stride))
+      return 0;
+    object.position = item.start;
+    if (object_field(&object, "updater", &updater, NULL, 0))
+      return 0;
+    ++count;
+    spaces(&array);
+    if (array.position >= array.length)
+      return 0;
+    if (array.text[array.position] == ',') {
+      ++array.position;
+      spaces(&array);
+    } else if (array.text[array.position] != ']')
+      return 0;
+  }
+  if (array.position >= array.length || array.text[array.position] != ']')
+    return 0;
+  ++array.position;
+  spaces(&array);
+  if (array.position != array.length)
+    return 0;
+  *file_count = count;
+  return 1;
+}
+
 static int line_version(const char *content, const char *key, bool colon,
                         Range *range, char *version, size_t version_size) {
   const char *line = content;

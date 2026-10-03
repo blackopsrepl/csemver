@@ -36,7 +36,7 @@ By default, `feat` selects a minor bump, `fix` selects a patch bump, and a Conve
 
 ## TOML configuration
 
-csemver reads `csemver.toml` from the current working directory; `-c FILE` selects another file. Existing `package.json` sections named `standard-version` or `commit-and-tag-version` provide compatibility defaults for supported string and boolean options and integer `releaseCount`; `standard-version` wins when both are present. Precedence is package metadata, then TOML, then CLI. JSON is read as data only; csemver does not execute JavaScript. String arrays for `issuePrefixes` and `packageFiles` are supported; other numeric, array, and updater-object package settings are not yet imported, so set those in TOML or on the command line. This repository uses a plain-text `VERSION` file as both its package-version source and bump target:
+csemver reads `csemver.toml` from the current working directory; `-c FILE` selects another file. Existing `package.json` sections named `standard-version` or `commit-and-tag-version` provide compatibility defaults for supported string and boolean options, integer `releaseCount`, and `bumpFiles` arrays of `{ filename, type }` using csemver-supported updater types; `standard-version` wins when both are present. Precedence is package metadata, then TOML, then CLI. JSON is read as data only; csemver does not execute JavaScript or load custom updater implementations. String arrays for `issuePrefixes` and `packageFiles` are supported; other numeric and array package settings, including string-form `bumpFiles`, are not yet imported, so set those in TOML or on the command line. This repository uses a plain-text `VERSION` file as both its package-version source and bump target:
 
 ```toml
 tagPrefix = "v"

@@ -145,6 +145,18 @@ static int load_config(CsemverConfig *config, const char *path) {
   return 1;
 }
 
+static int package_bump_file_type_supported(const char *type) {
+  static const char *const supported_types[] = {
+      "json", "plain-text", "python", "toml", "yaml", "openapi"};
+  size_t index;
+  for (index = 0; index < sizeof supported_types / sizeof supported_types[0];
+       ++index) {
+    if (strcmp(type, supported_types[index]) == 0)
+      return 1;
+  }
+  return 0;
+}
+
 static int load_package_config(CsemverConfig *config) {
   typedef struct {
     const char *json_key;
@@ -214,6 +226,7 @@ static int load_package_config(CsemverConfig *config) {
       {"issue-prefixes", "issue-prefixes", CSEMVER_MAX_PREFIXES}};
   static const char *const numeric_options[] = {"releaseCount",
                                                 "release-count"};
+  static const char *const bump_file_options[] = {"bumpFiles", "bump-files"};
   char *contents = NULL;
   char error[256] = {0};
   size_t section_index, option_index;
@@ -273,6 +286,39 @@ static int load_package_config(CsemverConfig *config) {
         free(contents);
         return 0;
       }
+    }
+    for (option_index = 0;
+         option_index < sizeof bump_file_options / sizeof bump_file_options[0];
+         ++option_index) {
+      char filenames[CSEMVER_MAX_FILES][CSEMVER_PATH_MAX];
+      char types[CSEMVER_MAX_FILES][32];
+      const char *value_pointers[CSEMVER_MAX_FILES];
+      size_t value_count, value_index;
+      if (!csemver_json_object_typed_file_array(
+              contents, sections[section_index],
+              bump_file_options[option_index], &filenames[0][0],
+              sizeof filenames[0], &types[0][0], sizeof types[0],
+              CSEMVER_MAX_FILES, &value_count))
+        continue;
+      for (value_index = 0; value_index < value_count; ++value_index) {
+        if (!package_bump_file_type_supported(types[value_index])) {
+          errorf("unsupported package bumpFiles updater type: %s",
+                 types[value_index]);
+          free(contents);
+          return 0;
+        }
+        value_pointers[value_index] = filenames[value_index];
+      }
+      if (!csemver_config_set_array(config, "bumpFiles", value_pointers,
+                                    value_count, error, sizeof error)) {
+        errorf("%s", error);
+        free(contents);
+        return 0;
+      }
+      for (value_index = 0; value_index < value_count; ++value_index)
+        snprintf(config->bump_files[value_index].type,
+                 sizeof config->bump_files[value_index].type, "%s",
+                 types[value_index]);
     }
     for (option_index = 0;
          option_index < sizeof numeric_options / sizeof numeric_options[0];

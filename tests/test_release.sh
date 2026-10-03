@@ -834,4 +834,36 @@ test "$package_header_gap" -eq 2 || {
   exit 1
 }
 
+mkdir "$tmp/pkg-bumpfiles-config"
+cd "$tmp/pkg-bumpfiles-config"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-bumpfiles-config-fixture",
+  "version": "1.0.0",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-config.git"},
+  "commit-and-tag-version": {
+    "bumpFiles": [{"filename": "VERSION", "type": "plain-text"}]
+  }
+}
+JSON
+printf '1.0.0\n' > VERSION
+git add package.json VERSION
+git commit -qm 'chore: seed package bumpFiles config fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+printf 'new feature\n' > feature.txt
+git add feature.txt
+git commit -qm 'feat: add configured version file'
+"$bin" --skip.commit --skip.tag > /dev/null
+test "$(cat VERSION)" = '1.1.0' || {
+  printf '%s\n' 'package.json bumpFiles object should update its configured plain-text file' >&2
+  exit 1
+}
+grep -Fq '"version": "1.0.0"' package.json || {
+  printf '%s\n' 'package.json bumpFiles override should not rewrite the package file' >&2
+  exit 1
+}
+
 printf '%s\n' 'release workflow tests passed'

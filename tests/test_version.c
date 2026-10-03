@@ -99,6 +99,33 @@ static void test_json_package_config_unsigned(void) {
   assert(value == 12);
 }
 
+static void test_json_package_config_typed_file_array(void) {
+  const char *package_json =
+      "{\"commit-and-tag-version\":{\"bumpFiles\":["
+      "{\"filename\":\"VERSION\",\"type\":\"plain-text\"},"
+      "{\"filename\":\"manifest.json\",\"type\":\"json\"}]}}";
+  const char *custom_updater =
+      "{\"commit-and-tag-version\":{\"bumpFiles\":["
+      "{\"filename\":\"VERSION\",\"type\":\"plain-text\","
+      "\"updater\":\"custom.js\"}]}}";
+  char filenames[2][128];
+  char types[2][32];
+  size_t count = 0;
+
+  assert(csemver_json_object_typed_file_array(
+      package_json, "commit-and-tag-version", "bumpFiles", &filenames[0][0],
+      sizeof filenames[0], &types[0][0], sizeof types[0], 2, &count));
+  assert(count == 2);
+  assert(strcmp(filenames[0], "VERSION") == 0);
+  assert(strcmp(types[0], "plain-text") == 0);
+  assert(strcmp(filenames[1], "manifest.json") == 0);
+  assert(strcmp(types[1], "json") == 0);
+  assert(!csemver_json_object_typed_file_array(
+      custom_updater, "commit-and-tag-version", "bumpFiles", &filenames[0][0],
+      sizeof filenames[0], &types[0][0], sizeof types[0], 2, &count));
+  assert(count == 0);
+}
+
 static void test_json_round_trip(void) {
   const char *input = "{\r\n\t\"name\": \"fixture\",\r\n"
                       "\t\"version\": \"1.2.3\",\r\n"
@@ -354,6 +381,7 @@ int main(void) {
   test_json_package_config_booleans();
   test_json_package_config_string_arrays();
   test_json_package_config_unsigned();
+  test_json_package_config_typed_file_array();
   test_json_round_trip();
   test_json_compact_input_uses_default_upstream_indent();
   test_json_escape_sequences_normalize_like_upstream();
