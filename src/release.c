@@ -8,6 +8,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fnmatch.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -2554,6 +2555,161 @@ static int generate_version(const CsemverConfig *config, const char *current,
   return semver_bump(&parsed, bump_name(bump), NULL, next, next_size);
 }
 
+static int ignore_path_has_hidden_component(const char *filename) {
+  while (*filename != '\0') {
+    const char *slash;
+    if (*filename == '.')
+      return 1;
+    slash = strchr(filename, '/');
+    if (slash == NULL)
+      return 0;
+    filename = slash + 1;
+  }
+  return 0;
+}
+
+static int ignore_path_pattern_matches(const char *pattern,
+                                       const char *filename) {
+  const char *pattern_slash = strchr(pattern, '/');
+  const char *filename_slash = strchr(filename, '/');
+  size_t pattern_length = pattern_slash == NULL
+                              ? strlen(pattern)
+                              : (size_t)(pattern_slash - pattern);
+  size_t filename_length = filename_slash == NULL
+                               ? strlen(filename)
+                               : (size_t)(filename_slash - filename);
+  if (pattern_length == 2 && memcmp(pattern, "**", 2) == 0) {
+    const char *remaining_pattern =
+        pattern_slash == NULL ? "" : pattern_slash + 1;
+    const char *candidate;
+    if (pattern_slash == NULL)
+      return !ignore_path_has_hidden_component(filename);
+    if (*filename == '.' || (candidate = strchr(filename, '/')) == NULL)
+      return 0;
+    candidate++;
+    for (;;) {
+      if (ignore_path_pattern_matches(remaining_pattern, candidate))
+        return 1;
+      if (*candidate == '.')
+        return 0;
+      candidate = strchr(candidate, '/');
+      if (candidate == NULL)
+        return 0;
+      ++candidate;
+    }
+  }
+  if ((pattern_slash == NULL) != (filename_slash == NULL))
+    return 0;
+  char *pattern_component = malloc(pattern_length + 1);
+  char *filename_component = malloc(filename_length + 1);
+  if (pattern_component == NULL || filename_component == NULL) {
+    free(pattern_component);
+    free(filename_component);
+    return 0;
+  }
+  memcpy(pattern_component, pattern, pattern_length);
+  pattern_component[pattern_length] = '\0';
+  memcpy(filename_component, filename, filename_length);
+  filename_component[filename_length] = '\0';
+  int matched = fnmatch(pattern_component, filename_component, FNM_PERIOD) == 0;
+  free(pattern_component);
+  free(filename_component);
+  if (!matched)
+    return 0;
+  if (pattern_slash == NULL)
+    return 1;
+  return ignore_path_pattern_matches(pattern_slash + 1, filename_slash + 1);
+}
+
+static int ignore_pattern_matches(const char *pattern, const char *filename,
+                                  int rooted) {
+  if (rooted)
+    return ignore_path_pattern_matches(pattern, filename);
+  for (;;) {
+    const char *slash = strchr(filename, '/');
+    size_t length =
+        slash == NULL ? strlen(filename) : (size_t)(slash - filename);
+    char component[CSEMVER_PATH_MAX];
+    if (length >= sizeof component)
+      return 0;
+    memcpy(component, filename, length);
+    component[length] = '\0';
+    if (fnmatch(pattern, component, FNM_PERIOD) == 0)
+      return 1;
+    if (slash == NULL)
+      return 0;
+    filename = slash + 1;
+  }
+}
+
+static int nearest_gitignore_path(char path[CSEMVER_PATH_MAX]) {
+  char directory[CSEMVER_PATH_MAX];
+  if (getcwd(directory, sizeof directory) == NULL)
+    return 0;
+  for (;;) {
+    int length = snprintf(path, CSEMVER_PATH_MAX, "%s%s.gitignore", directory,
+                          strcmp(directory, "/") == 0 ? "" : "/");
+    if (length >= 0 && length < CSEMVER_PATH_MAX && access(path, F_OK) == 0)
+      return 1;
+    if (strcmp(directory, "/") == 0)
+      return 0;
+    char *slash = strrchr(directory, '/');
+    if (slash == NULL)
+      return 0;
+    if (slash == directory)
+      directory[1] = '\0';
+    else
+      *slash = '\0';
+  }
+}
+
+static int file_is_gitignored(const char *filename) {
+  char ignore_path[CSEMVER_PATH_MAX];
+  char *contents = NULL;
+  size_t contents_length = 0;
+  size_t position = 0;
+  int ignored = 0;
+  if (!nearest_gitignore_path(ignore_path) ||
+      !csemver_read_file(ignore_path, &contents, &contents_length))
+    return 0;
+  while (position < contents_length) {
+    size_t start = position;
+    size_t length;
+    char *pattern;
+    int negated = 0;
+    int rooted = 0;
+    while (position < contents_length && contents[position] != '\n' &&
+           contents[position] != '\r')
+      ++position;
+    length = position - start;
+    while (position < contents_length &&
+           (contents[position] == '\n' || contents[position] == '\r'))
+      ++position;
+    pattern = malloc(length + 1);
+    if (pattern == NULL)
+      break;
+    memcpy(pattern, contents + start, length);
+    pattern[length] = '\0';
+    if (pattern[0] == '!') {
+      negated = 1;
+      memmove(pattern, pattern + 1, strlen(pattern));
+    }
+    if (pattern[0] == '/') {
+      rooted = 1;
+      memmove(pattern, pattern + 1, strlen(pattern));
+    }
+    if (pattern[0] != '\0') {
+      if (strchr(pattern, '/') != NULL)
+        rooted = 1;
+      if (ignore_pattern_matches(pattern, filename, rooted))
+        ignored = !negated;
+    }
+    free(pattern);
+  }
+  free(contents);
+  return ignored;
+}
+
 static int update_files(const CsemverConfig *config, const char *version,
                         bool version_is_null,
                         char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX],
@@ -2572,6 +2728,11 @@ static int update_files(const CsemverConfig *config, const char *version,
     size_t updated_size = 0;
     if (strcmp(config->bump_files[i].type, PACKAGE_UNSUPPORTED_FILENAME) == 0) {
       warn_unsupported_package_bump_file(config->bump_files[i].filename);
+      continue;
+    }
+    if (file_is_gitignored(config->bump_files[i].filename)) {
+      printf("Not updating file '%s', as it is ignored in Git\n",
+             config->bump_files[i].filename);
       continue;
     }
     if (!csemver_read_file(config->bump_files[i].filename, &content, NULL))
@@ -2998,6 +3159,8 @@ int csemver_main(int argc, char **argv) {
     else if (!config.skip_bump) {
       for (size_t i = 0; i < config.bump_file_count; ++i) {
         char *contents = NULL, old[SEMVER_TEXT_MAX], error[256];
+        if (file_is_gitignored(config.bump_files[i].filename))
+          continue;
         if (!csemver_read_file(config.bump_files[i].filename, &contents, NULL))
           continue;
         if (csemver_version_read_text(config.bump_files[i].filename,

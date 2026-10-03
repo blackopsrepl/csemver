@@ -1576,6 +1576,53 @@ test "$(git cat-file -t refs/tags/v1.1.0)" = tag
 test ! -e package.json
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/ignored-bump-files"
+cd "$tmp/ignored-bump-files"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf 'package-lock.json\n' > .gitignore
+printf '{"name":"ignored-bump-files","version":"1.0.0"}\n' > package.json
+printf '{"name":"ignored-bump-files","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"ignored-bump-files","version":"1.0.0"}}}\n' > package-lock.json
+git add .gitignore package.json
+git commit -qm 'chore: initialize ignored bump file fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise ignored bump file handling'
+ignored_bump_head=$(git rev-parse HEAD)
+ignored_bump_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
+expected_ignored_bump_output=$(printf '%s\n%s' \
+  '✔ bumping version in package.json from 1.0.0 to 1.0.1' \
+  "Not updating file 'package-lock.json', as it is ignored in Git")
+test "$ignored_bump_output" = "$expected_ignored_bump_output"
+grep -q '"version": "1.0.1"' package.json
+grep -q '"version":"1.0.0"' package-lock.json
+test "$(git rev-parse HEAD)" = "$ignored_bump_head"
+test "$(git tag --list)" = v1.0.0
+test "$(git status --porcelain)" = ' M package.json'
+test ! -e CHANGELOG.md
+
+mkdir "$tmp/globstar-root-bump-file"
+cd "$tmp/globstar-root-bump-file"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email test@example.invalid
+git config commit.gpgSign false
+printf '**/package-lock.json\n' > .gitignore
+printf '{"name":"globstar-root-bump-file","version":"1.0.0"}\n' > package.json
+printf '{"name":"globstar-root-bump-file","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"globstar-root-bump-file","version":"1.0.0"}}}\n' > package-lock.json
+git add .gitignore package.json
+git commit -qm 'chore: initialize globstar root fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise globstar root behavior'
+globstar_bump_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
+expected_globstar_bump_output=$(printf '%s\n%s' \
+  '✔ bumping version in package.json from 1.0.0 to 1.0.1' \
+  '✔ bumping version in package-lock.json from 1.0.0 to 1.0.1')
+test "$globstar_bump_output" = "$expected_globstar_bump_output"
+grep -q '"version": "1.0.1"' package.json
+grep -q '"version": "1.0.1"' package-lock.json
+
 mkdir "$tmp/malformed-package-lock"
 cd "$tmp/malformed-package-lock"
 git init -q -b master
