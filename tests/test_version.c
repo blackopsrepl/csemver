@@ -375,6 +375,8 @@ static void test_json_invalid_identifier_diagnostics_match_node(void) {
        "Unexpected token 'N', \"{\"name\":NaN}\" is not valid JSON"},
       {"{\"name\":foo}",
        "Unexpected token 'o', \"{\"name\":foo}\" is not valid JSON"},
+      {"{\"version\":\"1.0.0\",\"value\":NaN}",
+       "Unexpected token 'N', ...\"\",\"value\":NaN}\" is not valid JSON"},
   };
   char version[128];
   char error[256];
