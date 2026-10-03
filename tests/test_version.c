@@ -568,6 +568,48 @@ static void test_toml_and_yaml_surface(void) {
   free(updated);
 }
 
+static void test_gradle_updater_matches_upstream(void) {
+  const char *input =
+      "plugins { }\n\nversion='6.3.1'\njava.sourceCompatibility = 8\n";
+  const char *expected =
+      "plugins { }\n\nversion = \"6.4.0\"\njava.sourceCompatibility = 8\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_read_text("build.gradle.kts", "gradle", input, version,
+                                   sizeof version, NULL, error, sizeof error));
+  assert(strcmp(version, "6.3.1") == 0);
+  assert(csemver_version_update_text("build.gradle.kts", "gradle", input,
+                                     "6.4.0", &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_gradle_updater_handles_carriage_return_lines(void) {
+  const char *input =
+      "plugins { }\rversion='6.3.1'\rjava.sourceCompatibility = 8\r";
+  const char *expected =
+      "plugins { }\rversion = \"6.4.0\"\rjava.sourceCompatibility = 8\r";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_read_text("build.gradle", "gradle", input, version,
+                                   sizeof version, NULL, error, sizeof error));
+  assert(strcmp(version, "6.3.1") == 0);
+  assert(csemver_version_update_text("build.gradle", "gradle", input, "6.4.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
 int main(void) {
   test_repository_url_forms();
   test_json_package_config_strings();
@@ -598,6 +640,8 @@ int main(void) {
   test_package_lock_adds_missing_root_version_fields();
   test_plain_text_preserves_upstream_write_semantics();
   test_toml_and_yaml_surface();
+  test_gradle_updater_matches_upstream();
+  test_gradle_updater_handles_carriage_return_lines();
   puts("version file tests passed");
   return 0;
 }

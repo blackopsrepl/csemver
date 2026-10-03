@@ -1718,6 +1718,59 @@ cmp "$tmp/lifecycle-max-buffer-stderr.expected" "$tmp/lifecycle-max-buffer-stder
 test -z "$(git status --porcelain)"
 test "$(git tag --list 'v1.1.0')" = ''
 
+mkdir "$tmp/gradle-updater"
+cd "$tmp/gradle-updater"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "gradle-updater-fixture",
+  "commit-and-tag-version": {
+    "packageFiles": [{"filename": "build.gradle.kts", "type": "gradle"}],
+    "bumpFiles": ["build.gradle.kts"]
+  }
+}
+JSON
+cat > build.gradle.kts <<'GRADLE'
+plugins {
+    id("org.springframework.boot") version "2.4.6"
+    kotlin("jvm") version "1.4.31"
+    kotlin("plugin.spring") version "1.4.31"
+}
+
+version = "6.3.1"
+java.sourceCompatibility = JavaVersion.VERSION_1_8
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+GRADLE
+git add package.json build.gradle.kts
+git commit -qm 'chore: seed Gradle updater fixture'
+git tag -a v6.3.1 -m 'release 6.3.1'
+git commit --allow-empty -qm 'feat: add Gradle feature'
+gradle_output=$("$bin" --skip.changelog --skip.commit --skip.tag)
+printf '%s\n' "$gradle_output" | grep -Fq '✔ bumping version in build.gradle.kts from 6.3.1 to 6.4.0'
+cat > "$tmp/gradle-updater.expected" <<'GRADLE'
+plugins {
+    id("org.springframework.boot") version "2.4.6"
+    kotlin("jvm") version "1.4.31"
+    kotlin("plugin.spring") version "1.4.31"
+}
+
+version = "6.4.0"
+java.sourceCompatibility = JavaVersion.VERSION_1_8
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+GRADLE
+cmp "$tmp/gradle-updater.expected" build.gradle.kts
+test "$(git tag --list 'v6.4.0')" = ''
+
 mkdir "$tmp/no-package-fallback-disabled"
 cd "$tmp/no-package-fallback-disabled"
 git init -q -b master

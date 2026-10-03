@@ -1850,6 +1850,58 @@ static int line_version(const char *content, const char *key, bool colon,
   return 0;
 }
 
+static int gradle_version_range(const char *content, Range *range,
+                                char *version, size_t version_size) {
+  const char *line = content;
+  while (*line != '\0') {
+    const char *end = strpbrk(line, "\r\n");
+    const char *limit = end == NULL ? line + strlen(line) : end;
+    const char *cursor = line;
+    if ((size_t)(limit - line) >= sizeof "version" - 1 &&
+        memcmp(line, "version", sizeof "version" - 1) == 0) {
+      const char *value_start;
+      const char *last_quote = NULL;
+      const char *scan;
+      cursor += sizeof "version" - 1;
+      while (cursor < limit && isspace((unsigned char)*cursor))
+        ++cursor;
+      if (cursor < limit && *cursor == '=') {
+        ++cursor;
+        while (cursor < limit && isspace((unsigned char)*cursor))
+          ++cursor;
+        if (cursor < limit && (*cursor == '\'' || *cursor == '"')) {
+          value_start = cursor + 1;
+          for (scan = value_start; scan < limit; ++scan)
+            if (*scan == '\'' || *scan == '"')
+              last_quote = scan;
+          if (last_quote != NULL && last_quote > value_start &&
+              ((*value_start >= '0' && *value_start <= '9') ||
+               *value_start == '.')) {
+            size_t version_length = (size_t)(last_quote - value_start);
+            if (version != NULL) {
+              if (version_length >= version_size)
+                return 0;
+              memcpy(version, value_start, version_length);
+              version[version_length] = '\0';
+            }
+            if (range != NULL) {
+              range->start = (size_t)(line - content);
+              range->end = (size_t)(last_quote + 1 - content);
+            }
+            return 1;
+          }
+        }
+      }
+    }
+    if (end == NULL)
+      break;
+    line = end + 1;
+    if (*end == '\r' && *line == '\n')
+      ++line;
+  }
+  return 0;
+}
+
 int csemver_version_read_text(const char *filename, const char *type,
                               const char *content, char *version,
                               size_t version_size, bool *is_private,
@@ -1860,6 +1912,7 @@ int csemver_version_read_text(const char *filename, const char *type,
           : (strstr(filename, ".json") != NULL            ? "json"
              : strstr(filename, "pyproject.toml") != NULL ? "python"
              : strstr(filename, ".toml") != NULL          ? "toml"
+             : strstr(filename, "build.gradle") != NULL   ? "gradle"
              : strstr(filename, ".yaml") != NULL ||
                      strstr(filename, ".yml") != NULL
                  ? "yaml"
@@ -1891,6 +1944,14 @@ int csemver_version_read_text(const char *filename, const char *type,
     if (is_private != NULL)
       *is_private = fields.is_private;
     return 1;
+  }
+  if (strcmp(kind, "gradle") == 0) {
+    if (gradle_version_range(content, NULL, version, version_size))
+      return 1;
+    set_error(error, error_size,
+              "Failed to read the version field in your gradle file - is it "
+              "present?");
+    return 0;
   }
   if ((strcmp(kind, "python") == 0 || strcmp(kind, "toml") == 0) &&
       line_version(content, "version", false, NULL, version, version_size))
@@ -1932,6 +1993,7 @@ int csemver_version_update_text(const char *filename, const char *type,
           : (strstr(filename, ".json") != NULL            ? "json"
              : strstr(filename, "pyproject.toml") != NULL ? "python"
              : strstr(filename, ".toml") != NULL          ? "toml"
+             : strstr(filename, "build.gradle") != NULL   ? "gradle"
              : strstr(filename, ".yaml") != NULL ||
                      strstr(filename, ".yml") != NULL
                  ? "yaml"
@@ -1946,6 +2008,29 @@ int csemver_version_update_text(const char *filename, const char *type,
   if (!csemver_version_read_text(filename, type, content, old_version,
                                  old_version_size, NULL, error, error_size))
     return 0;
+  if (strcmp(kind, "gradle") == 0) {
+    static const char prefix[] = "version = \"";
+    Range gradle_range;
+    CsemverBuffer gradle_buffer;
+    if (!gradle_version_range(content, &gradle_range, NULL, 0))
+      goto bad_format;
+    csemver_buffer_init(&gradle_buffer);
+    if (!csemver_buffer_append(&gradle_buffer, content, gradle_range.start) ||
+        !csemver_buffer_append(&gradle_buffer, prefix, sizeof prefix - 1) ||
+        !csemver_buffer_append(&gradle_buffer, replacement,
+                               strlen(replacement)) ||
+        !csemver_buffer_append(&gradle_buffer, "\"", 1) ||
+        !csemver_buffer_append(&gradle_buffer, content + gradle_range.end,
+                               length - gradle_range.end) ||
+        !csemver_buffer_append(&gradle_buffer, "", 0)) {
+      csemver_buffer_free(&gradle_buffer);
+      set_error(error, error_size, "out of memory updating version file");
+      return 0;
+    }
+    *updated = gradle_buffer.data;
+    *updated_size = gradle_buffer.length;
+    return 1;
+  }
   if (strcmp(kind, "json") == 0) {
     JsonFields fields;
     if (!json_fields(content, filename, &fields))

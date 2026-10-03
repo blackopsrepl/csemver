@@ -261,7 +261,7 @@ static int load_config(CsemverConfig *config, const char *path) {
 
 static int package_bump_file_type_supported(const char *type) {
   static const char *const supported_types[] = {
-      "json", "plain-text", "python", "toml", "yaml", "openapi"};
+      "gradle", "json", "openapi", "plain-text", "python", "toml", "yaml"};
   size_t index;
   for (index = 0; index < sizeof supported_types / sizeof supported_types[0];
        ++index) {
@@ -293,6 +293,8 @@ static const char *package_bump_file_type_from_filename(const char *filename) {
   if (strcmp(filename, "VERSION.txt") == 0 ||
       strcmp(filename, "version.txt") == 0)
     return "plain-text";
+  if (strstr(filename, "build.gradle") != NULL)
+    return "gradle";
   if (strstr(filename, "openapi.yaml") != NULL)
     return "openapi";
   if (strstr(filename, "pyproject.toml") != NULL)
@@ -3491,6 +3493,7 @@ static int uses_plain_text_updater(const CsemverFile *file) {
   return strstr(file->filename, ".json") == NULL &&
          strstr(file->filename, "pyproject.toml") == NULL &&
          strstr(file->filename, ".toml") == NULL &&
+         strstr(file->filename, "build.gradle") == NULL &&
          strstr(file->filename, ".yaml") == NULL &&
          strstr(file->filename, ".yml") == NULL;
 }
