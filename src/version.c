@@ -22,6 +22,7 @@ typedef struct {
   bool expect_key;
   bool key_is_info;
   bool key_is_version;
+  bool saw_version_key;
   bool closes_as_mapping_key;
 } YamlFrame;
 typedef struct {
@@ -1962,13 +1963,16 @@ static int yaml_scalar_value_range(const char *content,
 static int yaml_version_range(const char *content, bool openapi, Range *range,
                               char *version, size_t version_size,
                               size_t *scalar_end,
-                              yaml_scalar_style_t *scalar_style) {
+                              yaml_scalar_style_t *scalar_style,
+                              bool *duplicate_version_key) {
   yaml_parser_t parser;
   YamlFrame *frames = NULL;
   size_t depth = 0;
   size_t capacity = 0;
   bool found = false;
   bool failed = false;
+  if (duplicate_version_key != NULL)
+    *duplicate_version_key = false;
   if (!yaml_parser_initialize(&parser))
     return 0;
   yaml_parser_set_input_string(&parser, (const unsigned char *)content,
@@ -2047,6 +2051,11 @@ static int yaml_version_range(const char *content, bool openapi, Range *range,
           frame->key_is_version = yaml_scalar_equals(&event, "version") &&
                                   ((openapi && frame->is_info_mapping) ||
                                    (!openapi && frame->is_root_mapping));
+          if (frame->key_is_version) {
+            if (frame->saw_version_key && duplicate_version_key != NULL)
+              *duplicate_version_key = true;
+            frame->saw_version_key = true;
+          }
           frame->expect_key = false;
         } else {
           if (frame->key_is_version && !found) {
@@ -2140,8 +2149,8 @@ static int yaml_normalize_version_mapping_key(CsemverBuffer *buffer,
   size_t colon = SIZE_MAX;
   size_t position;
   CsemverBuffer normalized;
-  if (!yaml_version_range(buffer->data, openapi, &range, NULL, 0, NULL,
-                          &style) ||
+  if (!yaml_version_range(buffer->data, openapi, &range, NULL, 0, NULL, &style,
+                          NULL) ||
       range.start > buffer->length)
     return 1;
   value_start = range.start;
@@ -2205,7 +2214,7 @@ static int yaml_normalize_version_line_spacing(CsemverBuffer *buffer,
   if (!yaml_normalize_version_mapping_key(buffer, openapi))
     return 0;
   if (!yaml_version_range(buffer->data, openapi, NULL, NULL, 0, &scalar_end,
-                          &style) ||
+                          &style, NULL) ||
       scalar_end > buffer->length ||
       (style != YAML_PLAIN_SCALAR_STYLE &&
        style != YAML_SINGLE_QUOTED_SCALAR_STYLE &&
@@ -4112,10 +4121,10 @@ int csemver_version_read_text(const char *filename, const char *type,
     return 1;
   if (strcmp(kind, "yaml") == 0 &&
       yaml_version_range(content, false, NULL, version, version_size, NULL,
-                         NULL))
+                         NULL, NULL))
     return 1;
   if (strcmp(kind, "openapi") == 0 &&
-      yaml_version_range(content, true, NULL, version, version_size, NULL,
+      yaml_version_range(content, true, NULL, version, version_size, NULL, NULL,
                          NULL))
     return 1;
   if (strcmp(kind, "plain-text") == 0) {
@@ -4258,14 +4267,28 @@ int csemver_version_update_text(const char *filename, const char *type,
       goto bad_format;
     ++count;
   } else if (strcmp(kind, "yaml") == 0) {
+    bool duplicate_version_key = false;
     if (!yaml_version_range(content, false, &ranges[count], old_version,
-                            old_version_size, NULL, NULL))
+                            old_version_size, NULL, NULL,
+                            &duplicate_version_key))
       goto bad_format;
+    if (duplicate_version_key) {
+      set_error(error, error_size,
+                "Document with errors cannot be stringified");
+      return 0;
+    }
     ++count;
   } else if (strcmp(kind, "openapi") == 0) {
+    bool duplicate_version_key = false;
     if (!yaml_version_range(content, true, &ranges[count], old_version,
-                            old_version_size, NULL, NULL))
+                            old_version_size, NULL, NULL,
+                            &duplicate_version_key))
       goto bad_format;
+    if (duplicate_version_key) {
+      set_error(error, error_size,
+                "Document with errors cannot be stringified");
+      return 0;
+    }
     ++count;
   } else if (strcmp(kind, "plain-text") == 0) {
     ranges[count++] = (Range){0, length};

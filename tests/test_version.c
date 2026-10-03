@@ -1039,6 +1039,39 @@ test_yaml_and_openapi_multiple_documents_match_upstream_error(void) {
   }
 }
 
+static void test_yaml_duplicate_version_key_reports_stringifier_error(void) {
+  const char *yaml_inputs[] = {
+      "version: 0.1.0\nversion: 1.2.3\n",
+      "version: 0.1.0\n\"version\": 1.2.3\n",
+  };
+  const char *openapi_input =
+      "openapi: 3.1.0\ninfo:\n  version: 0.1.0\n  version: 1.2.3\n";
+  char version[128];
+  char error[256];
+  size_t index;
+
+  for (index = 0; index < sizeof yaml_inputs / sizeof yaml_inputs[0]; ++index) {
+    char *updated = NULL;
+    size_t updated_size = 0;
+    error[0] = '\0';
+    assert(!csemver_version_update_text(
+        "config.yaml", "yaml", yaml_inputs[index], "1.3.0", &updated,
+        &updated_size, version, sizeof version, error, sizeof error));
+    assert(strcmp(error, "Document with errors cannot be stringified") == 0);
+    free(updated);
+  }
+  {
+    char *updated = NULL;
+    size_t updated_size = 0;
+    error[0] = '\0';
+    assert(!csemver_version_update_text(
+        "openapi.yaml", "openapi", openapi_input, "1.3.0", &updated,
+        &updated_size, version, sizeof version, error, sizeof error));
+    assert(strcmp(error, "Document with errors cannot be stringified") == 0);
+    free(updated);
+  }
+}
+
 static void
 test_yaml_block_mapping_leading_flow_sequence_comment_matches_error(void) {
   const char *input = "version: 1.2.3\nitems: [# lead\na, b]\n";
@@ -1511,6 +1544,7 @@ int main(void) {
   test_yaml_multiline_nested_flow_sequence_multiple_comments();
   test_yaml_leading_nested_flow_sequence_comment_matches_upstream_error();
   test_yaml_and_openapi_multiple_documents_match_upstream_error();
+  test_yaml_duplicate_version_key_reports_stringifier_error();
   test_yaml_block_mapping_leading_flow_sequence_comment_matches_error();
   test_yaml_block_sequence_comment_moves_before_item();
   test_yaml_block_sequence_comments_normalize_indentation();
