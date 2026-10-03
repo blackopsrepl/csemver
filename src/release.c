@@ -422,6 +422,30 @@ static int load_package_config(CsemverConfig *config) {
                                        numeric_options[option_index], &value))
         config->release_count = value;
     }
+    {
+      char types[CSEMVER_MAX_TYPES][64];
+      char type_sections[CSEMVER_MAX_TYPES][128];
+      bool hidden[CSEMVER_MAX_TYPES];
+      bool bump[CSEMVER_MAX_TYPES];
+      size_t type_count, type_index;
+      if (csemver_json_object_commit_type_array(
+              contents, sections[section_index], "types", &types[0][0],
+              sizeof types[0], &type_sections[0][0], sizeof type_sections[0],
+              hidden, bump, CSEMVER_MAX_TYPES, &type_count)) {
+        memset(config->commit_types, 0, sizeof config->commit_types);
+        config->commit_type_count = type_count;
+        for (type_index = 0; type_index < type_count; ++type_index) {
+          snprintf(config->commit_types[type_index].type,
+                   sizeof config->commit_types[type_index].type, "%s",
+                   types[type_index]);
+          snprintf(config->commit_types[type_index].section,
+                   sizeof config->commit_types[type_index].section, "%s",
+                   type_sections[type_index]);
+          config->commit_types[type_index].hidden = hidden[type_index];
+          config->commit_types[type_index].bump = bump[type_index];
+        }
+      }
+    }
   }
   free(contents);
   return 1;

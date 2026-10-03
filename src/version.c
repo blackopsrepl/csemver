@@ -1226,6 +1226,108 @@ int csemver_json_object_typed_file_array(const char *content,
   return 1;
 }
 
+int csemver_json_object_commit_type_array(
+    const char *content, const char *object_key, const char *field_key,
+    char *types, size_t type_stride, char *sections, size_t section_stride,
+    bool *hidden, bool *bump, size_t max_types, size_t *type_count) {
+  Range field;
+  Scanner array;
+  size_t count = 0;
+
+  if (type_count != NULL)
+    *type_count = 0;
+  if (types == NULL || type_stride == 0 || sections == NULL ||
+      section_stride == 0 || hidden == NULL || bump == NULL ||
+      type_count == NULL || max_types > SIZE_MAX / type_stride ||
+      max_types > SIZE_MAX / section_stride ||
+      !json_config_field(content, object_key, field_key, &field, NULL, 0) ||
+      field.start >= field.end || content[field.start] != '[')
+    return 0;
+  array.text = content;
+  array.position = field.start + 1;
+  array.length = field.end;
+  spaces(&array);
+  while (array.position < array.length && array.text[array.position] != ']') {
+    Range item;
+    Range value;
+    Scanner object;
+    char *type;
+    char *section;
+    char effect[32] = {0};
+    bool is_hidden = false;
+    bool bumps = true;
+    if (count >= max_types || array.text[array.position] != '{' ||
+        !skip_value(&array, &item))
+      return 0;
+    type = types + count * type_stride;
+    section = sections + count * section_stride;
+    object.text = array.text;
+    object.position = item.start;
+    object.length = item.end;
+    if (!object_field(&object, "type", NULL, type, type_stride))
+      return 0;
+    object.position = item.start;
+    if (object_field(&object, "section", &value, NULL, 0)) {
+      Scanner string = {array.text, value.start, value.end};
+      if (!string_value(&string, section, section_stride, NULL, NULL))
+        return 0;
+      spaces(&string);
+      if (string.position != value.end)
+        return 0;
+    } else
+      section[0] = '\0';
+    object.position = item.start;
+    if (object_field(&object, "hidden", &value, NULL, 0)) {
+      size_t length = value.end - value.start;
+      if (length == 4 && memcmp(array.text + value.start, "true", 4) == 0)
+        is_hidden = true;
+      else if (length != 5 || memcmp(array.text + value.start, "false", 5) != 0)
+        return 0;
+    }
+    object.position = item.start;
+    if (object_field(&object, "effect", &value, NULL, 0)) {
+      Scanner string = {array.text, value.start, value.end};
+      if (!string_value(&string, effect, sizeof effect, NULL, NULL))
+        return 0;
+      spaces(&string);
+      if (string.position != value.end)
+        return 0;
+      if (strcmp(effect, "hidden") == 0) {
+        is_hidden = true;
+        bumps = false;
+      } else if (strcmp(effect, "changelog") == 0) {
+        is_hidden = false;
+        bumps = false;
+      } else if (strcmp(effect, "bump") == 0) {
+        is_hidden = false;
+        bumps = true;
+      } else {
+        return 0;
+      }
+    } else
+      bumps = !is_hidden;
+    hidden[count] = is_hidden;
+    bump[count] = bumps;
+    ++count;
+    spaces(&array);
+    if (array.position >= array.length)
+      return 0;
+    if (array.text[array.position] == ',') {
+      ++array.position;
+      spaces(&array);
+    } else if (array.text[array.position] != ']')
+      return 0;
+  }
+  if (array.position >= array.length || array.text[array.position] != ']')
+    return 0;
+  ++array.position;
+  spaces(&array);
+  if (array.position != array.length)
+    return 0;
+  *type_count = count;
+  return 1;
+}
+
 static int line_version(const char *content, const char *key, bool colon,
                         Range *range, char *version, size_t version_size) {
   const char *line = content;

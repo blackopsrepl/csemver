@@ -933,4 +933,40 @@ grep -Fq '"version": "1.0.0"' package.json
 grep -Fq '"version": "2.0.0"' metadata.json
 test -f CHANGELOG.md
 
+mkdir "$tmp/pkg-custom-types"
+cd "$tmp/pkg-custom-types"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-custom-types-fixture",
+  "version": "1.0.0",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-custom-types.git"},
+  "commit-and-tag-version": {
+    "types": [
+      {"type": "feature", "section": "Custom Features", "hidden": false},
+      {"type": "docs", "section": "Documentation", "hidden": false}
+    ]
+  }
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed package custom types fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+for message in 'feature: custom feature' 'docs: update manual' 'feat: default feature'; do
+  git commit --allow-empty -qm "$message"
+done
+"$bin" --skip.commit --skip.tag >/dev/null
+grep -Fq '### Custom Features' CHANGELOG.md
+grep -Fq '### Documentation' CHANGELOG.md
+if grep -Fq '### Features' CHANGELOG.md; then
+  printf '%s\n' 'package-defined commit types should replace the default type list' >&2
+  exit 1
+fi
+if grep -Fq 'default feature' CHANGELOG.md; then
+  printf '%s\n' 'commit types absent from the package-defined list should be omitted' >&2
+  exit 1
+fi
+
 printf '%s\n' 'release workflow tests passed'

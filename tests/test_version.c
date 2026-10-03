@@ -99,6 +99,42 @@ static void test_json_package_config_unsigned(void) {
   assert(value == 12);
 }
 
+static void test_json_package_config_commit_types(void) {
+  const char *package_json =
+      "{\"commit-and-tag-version\":{\"types\":["
+      "{\"type\":\"feature\",\"section\":\"Custom Features\","
+      "\"hidden\":false},"
+      "{\"type\":\"chore\",\"section\":\"Internal\","
+      "\"effect\":\"hidden\"},"
+      "{\"type\":\"docs\",\"section\":\"Documentation\","
+      "\"hidden\":true,\"effect\":\"changelog\"}]}}";
+  const char *invalid_effect = "{\"commit-and-tag-version\":{\"types\":["
+                               "{\"type\":\"feat\",\"effect\":\"unknown\"}]}}";
+  char types[3][64];
+  char sections[3][128];
+  bool hidden[3];
+  bool bump[3];
+  size_t count = 99;
+
+  assert(csemver_json_object_commit_type_array(
+      package_json, "commit-and-tag-version", "types", &types[0][0],
+      sizeof types[0], &sections[0][0], sizeof sections[0], hidden, bump,
+      sizeof types / sizeof types[0], &count));
+  assert(count == 3);
+  assert(strcmp(types[0], "feature") == 0);
+  assert(strcmp(sections[0], "Custom Features") == 0);
+  assert(!hidden[0] && bump[0]);
+  assert(strcmp(types[1], "chore") == 0);
+  assert(hidden[1] && !bump[1]);
+  assert(strcmp(types[2], "docs") == 0);
+  assert(!hidden[2] && !bump[2]);
+  assert(!csemver_json_object_commit_type_array(
+      invalid_effect, "commit-and-tag-version", "types", &types[0][0],
+      sizeof types[0], &sections[0][0], sizeof sections[0], hidden, bump,
+      sizeof types / sizeof types[0], &count));
+  assert(count == 0);
+}
+
 static void test_json_package_config_typed_file_array(void) {
   const char *package_json =
       "{\"commit-and-tag-version\":{\"bumpFiles\":["
@@ -381,6 +417,7 @@ int main(void) {
   test_json_package_config_booleans();
   test_json_package_config_string_arrays();
   test_json_package_config_unsigned();
+  test_json_package_config_commit_types();
   test_json_package_config_typed_file_array();
   test_json_round_trip();
   test_json_compact_input_uses_default_upstream_indent();

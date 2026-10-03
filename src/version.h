@@ -27,9 +27,15 @@ int csemver_json_object_string_array(const char *content,
                                      size_t *value_count);
 int csemver_json_object_unsigned(const char *content, const char *object_key,
                                  const char *field_key, unsigned *value);
-int csemver_json_object_typed_file_array(
+int csemver_json_object_commit_type_array(
     const char *content, const char *object_key, const char *field_key,
-    char *filenames, size_t filename_stride, char *types, size_t type_stride,
-    size_t max_values, size_t *file_count);
+    char *types, size_t type_stride, char *sections, size_t section_stride,
+    bool *hidden, bool *bump, size_t max_types, size_t *type_count);
+int csemver_json_object_typed_file_array(const char *content,
+                                         const char *object_key,
+                                         const char *field_key, char *filenames,
+                                         size_t filename_stride, char *types,
+                                         size_t type_stride, size_t max_values,
+                                         size_t *file_count);
 
 #endif
