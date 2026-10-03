@@ -2089,6 +2089,65 @@ static void yaml_trim_trailing_horizontal_space(CsemverBuffer *buffer) {
     buffer->data[buffer->length] = '\0';
 }
 
+static int yaml_match_serialized_newline(const char *source,
+                                         CsemverBuffer *output) {
+  size_t source_length = strlen(source);
+  size_t crlf_count = 0;
+  size_t lf_count = 0;
+  size_t index;
+  bool has_line_ending;
+  bool output_has_terminal_line_ending =
+      output->length > 0 && (output->data[output->length - 1] == '\n' ||
+                             output->data[output->length - 1] == '\r');
+  const char *replacement;
+  size_t replacement_length;
+  CsemverBuffer normalized;
+  for (index = 0; index < source_length; ++index) {
+    if (source[index] == '\n') {
+      if (index > 0 && source[index - 1] == '\r')
+        ++crlf_count;
+      else
+        ++lf_count;
+    }
+  }
+  has_line_ending = crlf_count + lf_count > 0;
+  replacement = has_line_ending && crlf_count > lf_count ? "\r\n" : "\n";
+  replacement_length = has_line_ending && crlf_count > lf_count ? 2 : 1;
+  csemver_buffer_init(&normalized);
+  for (index = 0; index < output->length;) {
+    char byte = output->data[index];
+    if (byte == '\r' || byte == '\n') {
+      if (byte == '\r' && index + 1 < output->length &&
+          output->data[index + 1] == '\n')
+        index += 2;
+      else
+        ++index;
+      if (has_line_ending) {
+        if (!csemver_buffer_append(&normalized, replacement,
+                                   replacement_length))
+          goto allocation_error;
+      } else if (!csemver_buffer_append(&normalized, "undefined", 9)) {
+        goto allocation_error;
+      }
+    } else {
+      if (!csemver_buffer_append(&normalized, &byte, 1))
+        goto allocation_error;
+      ++index;
+    }
+  }
+  if (!output_has_terminal_line_ending &&
+      !csemver_buffer_append(&normalized,
+                             has_line_ending ? replacement : "undefined",
+                             has_line_ending ? replacement_length : 9))
+    goto allocation_error;
+  csemver_buffer_free(output);
+  *output = normalized;
+  return 1;
+allocation_error:
+  csemver_buffer_free(&normalized);
+  return 0;
+}
+
 static int yaml_normalize_single_line_flow(const char *content, char **output,
                                            size_t *output_size) {
   size_t length = strlen(content);
@@ -2108,7 +2167,8 @@ static int yaml_normalize_single_line_flow(const char *content, char **output,
   if (memchr(content, '\n', line_length) != NULL ||
       memchr(content, '\r', line_length) != NULL) {
     csemver_buffer_init(&buffer);
-    if (!csemver_buffer_append(&buffer, content, length)) {
+    if (!csemver_buffer_append(&buffer, content, length) ||
+        !yaml_match_serialized_newline(content, &buffer)) {
       csemver_buffer_free(&buffer);
       return 0;
     }
@@ -2226,7 +2286,8 @@ static int yaml_normalize_single_line_flow(const char *content, char **output,
   yaml_parser_delete(&parser);
   free(frames);
   if (failed || depth != 0 ||
-      !csemver_buffer_append(&buffer, content + position, length - position)) {
+      !csemver_buffer_append(&buffer, content + position, length - position) ||
+      !yaml_match_serialized_newline(content, &buffer)) {
     csemver_buffer_free(&buffer);
     return 0;
   }
