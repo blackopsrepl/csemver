@@ -1337,6 +1337,19 @@ test ! -e package.json
 grep -Fq '## [1.3.0](https://github.com/example/csemver/compare/android/production/v1.2.0...android/production/v1.3.0)' CHANGELOG.md
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/tag-fallback-no-tags"
+cd "$tmp/tag-fallback-no-tags"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+git commit --allow-empty -qm 'feat: release without package or tags'
+"$bin" > /dev/null
+test "$(git tag --list v1.1.0)" = v1.1.0
+test "$(git cat-file -t refs/tags/v1.1.0)" = tag
+test ! -e package.json
+test -z "$(git status --porcelain)"
+
 mkdir "$tmp/malformed-package-lock"
 cd "$tmp/malformed-package-lock"
 git init -q -b master
