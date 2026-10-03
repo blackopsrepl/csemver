@@ -2539,7 +2539,12 @@ int csemver_main(int argc, char **argv) {
     return 1;
   }
   if (!get_version(&config, current, &is_private)) {
-    if (config.git_tag_fallback && latest_version[0] != '\0')
+    if (!config.git_tag_fallback) {
+      if (!config.silent)
+        fputs("no package file found\n", stderr);
+      return 1;
+    }
+    if (latest_version[0] != '\0')
       snprintf(current, sizeof current, "%s", latest_version);
     else
       snprintf(current, sizeof current, "1.0.0");

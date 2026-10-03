@@ -1186,4 +1186,35 @@ actual_normal_stages=$(printf '%s\n' "$normal_lifecycle_output" |
 test "$actual_normal_stages" = "$expected_dry_run_stages"
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/no-package-fallback-disabled"
+cd "$tmp/no-package-fallback-disabled"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+printf 'seed\n' > README.md
+git add README.md
+git commit -qm 'chore: seed without a version file'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: exercise disabled tag fallback'
+head_before=$(git rev-parse HEAD)
+if fallback_error=$("$bin" --no-git-tag-fallback 2>&1); then
+  printf '%s\n' 'csemver must reject missing version files when tag fallback is disabled' >&2
+  exit 1
+else
+  fallback_status=$?
+fi
+test "$fallback_status" -eq 1
+test "$fallback_error" = 'no package file found'
+if fallback_silent_output=$("$bin" --silent --no-git-tag-fallback 2>&1); then
+  printf '%s\n' 'csemver must still fail with silent output suppressed' >&2
+  exit 1
+else
+  fallback_silent_status=$?
+fi
+test "$fallback_silent_status" -eq 1
+test -z "$fallback_silent_output"
+test "$(git rev-parse HEAD)" = "$head_before"
+test "$(git tag --list)" = 'v1.0.0'
+test ! -e CHANGELOG.md
+
 printf '%s\n' 'release workflow tests passed'
