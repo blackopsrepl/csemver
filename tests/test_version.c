@@ -633,6 +633,111 @@ static void test_csproj_updater_matches_upstream(void) {
   free(updated);
 }
 
+static void test_maven_updater_matches_upstream(void) {
+  const char *input = "<project>\n  <version>6.3.1</version>\n</project>";
+  const char *expected =
+      "<project>\n  <version>6.4.0</version>\n</project>\n\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_read_text("pom.xml", "maven", input, version,
+                                   sizeof version, NULL, error, sizeof error));
+  assert(strcmp(version, "6.3.1") == 0);
+  assert(csemver_version_update_text("pom.xml", "maven", input, "6.4.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_maven_property_and_invalid_shapes(void) {
+  const char *property_input =
+      "<project>\n  <version>${revision}</version>\n"
+      "  <properties>\n    <revision>6.3.1</revision>\n  </properties>\n"
+      "</project>";
+  const char *property_expected =
+      "<project>\n  <version>${revision}</version>\n"
+      "  <properties>\n    <revision>6.4.0</revision>\n  </properties>\n"
+      "</project>\n\n";
+  const char *truncated_input = "<project><version>6.3.1</version>";
+  const char *truncated_expected =
+      "<project>\n  <version>6.4.0</version>\n</project>\n\n";
+  const char *invalid_reference =
+      "<project><version>${revision</version></project>";
+  const char *missing_property =
+      "<project><version>${revision}</version></project>";
+  const char *attributed_version =
+      "<project><version source=\"x\">6.3.1</version></project>";
+  const char *duplicate_version =
+      "<project><version>6.3.1</version><version>6.3.2</version></project>";
+  const char *prefixed_project =
+      "<m:project xmlns:m=\"urn:test\"><m:version>6.3.1</m:version>"
+      "</m:project>";
+  const char *empty_version = "<project><version/></project>";
+  const char *empty_expected =
+      "<project>\n  <version>6.4.0</version>\n</project>\n\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_read_text("pom.xml", NULL, property_input, version,
+                                   sizeof version, NULL, error, sizeof error));
+  assert(strcmp(version, "6.3.1") == 0);
+  assert(csemver_version_update_text("pom.xml", NULL, property_input, "6.4.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(property_expected));
+  assert(memcmp(updated, property_expected, updated_size) == 0);
+  free(updated);
+  updated = NULL;
+  assert(csemver_version_update_text("pom.xml", "maven", truncated_input,
+                                     "6.4.0", &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(truncated_expected));
+  assert(memcmp(updated, truncated_expected, updated_size) == 0);
+  free(updated);
+  assert(!csemver_version_read_text("pom.xml", "maven", invalid_reference,
+                                    version, sizeof version, NULL, error,
+                                    sizeof error));
+  assert(strcmp(error, "Failed to read the version field in your pom file - "
+                       "unexpected invalid property reference") == 0);
+  assert(!csemver_version_read_text("pom.xml", "maven", missing_property,
+                                    version, sizeof version, NULL, error,
+                                    sizeof error));
+  assert(strcmp(error, "Failed to read the revision field in your pom file "
+                       "properties - is it present?") == 0);
+  assert(!csemver_version_read_text("pom.xml", "maven", attributed_version,
+                                    version, sizeof version, NULL, error,
+                                    sizeof error));
+  assert(strcmp(error, "pomVersion.startsWith is not a function") == 0);
+  assert(!csemver_version_read_text("pom.xml", "maven", duplicate_version,
+                                    version, sizeof version, NULL, error,
+                                    sizeof error));
+  assert(strcmp(error, "pomVersion.startsWith is not a function") == 0);
+  assert(!csemver_version_read_text("pom.xml", "maven", prefixed_project,
+                                    version, sizeof version, NULL, error,
+                                    sizeof error));
+  assert(strcmp(error,
+                "Failed to read the version field in your pom file - is it "
+                "present?") == 0);
+  assert(!csemver_version_update_text("pom.xml", "maven", prefixed_project,
+                                      "6.4.0", &updated, &updated_size, version,
+                                      sizeof version, error, sizeof error));
+  assert(strcmp(error,
+                "Cannot read properties of undefined (reading 'version')") ==
+         0);
+  assert(csemver_version_update_text("pom.xml", "maven", empty_version, "6.4.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(empty_expected));
+  assert(memcmp(updated, empty_expected, updated_size) == 0);
+  free(updated);
+}
+
 int main(void) {
   test_repository_url_forms();
   test_json_package_config_strings();
@@ -666,6 +771,8 @@ int main(void) {
   test_gradle_updater_matches_upstream();
   test_gradle_updater_handles_carriage_return_lines();
   test_csproj_updater_matches_upstream();
+  test_maven_updater_matches_upstream();
+  test_maven_property_and_invalid_shapes();
   puts("version file tests passed");
   return 0;
 }

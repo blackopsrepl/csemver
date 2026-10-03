@@ -261,7 +261,7 @@ static int load_config(CsemverConfig *config, const char *path) {
 
 static int package_bump_file_type_supported(const char *type) {
   static const char *const supported_types[] = {
-      "csproj",     "gradle", "json", "openapi",
+      "csproj",     "gradle", "json", "maven", "openapi",
       "plain-text", "python", "toml", "yaml"};
   size_t index;
   for (index = 0; index < sizeof supported_types / sizeof supported_types[0];
@@ -298,6 +298,8 @@ static const char *package_bump_file_type_from_filename(const char *filename) {
     return "gradle";
   if (package_path_ends_with(filename, ".csproj"))
     return "csproj";
+  if (strstr(filename, "pom.xml") != NULL)
+    return "maven";
   if (strstr(filename, "openapi.yaml") != NULL)
     return "openapi";
   if (strstr(filename, "pyproject.toml") != NULL)

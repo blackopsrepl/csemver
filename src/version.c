@@ -1,6 +1,7 @@
 #include "version.h"
 
 #include "common.h"
+#include "maven.h"
 
 #include <ctype.h>
 #include <limits.h>
@@ -1970,6 +1971,7 @@ int csemver_version_read_text(const char *filename, const char *type,
              : strstr(filename, ".toml") != NULL               ? "toml"
              : strstr(filename, "build.gradle") != NULL        ? "gradle"
              : version_filename_ends_with(filename, ".csproj") ? "csproj"
+             : strstr(filename, "pom.xml") != NULL             ? "maven"
              : strstr(filename, ".yaml") != NULL ||
                      strstr(filename, ".yml") != NULL
                  ? "yaml"
@@ -2018,6 +2020,9 @@ int csemver_version_read_text(const char *filename, const char *type,
               "present?");
     return 0;
   }
+  if (strcmp(kind, "maven") == 0)
+    return csemver_maven_read_text(content, version, version_size, error,
+                                   error_size);
   if ((strcmp(kind, "python") == 0 || strcmp(kind, "toml") == 0) &&
       line_version(content, "version", false, NULL, version, version_size))
     return 1;
@@ -2060,6 +2065,7 @@ int csemver_version_update_text(const char *filename, const char *type,
              : strstr(filename, ".toml") != NULL               ? "toml"
              : strstr(filename, "build.gradle") != NULL        ? "gradle"
              : version_filename_ends_with(filename, ".csproj") ? "csproj"
+             : strstr(filename, "pom.xml") != NULL             ? "maven"
              : strstr(filename, ".yaml") != NULL ||
                      strstr(filename, ".yml") != NULL
                  ? "yaml"
@@ -2071,6 +2077,10 @@ int csemver_version_update_text(const char *filename, const char *type,
   size_t count = 0, insertion_count = 0, i, j, pos = 0,
          length = strlen(content);
   CsemverBuffer buffer;
+  if (strcmp(kind, "maven") == 0)
+    return csemver_maven_update_text(content, replacement, updated,
+                                     updated_size, old_version,
+                                     old_version_size, error, error_size);
   if (!csemver_version_read_text(filename, type, content, old_version,
                                  old_version_size, NULL, error, error_size))
     return 0;

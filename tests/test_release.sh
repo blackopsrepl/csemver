@@ -1810,6 +1810,40 @@ CSPROJ
 cmp "$tmp/csproj-updater.expected" Project.csproj
 test "$(git tag --list 'v6.4.0')" = ''
 
+mkdir "$tmp/maven-updater"
+cd "$tmp/maven-updater"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "maven-updater-fixture",
+  "commit-and-tag-version": {
+    "packageFiles": [{"filename": "pom.xml", "type": "maven"}],
+    "bumpFiles": ["pom.xml"]
+  }
+}
+JSON
+cat > pom.xml <<'POM'
+<project>
+  <version>6.3.1</version>
+</project>
+POM
+git add package.json pom.xml
+git commit -qm 'chore: seed Maven updater fixture'
+git tag -a v6.3.1 -m 'release 6.3.1'
+git commit --allow-empty -qm 'feat: add Maven feature'
+maven_output=$("$bin" --skip.changelog --skip.commit --skip.tag)
+printf '%s\n' "$maven_output" | grep -Fq '✔ bumping version in pom.xml from 6.3.1 to 6.4.0'
+cat > "$tmp/maven-updater.expected" <<'POM'
+<project>
+  <version>6.4.0</version>
+</project>
+
+POM
+cmp "$tmp/maven-updater.expected" pom.xml
+test "$(git tag --list 'v6.4.0')" = ''
+
 mkdir "$tmp/csproj-invalid-version"
 cd "$tmp/csproj-invalid-version"
 git init -q -b master
