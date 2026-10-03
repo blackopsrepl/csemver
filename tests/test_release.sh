@@ -1610,6 +1610,18 @@ printf '%s\n' "$malformed_package_preview" | \
       "$malformed_package_preview" >&2
     exit 1
   }
+printf '%s\n' "$malformed_package_preview" | \
+  grep -Fq "Unexpected token '}', ...\"\"version\":}" || {
+    printf 'malformed package diagnostic did not match upstream:\n%s\n' \
+      "$malformed_package_preview" >&2
+    exit 1
+  }
+if printf '%s\n' "$malformed_package_preview" | \
+  grep -Fq 'JSON version file has no root version string'; then
+  printf 'failed packageFiles should be skipped silently before bump processing:\n%s\n' \
+    "$malformed_package_preview" >&2
+  exit 1
+fi
 
 mkdir "$tmp/tag-fallback-no-tags"
 cd "$tmp/tag-fallback-no-tags"

@@ -1107,7 +1107,6 @@ static int get_version(const CsemverConfig *config, char *version,
       return 1;
     }
     free(content);
-    errorf("%s: %s", config->package_files[index].filename, error);
   }
   return 0;
 }

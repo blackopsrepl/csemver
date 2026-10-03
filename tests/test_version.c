@@ -432,6 +432,18 @@ static void test_json_array_trailing_comma_diagnostic_matches_node(void) {
   assert(strcmp(error, expected) == 0);
 }
 
+static void test_json_missing_object_value_diagnostic_matches_node(void) {
+  const char *input = "{\"name\":\"malformed-primary\",\"version\":}\n";
+  const char *expected =
+      "Unexpected token '}', ...\"\"version\":}\n\" is not valid JSON";
+  char version[128];
+  char error[256];
+
+  assert(!csemver_version_read_text("package.json", "json", input, version,
+                                    sizeof version, NULL, error, sizeof error));
+  assert(strcmp(error, expected) == 0);
+}
+
 static void test_json_leading_zero_diagnostic_matches_node(void) {
   const char *input = "{\"name\":01}";
   const char *expected =
@@ -579,6 +591,7 @@ int main(void) {
   test_json_invalid_identifier_diagnostics_match_node();
   test_json_trailing_comma_diagnostic_matches_node();
   test_json_array_trailing_comma_diagnostic_matches_node();
+  test_json_missing_object_value_diagnostic_matches_node();
   test_json_leading_zero_diagnostic_matches_node();
   test_package_lock_updates_only_root_package();
   test_package_lock_adds_missing_root_package_version();

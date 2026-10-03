@@ -508,6 +508,38 @@ static int json_invalid_token_position(const char *content, size_t *position) {
   return 0;
 }
 
+static int json_missing_value_position(const char *content, size_t *position) {
+  bool in_string = false, escaped = false;
+  size_t i, length = strlen(content);
+  for (i = 0; i < length; ++i) {
+    if (in_string) {
+      if (escaped)
+        escaped = false;
+      else if (content[i] == '\\')
+        escaped = true;
+      else if (content[i] == '"')
+        in_string = false;
+      continue;
+    }
+    if (content[i] == '"') {
+      in_string = true;
+      continue;
+    }
+    if (content[i] == ':') {
+      size_t next = i + 1;
+      while (next < length && (content[next] == ' ' || content[next] == '\t' ||
+                               content[next] == '\r' || content[next] == '\n'))
+        ++next;
+      if (next < length && (content[next] == '}' || content[next] == ']' ||
+                            content[next] == ',')) {
+        *position = next;
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
 static void json_unexpected_token_error(const char *content,
                                         size_t token_position, char *error,
                                         size_t error_size) {
@@ -528,9 +560,9 @@ static void json_parse_error(const char *content, char *error,
   Scanner scanner = {content, 0, strlen(content)};
   size_t position, line, column, invalid_position = 0;
   size_t object_trailing_position = 0, array_trailing_position = 0;
-  size_t leading_zero_position = 0;
+  size_t leading_zero_position = 0, missing_value_position = 0;
   bool has_invalid, has_object_trailing, has_array_trailing;
-  bool has_leading_zero;
+  bool has_leading_zero, has_missing_value;
   spaces(&scanner);
   if (scanner.position >= scanner.length) {
     set_error(error, error_size, "Unexpected end of JSON input");
@@ -552,6 +584,19 @@ static void json_parse_error(const char *content, char *error,
       json_trailing_comma_position(content, ']', &array_trailing_position);
   has_leading_zero =
       json_leading_zero_position(content, &leading_zero_position);
+  has_missing_value =
+      json_missing_value_position(content, &missing_value_position);
+  if (has_missing_value &&
+      (!has_invalid || missing_value_position < invalid_position) &&
+      (!has_object_trailing ||
+       missing_value_position < object_trailing_position) &&
+      (!has_array_trailing ||
+       missing_value_position < array_trailing_position) &&
+      (!has_leading_zero || missing_value_position < leading_zero_position)) {
+    json_unexpected_token_error(content, missing_value_position, error,
+                                error_size);
+    return;
+  }
   if (has_leading_zero &&
       (!has_invalid || leading_zero_position < invalid_position) &&
       (!has_object_trailing ||
