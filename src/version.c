@@ -1851,6 +1851,76 @@ static int line_version(const char *content, const char *key, bool colon,
   return 0;
 }
 
+static int python_version_range(const char *content, Range *range,
+                                char *version, size_t version_size) {
+  static const char keyword[] = "version";
+  const char *line = content;
+  while (*line != '\0') {
+    const char *line_end = strchr(line, '\n');
+    const char *limit = line_end == NULL ? line + strlen(line) : line_end;
+    const char *regex_limit = memchr(line, '\r', (size_t)(limit - line));
+    const char *candidate;
+    if (regex_limit == NULL)
+      regex_limit = limit;
+    for (candidate = line;
+         (size_t)(regex_limit - candidate) >= sizeof keyword - 1; ++candidate) {
+      const char *cursor;
+      const char *value_start;
+      const char *last_quote = NULL;
+      const char *search;
+      size_t value_length;
+      size_t index;
+      for (index = 0; index < sizeof keyword - 1; ++index)
+        if (tolower((unsigned char)candidate[index]) != keyword[index])
+          break;
+      if (index != sizeof keyword - 1)
+        continue;
+      cursor = candidate + sizeof keyword - 1;
+      while (cursor < regex_limit && (*cursor == ' ' || *cursor == '"'))
+        ++cursor;
+      if (cursor >= regex_limit || *cursor++ != '=')
+        continue;
+      while (cursor < regex_limit && *cursor == ' ')
+        ++cursor;
+      if (cursor >= regex_limit || (*cursor != '\'' && *cursor != '"'))
+        continue;
+      value_start = cursor + 1;
+      for (cursor = value_start; cursor < regex_limit; ++cursor)
+        if (*cursor == '\'' || *cursor == '"')
+          last_quote = cursor;
+      if (last_quote == NULL)
+        continue;
+      value_length = (size_t)(last_quote - value_start);
+      if (version != NULL) {
+        if (value_length >= version_size)
+          return 0;
+        memcpy(version, value_start, value_length);
+        version[value_length] = '\0';
+      }
+      if (range != NULL) {
+        if (value_length == 0) {
+          range->start = (size_t)(line - content);
+          range->end = range->start;
+        } else {
+          for (search = line; (size_t)(limit - search) >= value_length;
+               ++search)
+            if (memcmp(search, value_start, value_length) == 0)
+              break;
+          if ((size_t)(limit - search) < value_length)
+            return 0;
+          range->start = (size_t)(search - content);
+          range->end = range->start + value_length;
+        }
+      }
+      return 1;
+    }
+    if (line_end == NULL)
+      break;
+    line = line_end + 1;
+  }
+  return 0;
+}
+
 static int gradle_version_range(const char *content, Range *range,
                                 char *version, size_t version_size) {
   const char *line = content;
@@ -2023,7 +2093,10 @@ int csemver_version_read_text(const char *filename, const char *type,
   if (strcmp(kind, "maven") == 0)
     return csemver_maven_read_text(content, version, version_size, error,
                                    error_size);
-  if ((strcmp(kind, "python") == 0 || strcmp(kind, "toml") == 0) &&
+  if (strcmp(kind, "python") == 0 &&
+      python_version_range(content, NULL, version, version_size))
+    return 1;
+  if (strcmp(kind, "toml") == 0 &&
       line_version(content, "version", false, NULL, version, version_size))
     return 1;
   if ((strcmp(kind, "yaml") == 0 || strcmp(kind, "openapi") == 0) &&
@@ -2081,7 +2154,17 @@ int csemver_version_update_text(const char *filename, const char *type,
     return csemver_maven_update_text(content, replacement, updated,
                                      updated_size, old_version,
                                      old_version_size, error, error_size);
-  if (!csemver_version_read_text(filename, type, content, old_version,
+  if (strcmp(kind, "python") == 0) {
+    if (!python_version_range(content, &ranges[count], old_version,
+                              old_version_size)) {
+      set_error(error, error_size,
+                "Cannot read properties of undefined (reading 'replace')");
+      return 0;
+    }
+    ++count;
+  }
+  if (strcmp(kind, "python") != 0 &&
+      !csemver_version_read_text(filename, type, content, old_version,
                                  old_version_size, NULL, error, error_size))
     return 0;
   if (strcmp(kind, "gradle") == 0) {
@@ -2153,7 +2236,7 @@ int csemver_version_update_text(const char *filename, const char *type,
     }
     return 1;
   }
-  if (strcmp(kind, "python") == 0 || strcmp(kind, "toml") == 0) {
+  if (strcmp(kind, "toml") == 0) {
     if (!line_version(content, "version", false, &ranges[count], old_version,
                       old_version_size))
       goto bad_format;
@@ -2165,8 +2248,9 @@ int csemver_version_update_text(const char *filename, const char *type,
     ++count;
   } else if (strcmp(kind, "plain-text") == 0) {
     ranges[count++] = (Range){0, length};
-  } else
+  } else if (strcmp(kind, "python") != 0) {
     goto bad_format;
+  }
   for (i = 0; i < count; ++i)
     for (j = i + 1; j < count; ++j)
       if (ranges[j].start < ranges[i].start) {

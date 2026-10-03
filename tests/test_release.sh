@@ -1844,6 +1844,39 @@ POM
 cmp "$tmp/maven-updater.expected" pom.xml
 test "$(git tag --list 'v6.4.0')" = ''
 
+mkdir "$tmp/python-updater"
+cd "$tmp/python-updater"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "python-updater-fixture",
+  "commit-and-tag-version": {
+    "packageFiles": [{"filename": "pyproject.toml", "type": "python"}],
+    "bumpFiles": [{"filename": "pyproject.toml", "type": "python"}]
+  }
+}
+JSON
+cat > pyproject.toml <<'PY'
+# version = '6.3.1'
+[tool.poetry]
+version = "6.3.1"
+PY
+git add package.json pyproject.toml
+git commit -qm 'chore: seed Python updater fixture'
+git tag -a v6.3.1 -m 'release 6.3.1'
+git commit --allow-empty -qm 'feat: add Python feature'
+python_output=$("$bin" --skip.changelog --skip.commit --skip.tag)
+printf '%s\n' "$python_output" | grep -Fq '✔ bumping version in pyproject.toml from 6.3.1 to 6.4.0'
+cat > "$tmp/python-updater.expected" <<'PY'
+# version = '6.4.0'
+[tool.poetry]
+version = "6.3.1"
+PY
+cmp "$tmp/python-updater.expected" pyproject.toml
+test "$(git tag --list 'v6.4.0')" = ''
+
 mkdir "$tmp/csproj-invalid-version"
 cd "$tmp/csproj-invalid-version"
 git init -q -b master
