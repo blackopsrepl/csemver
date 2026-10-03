@@ -1632,6 +1632,50 @@ cmp "$tmp/brace-order-package.expected" package.json
 grep -q '"version": "1.0.1"' package-lock.json
 test "$(git status --porcelain)" = ' M package-lock.json'
 
+mkdir "$tmp/brace-ignore-range"
+cd "$tmp/brace-ignore-range"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email test@example.invalid
+git config commit.gpgSign false
+printf 'packag{e..e}.json\n' > .gitignore
+printf '{"name":"brace-ignore-range","version":"1.0.0"}\n' > package.json
+printf '{"name":"brace-ignore-range","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"brace-ignore-range","version":"1.0.0"}}}\n' > package-lock.json
+git add .gitignore package.json package-lock.json
+git commit -qm 'chore: initialize brace range fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise brace range matching'
+cp package.json "$tmp/brace-range-package.expected"
+brace_range_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
+expected_brace_range_output=$(printf '%s\n' \
+  "Not updating file 'package.json', as it is ignored in Git" \
+  '✔ bumping version in package-lock.json from 1.0.0 to 1.0.1')
+test "$brace_range_output" = "$expected_brace_range_output"
+cmp "$tmp/brace-range-package.expected" package.json
+grep -q '"version": "1.0.1"' package-lock.json
+test "$(git status --porcelain)" = ' M package-lock.json'
+
+mkdir "$tmp/brace-ignore-numeric-range"
+cd "$tmp/brace-ignore-numeric-range"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email test@example.invalid
+git config commit.gpgSign false
+printf 'package{1..5..2}.json\n' > .gitignore
+printf '%s\n' '{"name":"brace-ignore-numeric-range","version":"1.0.0","commit-and-tag-version":{"bumpFiles":[{"filename":"package3.json","type":"json"}]}}' > package.json
+printf '{"version":"1.0.0"}\n' > package3.json
+git add -f .gitignore package.json package3.json
+git commit -qm 'chore: initialize numeric brace range fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise numeric brace range matching'
+cp package.json "$tmp/brace-numeric-package.expected"
+cp package3.json "$tmp/brace-numeric-target.expected"
+numeric_brace_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
+test "$numeric_brace_output" = "Not updating file 'package3.json', as it is ignored in Git"
+cmp "$tmp/brace-numeric-package.expected" package.json
+cmp "$tmp/brace-numeric-target.expected" package3.json
+test -z "$(git status --porcelain)"
+
 mkdir "$tmp/ignored-bump-files"
 cd "$tmp/ignored-bump-files"
 git init -q -b master

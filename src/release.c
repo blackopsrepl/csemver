@@ -2623,6 +2623,179 @@ static int ignore_path_pattern_matches(const char *pattern,
 }
 
 static int ignore_pattern_matches(const char *pattern, const char *filename,
+                                  int rooted);
+
+static char *ignore_pattern_replace_brace(const char *pattern, const char *open,
+                                          const char *close,
+                                          const char *replacement,
+                                          size_t replacement_length) {
+  size_t prefix_length = (size_t)(open - pattern);
+  size_t suffix_length = strlen(close + 1);
+  size_t prefix_replacement_length;
+  size_t expanded_length;
+  char *expanded;
+  if (prefix_length > SIZE_MAX - replacement_length)
+    return NULL;
+  prefix_replacement_length = prefix_length + replacement_length;
+  if (prefix_replacement_length == SIZE_MAX ||
+      suffix_length > SIZE_MAX - prefix_replacement_length - 1)
+    return NULL;
+  expanded_length = prefix_replacement_length + suffix_length;
+  expanded = malloc(expanded_length + 1);
+  if (expanded == NULL)
+    return NULL;
+  memcpy(expanded, pattern, prefix_length);
+  memcpy(expanded + prefix_length, replacement, replacement_length);
+  memcpy(expanded + prefix_replacement_length, close + 1, suffix_length);
+  expanded[expanded_length] = '\0';
+  return expanded;
+}
+
+static int parse_brace_integer(const char *text, long long *value) {
+  const char *digit = text;
+  char *end;
+  long long parsed;
+  if (*digit == '-')
+    ++digit;
+  if (*digit == '\0')
+    return 0;
+  for (; *digit != '\0'; ++digit) {
+    if (!isdigit((unsigned char)*digit))
+      return 0;
+  }
+  errno = 0;
+  parsed = strtoll(text, &end, 10);
+  if (errno == ERANGE || *end != '\0')
+    return 0;
+  *value = parsed;
+  return 1;
+}
+
+static int ascii_letter(char value) {
+  return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z');
+}
+
+static int ignore_brace_sequence_matches(const char *pattern, const char *open,
+                                         const char *close,
+                                         const char *filename, int rooted) {
+  size_t body_length = (size_t)(close - open - 1);
+  char *body = malloc(body_length + 1);
+  char *separator;
+  char *end_text;
+  char *step_text = NULL;
+  long long first, last, step = 1;
+  int alpha;
+  int padded = 0;
+  size_t width;
+  if (body == NULL)
+    return 0;
+  memcpy(body, open + 1, body_length);
+  body[body_length] = '\0';
+  separator = strstr(body, "..");
+  if (separator == NULL) {
+    free(body);
+    return -1;
+  }
+  *separator = '\0';
+  end_text = separator + 2;
+  separator = strstr(end_text, "..");
+  if (separator != NULL) {
+    *separator = '\0';
+    step_text = separator + 2;
+    if (strstr(step_text, "..") != NULL ||
+        !parse_brace_integer(step_text, &step)) {
+      free(body);
+      return -1;
+    }
+  }
+  width = strlen(body) > strlen(end_text) ? strlen(body) : strlen(end_text);
+  alpha = strlen(body) == 1 && strlen(end_text) == 1 && ascii_letter(body[0]) &&
+          ascii_letter(end_text[0]);
+  if (alpha) {
+    first = (unsigned char)body[0];
+    last = (unsigned char)end_text[0];
+  } else if (!parse_brace_integer(body, &first) ||
+             !parse_brace_integer(end_text, &last)) {
+    free(body);
+    return -1;
+  }
+  if (step_text == NULL)
+    step = 1;
+  if (step < 0)
+    step = step == LLONG_MIN ? LLONG_MAX : -step;
+  if (step == 0)
+    step = 1;
+  if (!alpha) {
+    const char *first_digits = body[0] == '-' ? body + 1 : body;
+    const char *last_digits = end_text[0] == '-' ? end_text + 1 : end_text;
+    padded = (first_digits[0] == '0' && first_digits[1] != '\0') ||
+             (last_digits[0] == '0' && last_digits[1] != '\0');
+  }
+  int ascending = first <= last;
+  for (size_t count = 0; count < 100000; ++count) {
+    char item[64];
+    char numeric[64];
+    size_t item_length;
+    char *expanded;
+    int numeric_length;
+    if ((ascending && first > last) || (!ascending && first < last))
+      break;
+    if (alpha) {
+      if (first == '\\') {
+        item_length = 0;
+      } else {
+        item[0] = (char)first;
+        item_length = 1;
+      }
+    } else {
+      numeric_length = snprintf(numeric, sizeof numeric, "%lld", first);
+      if (numeric_length < 0 || (size_t)numeric_length >= sizeof numeric) {
+        free(body);
+        return 0;
+      }
+      item_length = (size_t)numeric_length;
+      if (padded && item_length < width) {
+        size_t sign_length = numeric[0] == '-' ? 1 : 0;
+        size_t zero_count = width - item_length;
+        if (sign_length != 0)
+          item[0] = '-';
+        memset(item + sign_length, '0', zero_count);
+        memcpy(item + sign_length + zero_count, numeric + sign_length,
+               item_length - sign_length);
+        item_length += zero_count;
+      } else {
+        memcpy(item, numeric, item_length);
+      }
+    }
+    expanded =
+        ignore_pattern_replace_brace(pattern, open, close, item, item_length);
+    if (expanded == NULL) {
+      free(body);
+      return 0;
+    }
+    int matches = ignore_pattern_matches(expanded, filename, rooted);
+    free(expanded);
+    if (matches) {
+      free(body);
+      return 1;
+    }
+    if (first == last)
+      break;
+    if (ascending) {
+      if (first > LLONG_MAX - step)
+        break;
+      first += step;
+    } else {
+      if (first < LLONG_MIN + step)
+        break;
+      first -= step;
+    }
+  }
+  free(body);
+  return 0;
+}
+
+static int ignore_pattern_matches(const char *pattern, const char *filename,
                                   int rooted) {
   const char *open = NULL;
   for (const char *cursor = pattern; *cursor != '\0'; ++cursor) {
@@ -2699,6 +2872,12 @@ static int ignore_pattern_matches(const char *pattern, const char *filename,
           break;
       }
       return 0;
+    }
+    if (close != NULL) {
+      int sequence_match =
+          ignore_brace_sequence_matches(pattern, open, close, filename, rooted);
+      if (sequence_match >= 0)
+        return sequence_match;
     }
   }
   if (rooted)
