@@ -9,6 +9,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <fnmatch.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -2188,15 +2189,156 @@ static const char *bump_name(int bump) {
   return bump == 3 ? "major" : bump == 2 ? "minor" : "patch";
 }
 
+static char *shell_quote_lifecycle_command(const char *command) {
+  CsemverBuffer quoted;
+  const char *cursor;
+  csemver_buffer_init(&quoted);
+  if (!csemver_buffer_append(&quoted, "'", 1))
+    return NULL;
+  for (cursor = command; *cursor != '\0'; ++cursor) {
+    if (*cursor == '\'') {
+      if (!csemver_buffer_append(&quoted, "'\\''", 4)) {
+        csemver_buffer_free(&quoted);
+        return NULL;
+      }
+    } else if (!csemver_buffer_append(&quoted, cursor, 1)) {
+      csemver_buffer_free(&quoted);
+      return NULL;
+    }
+  }
+  if (!csemver_buffer_append(&quoted, "'", 1)) {
+    csemver_buffer_free(&quoted);
+    return NULL;
+  }
+  return quoted.data;
+}
+
+static int run_lifecycle_command(const char *command, char **stdout_output,
+                                 char **stderr_output, int *exit_code) {
+  const char *temporary_directory = getenv("TMPDIR");
+  char *template;
+  char *quoted_command = NULL;
+  char *shell_command = NULL;
+  size_t template_size;
+  size_t shell_command_size;
+  int stderr_fd = -1;
+  int higher_fd;
+  CsemverBuffer stderr_buffer;
+  char chunk[4096];
+  ssize_t count;
+  int success = 0;
+  const char *argv[4];
+
+  *stdout_output = NULL;
+  *stderr_output = NULL;
+  if (temporary_directory == NULL || temporary_directory[0] == '\0')
+    temporary_directory = "/tmp";
+  template_size =
+      strlen(temporary_directory) + sizeof "/csemver-lifecycle-XXXXXX";
+  template = malloc(template_size);
+  if (template == NULL)
+    return 0;
+  snprintf(template, template_size, "%s/csemver-lifecycle-XXXXXX",
+           temporary_directory);
+  stderr_fd = mkstemp(template);
+  if (stderr_fd < 0 || unlink(template) != 0)
+    goto cleanup;
+  if (stderr_fd < 3) {
+    higher_fd = fcntl(stderr_fd, F_DUPFD, 3);
+    if (higher_fd < 0)
+      goto cleanup;
+    close(stderr_fd);
+    stderr_fd = higher_fd;
+  }
+  quoted_command = shell_quote_lifecycle_command(command);
+  if (quoted_command == NULL)
+    goto cleanup;
+  shell_command_size = strlen(quoted_command) + 64;
+  shell_command = malloc(shell_command_size);
+  if (shell_command == NULL)
+    goto cleanup;
+  snprintf(shell_command, shell_command_size, "exec /bin/sh -c %s 2>&%d %d>&-",
+           quoted_command, stderr_fd, stderr_fd);
+  argv[0] = "/bin/sh";
+  argv[1] = "-c";
+  argv[2] = shell_command;
+  argv[3] = NULL;
+  if (!csemver_run_process(argv, stdout_output, exit_code))
+    goto cleanup;
+
+  csemver_buffer_init(&stderr_buffer);
+  if (lseek(stderr_fd, 0, SEEK_SET) < 0)
+    goto cleanup_buffer;
+  while ((count = read(stderr_fd, chunk, sizeof chunk)) != 0) {
+    if (count < 0) {
+      if (errno == EINTR)
+        continue;
+      goto cleanup_buffer;
+    }
+    if (!csemver_buffer_append(&stderr_buffer, chunk, (size_t)count))
+      goto cleanup_buffer;
+  }
+  if (stderr_buffer.data == NULL) {
+    stderr_buffer.data = calloc(1, 1);
+    if (stderr_buffer.data == NULL)
+      goto cleanup_buffer;
+  }
+  *stderr_output = stderr_buffer.data;
+  success = 1;
+  goto cleanup;
+
+cleanup_buffer:
+  csemver_buffer_free(&stderr_buffer);
+cleanup:
+  if (!success) {
+    free(*stdout_output);
+    *stdout_output = NULL;
+    free(*stderr_output);
+    *stderr_output = NULL;
+  }
+  if (stderr_fd >= 0)
+    close(stderr_fd);
+  if (template != NULL)
+    unlink(template);
+  free(template);
+  free(quoted_command);
+  free(shell_command);
+  return success;
+}
+
+static void print_lifecycle_message(const char *message) {
+  fprintf(stderr, "%s\n", message);
+}
+
+static char *lifecycle_error_message(const char *command,
+                                     const char *stderr_text) {
+  CsemverBuffer message;
+  csemver_buffer_init(&message);
+  if (!csemver_buffer_append(&message, "Command failed: ", 16) ||
+      !csemver_buffer_append(&message, command, strlen(command)) ||
+      !csemver_buffer_append(&message, "\n", 1))
+    goto failure;
+  if (stderr_text[0] != '\0' &&
+      !csemver_buffer_append(&message, stderr_text, strlen(stderr_text)))
+    goto failure;
+  return message.data;
+
+failure:
+  csemver_buffer_free(&message);
+  return NULL;
+}
+
 static int run_lifecycle_capture(const CsemverConfig *config, const char *name,
                                  char **output) {
   size_t i;
   if (output != NULL)
     *output = NULL;
   for (i = 0; i < config->script_count; ++i) {
-    const char *argv[] = {"/bin/sh", "-c", config->scripts[i].command, NULL};
     int status = 0;
-    char **capture = output != NULL && *output == NULL ? output : NULL;
+    char *captured_output = NULL;
+    char *captured_error = NULL;
+    char *error_message;
+    int keep_output;
     if (strcmp(config->scripts[i].name, name) != 0)
       continue;
     if (!config->silent) {
@@ -2205,10 +2347,34 @@ static int run_lifecycle_capture(const CsemverConfig *config, const char *name,
     }
     if (config->dry_run)
       continue;
-    if (!run_command(argv, capture, &status) || status != 0) {
-      errorf("lifecycle script '%s' failed with status %d", name, status);
+    keep_output = output != NULL && *output == NULL;
+    if (!run_lifecycle_command(config->scripts[i].command, &captured_output,
+                               &captured_error, &status)) {
+      errorf("unable to capture lifecycle script output");
+      free(captured_output);
+      free(captured_error);
       return 0;
     }
+    if (status != 0) {
+      error_message =
+          lifecycle_error_message(config->scripts[i].command, captured_error);
+      if (!config->silent && error_message != NULL) {
+        print_lifecycle_message(captured_error[0] != '\0' ? captured_error
+                                                          : error_message);
+        print_lifecycle_message(error_message);
+      }
+      free(error_message);
+      free(captured_output);
+      free(captured_error);
+      return 0;
+    }
+    if (!config->silent && captured_error[0] != '\0')
+      print_lifecycle_message(captured_error);
+    if (keep_output)
+      *output = captured_output;
+    else
+      free(captured_output);
+    free(captured_error);
   }
   return 1;
 }

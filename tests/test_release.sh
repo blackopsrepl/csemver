@@ -1549,6 +1549,76 @@ actual_normal_stages=$(printf '%s\n' "$normal_lifecycle_output" |
 test "$actual_normal_stages" = "$expected_dry_run_stages"
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/lifecycle-script-failure"
+cd "$tmp/lifecycle-script-failure"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "lifecycle-script-failure-fixture",
+  "version": "1.0.0",
+  "commit-and-tag-version": {
+    "scripts": {"prerelease": "printf hook-stdout; printf hook-failure >&2; exit 7"}
+  }
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed lifecycle script failure fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: exercise lifecycle script failure'
+set +e
+"$bin" --skip.changelog --skip.commit --skip.tag > "$tmp/lifecycle-failure.stdout" 2> "$tmp/lifecycle-failure.stderr"
+lifecycle_failure_status=$?
+set -e
+test "$lifecycle_failure_status" -eq 1
+printf '%s\n' \
+  '✔ Running lifecycle script "prerelease"' \
+  'ℹ - execute command: "printf hook-stdout; printf hook-failure >&2; exit 7"' \
+  > "$tmp/lifecycle-failure.stdout.expected"
+cmp "$tmp/lifecycle-failure.stdout.expected" "$tmp/lifecycle-failure.stdout"
+printf '%s\n' \
+  'hook-failure' \
+  'Command failed: printf hook-stdout; printf hook-failure >&2; exit 7' \
+  'hook-failure' > "$tmp/lifecycle-failure.stderr.expected"
+cmp "$tmp/lifecycle-failure.stderr.expected" "$tmp/lifecycle-failure.stderr"
+cat > package.json <<'JSON'
+{
+  "name": "lifecycle-script-failure-fixture",
+  "version": "1.0.0",
+  "commit-and-tag-version": {
+    "scripts": {"prerelease": "printf hook-stdout; exit 7"}
+  }
+}
+JSON
+git add package.json
+git commit -qm 'chore: use stdout-only failing hook'
+set +e
+"$bin" --skip.changelog --skip.commit --skip.tag > "$tmp/lifecycle-failure-stdout-only.stdout" 2> "$tmp/lifecycle-failure-stdout-only.stderr"
+lifecycle_failure_stdout_only_status=$?
+set -e
+test "$lifecycle_failure_stdout_only_status" -eq 1
+printf '%s\n' \
+  '✔ Running lifecycle script "prerelease"' \
+  'ℹ - execute command: "printf hook-stdout; exit 7"' \
+  > "$tmp/lifecycle-failure-stdout-only.stdout.expected"
+cmp "$tmp/lifecycle-failure-stdout-only.stdout.expected" "$tmp/lifecycle-failure-stdout-only.stdout"
+printf '%s\n' \
+  'Command failed: printf hook-stdout; exit 7' \
+  '' \
+  'Command failed: printf hook-stdout; exit 7' \
+  '' > "$tmp/lifecycle-failure-stdout-only.stderr.expected"
+cmp "$tmp/lifecycle-failure-stdout-only.stderr.expected" "$tmp/lifecycle-failure-stdout-only.stderr"
+set +e
+"$bin" --silent --skip.changelog --skip.commit --skip.tag > "$tmp/lifecycle-failure-silent.stdout" 2> "$tmp/lifecycle-failure-silent.stderr"
+lifecycle_failure_silent_status=$?
+set -e
+test "$lifecycle_failure_silent_status" -eq 1
+test ! -s "$tmp/lifecycle-failure-silent.stdout"
+test ! -s "$tmp/lifecycle-failure-silent.stderr"
+test -z "$(git status --porcelain)"
+test "$(git tag --list 'v1.1.0')" = ''
+
 mkdir "$tmp/no-package-fallback-disabled"
 cd "$tmp/no-package-fallback-disabled"
 git init -q -b master
