@@ -1563,6 +1563,26 @@ test ! -e package.json
 grep -Fq '## [1.3.0](https://github.com/example/csemver/compare/android/production/v1.2.0...android/production/v1.3.0)' CHANGELOG.md
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/malformed-package-fallback"
+cd "$tmp/malformed-package-fallback"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{"name":"malformed-primary","version":}\n' > package.json
+printf '{"name":"valid-fallback","version":"2.0.0"}\n' > bower.json
+git add package.json bower.json
+git commit -qm 'chore: seed malformed primary package file'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: use fallback package file'
+malformed_package_preview=$("$bin" --dry-run 2>&1)
+printf '%s\n' "$malformed_package_preview" | \
+  grep -Fq 'bumping version in bower.json from 2.0.0 to 2.1.0' || {
+    printf 'malformed packageFiles entries should fall through to the next valid file:\n%s\n' \
+      "$malformed_package_preview" >&2
+    exit 1
+  }
+
 mkdir "$tmp/tag-fallback-no-tags"
 cd "$tmp/tag-fallback-no-tags"
 git init -q -b master
