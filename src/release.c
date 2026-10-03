@@ -157,6 +157,7 @@ static int load_package_config(CsemverConfig *config) {
   typedef struct {
     const char *json_key;
     const char *config_key;
+    size_t max_values;
   } PackageArrayOption;
   static const char *const sections[] = {"commit-and-tag-version",
                                          "standard-version"};
@@ -207,7 +208,10 @@ static int load_package_config(CsemverConfig *config) {
       {"preMajor", "preMajor"},
       {"pre-major", "pre-major"}};
   static const PackageArrayOption array_options[] = {
-      {"issuePrefixes", "issuePrefixes"}, {"issue-prefixes", "issue-prefixes"}};
+      {"packageFiles", "packageFiles", CSEMVER_MAX_FILES},
+      {"package-files", "package-files", CSEMVER_MAX_FILES},
+      {"issuePrefixes", "issuePrefixes", CSEMVER_MAX_PREFIXES},
+      {"issue-prefixes", "issue-prefixes", CSEMVER_MAX_PREFIXES}};
   char *contents = NULL;
   char error[256] = {0};
   size_t section_index, option_index;
@@ -249,13 +253,14 @@ static int load_package_config(CsemverConfig *config) {
     for (option_index = 0;
          option_index < sizeof array_options / sizeof array_options[0];
          ++option_index) {
-      char values[CSEMVER_MAX_PREFIXES][CSEMVER_VALUE_MAX];
-      const char *value_pointers[CSEMVER_MAX_PREFIXES];
+      char values[CSEMVER_MAX_FILES][CSEMVER_PATH_MAX];
+      const char *value_pointers[CSEMVER_MAX_FILES];
       size_t value_count, value_index;
       if (!csemver_json_object_string_array(
               contents, sections[section_index],
               array_options[option_index].json_key, &values[0][0],
-              sizeof values[0], CSEMVER_MAX_PREFIXES, &value_count))
+              sizeof values[0], array_options[option_index].max_values,
+              &value_count))
         continue;
       for (value_index = 0; value_index < value_count; ++value_index)
         value_pointers[value_index] = values[value_index];

@@ -690,16 +690,27 @@ cat > package.json <<'JSON'
   "version": "1.0.0",
   "repository": {"type": "git", "url": "https://github.com/example/pkg-array-config.git"},
   "commit-and-tag-version": {
+    "packageFiles": ["package.json", "bower.json"],
     "issuePrefixes": ["JIRA-", "GH-"],
     "issueUrlFormat": "https://issues.example/{{prefix}}{{id}}"
   }
 }
 JSON
-git add package.json
+cat > bower.json <<'JSON'
+{
+  "name": "pkg-array-config-fixture",
+  "version": "2.0.0"
+}
+JSON
+git add package.json bower.json
 git commit -qm 'chore: seed package array config fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'fix: address JIRA-7 and GH-42'
 pkg_array_output=$("$bin" --skip.commit --skip.tag 2>&1)
+grep -Fq '"version": "1.0.1"' bower.json || {
+  printf '%s\n' 'package.json packageFiles should update bower.json to the release version' >&2
+  exit 1
+}
 for issue_ref in '[JIRA-7](https://issues.example/JIRA-7)' \
   '[GH-42](https://issues.example/GH-42)'; do
   grep -Fq "$issue_ref" CHANGELOG.md || {
