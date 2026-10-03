@@ -26,6 +26,7 @@
 #define COMMIT_MAX 1024
 #define ISSUE_REFERENCE_MAX 64
 #define ISSUE_REFERENCE_TEXT_MAX 128
+#define PACKAGE_UNSUPPORTED_FILENAME "__unsupported_filename"
 
 typedef struct {
   char hash[64];
@@ -189,6 +190,54 @@ static const char *package_bump_file_type_from_filename(const char *filename) {
   return NULL;
 }
 
+static void print_json_quoted(FILE *stream, const char *value) {
+  const unsigned char *cursor = (const unsigned char *)value;
+  fputc('"', stream);
+  while (*cursor != '\0') {
+    switch (*cursor) {
+    case '"':
+      fputs("\\\"", stream);
+      break;
+    case '\\':
+      fputs("\\\\", stream);
+      break;
+    case '\b':
+      fputs("\\b", stream);
+      break;
+    case '\f':
+      fputs("\\f", stream);
+      break;
+    case '\n':
+      fputs("\\n", stream);
+      break;
+    case '\r':
+      fputs("\\r", stream);
+      break;
+    case '\t':
+      fputs("\\t", stream);
+      break;
+    default:
+      if (*cursor < 0x20)
+        fprintf(stream, "\\u%04x", (unsigned)*cursor);
+      else
+        fputc(*cursor, stream);
+      break;
+    }
+    ++cursor;
+  }
+  fputc('"', stream);
+}
+
+static void warn_unsupported_package_bump_file(const char *filename) {
+  fputs("Unable to obtain updater for: ", stderr);
+  print_json_quoted(stderr, filename);
+  fprintf(stderr,
+          "\n - Error: Unsupported file (%s) provided for bumping.\n"
+          " Please specify the updater `type` or use a custom `updater`.\n"
+          " - Skipping...\n",
+          filename);
+}
+
 static int load_package_config(CsemverConfig *config) {
   typedef struct {
     const char *json_key;
@@ -339,17 +388,14 @@ static int load_package_config(CsemverConfig *config) {
         for (value_index = 0; value_index < value_count; ++value_index) {
           const char *type =
               package_bump_file_type_from_filename(filenames[value_index]);
-          if (type == NULL) {
-            errorf("unsupported package bumpFiles filename: %s",
-                   filenames[value_index]);
-            free(contents);
-            return 0;
-          }
+          if (type == NULL)
+            type = PACKAGE_UNSUPPORTED_FILENAME;
           snprintf(types[value_index], sizeof types[value_index], "%s", type);
         }
       }
       for (value_index = 0; value_index < value_count; ++value_index) {
-        if (!package_bump_file_type_supported(types[value_index])) {
+        if (strcmp(types[value_index], PACKAGE_UNSUPPORTED_FILENAME) != 0 &&
+            !package_bump_file_type_supported(types[value_index])) {
           errorf("unsupported package bumpFiles updater type: %s",
                  types[value_index]);
           free(contents);
@@ -2067,6 +2113,10 @@ static int update_files(const CsemverConfig *config, const char *version,
     char old_version[SEMVER_TEXT_MAX];
     char error[256] = {0};
     size_t updated_size = 0;
+    if (strcmp(config->bump_files[i].type, PACKAGE_UNSUPPORTED_FILENAME) == 0) {
+      warn_unsupported_package_bump_file(config->bump_files[i].filename);
+      continue;
+    }
     if (!csemver_read_file(config->bump_files[i].filename, &content, NULL))
       continue;
     if (!csemver_version_update_text(

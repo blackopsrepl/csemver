@@ -896,4 +896,41 @@ grep -Fq '"version": "1.0.0"' package.json || {
   exit 1
 }
 
+mkdir "$tmp/pkg-bumpfiles-unsupported"
+cd "$tmp/pkg-bumpfiles-unsupported"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-bumpfiles-unsupported-fixture",
+  "version": "1.0.0",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-unsupported.git"},
+  "commit-and-tag-version": {"bumpFiles": ["metadata.json"]}
+}
+JSON
+cat > metadata.json <<'JSON'
+{
+  "version": "2.0.0"
+}
+JSON
+git add package.json metadata.json
+git commit -qm 'chore: seed unsupported package bump file fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: change with unsupported bump file'
+if unsupported_output=$("$bin" --skip.commit --skip.tag 2>&1); then
+  :
+else
+  printf '%s\n' 'unsupported package bumpFiles should be skipped like upstream' >&2
+  printf '%s\n' "$unsupported_output" >&2
+  exit 1
+fi
+printf '%s\n' "$unsupported_output" | grep -Fxq 'Unable to obtain updater for: "metadata.json"'
+printf '%s\n' "$unsupported_output" | grep -Fxq ' - Error: Unsupported file (metadata.json) provided for bumping.'
+printf '%s\n' "$unsupported_output" | grep -Fxq ' Please specify the updater `type` or use a custom `updater`.'
+printf '%s\n' "$unsupported_output" | grep -Fxq ' - Skipping...'
+grep -Fq '"version": "1.0.0"' package.json
+grep -Fq '"version": "2.0.0"' metadata.json
+test -f CHANGELOG.md
+
 printf '%s\n' 'release workflow tests passed'
