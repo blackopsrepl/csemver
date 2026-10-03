@@ -1676,6 +1676,30 @@ cmp "$tmp/brace-numeric-package.expected" package.json
 cmp "$tmp/brace-numeric-target.expected" package3.json
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/extglob-ignore-bump-files"
+cd "$tmp/extglob-ignore-bump-files"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email test@example.invalid
+git config commit.gpgSign false
+printf '@(package|package-lock).json\n' > .gitignore
+printf '{"name":"extglob-ignore-bump-files","version":"1.0.0"}\n' > package.json
+printf '{"name":"extglob-ignore-bump-files","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"extglob-ignore-bump-files","version":"1.0.0"}}}\n' > package-lock.json
+git add .gitignore package.json package-lock.json
+git commit -qm 'chore: initialize extglob ignore fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise extglob ignore matching'
+cp package.json "$tmp/extglob-package.expected"
+cp package-lock.json "$tmp/extglob-lock.expected"
+extglob_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
+expected_extglob_output=$(printf '%s\n' \
+  "Not updating file 'package.json', as it is ignored in Git" \
+  "Not updating file 'package-lock.json', as it is ignored in Git")
+test "$extglob_output" = "$expected_extglob_output"
+cmp "$tmp/extglob-package.expected" package.json
+cmp "$tmp/extglob-lock.expected" package-lock.json
+test -z "$(git status --porcelain)"
+
 mkdir "$tmp/ignored-bump-files"
 cd "$tmp/ignored-bump-files"
 git init -q -b master

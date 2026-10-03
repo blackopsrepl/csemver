@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include "release.h"
 
@@ -19,6 +20,12 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+#ifdef FNM_EXTMATCH
+#define IGNORE_FNM_FLAGS (FNM_PERIOD | FNM_EXTMATCH)
+#else
+#define IGNORE_FNM_FLAGS FNM_PERIOD
+#endif
 
 #ifndef CSEMVER_VERSION
 #define CSEMVER_VERSION "0.1.0"
@@ -2612,7 +2619,8 @@ static int ignore_path_pattern_matches(const char *pattern,
   pattern_component[pattern_length] = '\0';
   memcpy(filename_component, filename, filename_length);
   filename_component[filename_length] = '\0';
-  int matched = fnmatch(pattern_component, filename_component, FNM_PERIOD) == 0;
+  int matched =
+      fnmatch(pattern_component, filename_component, IGNORE_FNM_FLAGS) == 0;
   free(pattern_component);
   free(filename_component);
   if (!matched)
@@ -2891,7 +2899,7 @@ static int ignore_pattern_matches(const char *pattern, const char *filename,
       return 0;
     memcpy(component, filename, length);
     component[length] = '\0';
-    if (fnmatch(pattern, component, FNM_PERIOD) == 0)
+    if (fnmatch(pattern, component, IGNORE_FNM_FLAGS) == 0)
       return 1;
     if (slash == NULL)
       return 0;
