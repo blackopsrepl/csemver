@@ -10,7 +10,7 @@ csemver implements the version bump, changelog, release commit, and annotated Gi
 
 ## Build and test
 
-Requirements: a C17 compiler, GNU Make, Git, and libxml2 development files (for example, `libxml2-dev` plus `pkg-config` on Debian/Ubuntu). The TOML parser is compiled directly from `src/toml.c`.
+Requirements: a C17 compiler, GNU Make, Git, libxml2 and libyaml development files, and `pkg-config` (for example, `libxml2-dev libyaml-dev pkg-config` on Debian/Ubuntu). The TOML parser is compiled directly from `src/toml.c`.
 
 ```sh
 make
@@ -48,7 +48,7 @@ packageFiles = [{ filename = "VERSION", type = "plain-text" }]
 bumpFiles = [{ filename = "VERSION", type = "plain-text" }]
 ```
 
-File lists may also contain strings (for recognized extensions) or tables with `filename` and `type`. Supported updater types are `csproj`, `gradle`, `json`, `maven`, `python`, `toml`, `yaml`, `openapi`, and `plain-text`. Gradle files rewrite the matched declaration as `version = "VERSION"` and preserve the rest of the file. C# project files rewrite the matched `<Version>` element and preserve the rest of the file. Maven POM files use libxml2 to resolve direct or `${property}` versions and reserialize the document with upstream-compatible formatting and newline behavior for the tested fixtures. JSON package-lock files update only the root package version surfaces. JSON files are reserialized with detected indentation and newline conventions and end with a newline, matching upstream behavior; Python, TOML, YAML, and OpenAPI updates preserve surrounding bytes, while plain-text replaces only the version token.
+File lists may also contain strings (for recognized extensions) or tables with `filename` and `type`. Supported updater types are `csproj`, `gradle`, `json`, `maven`, `python`, `toml`, `yaml`, `openapi`, and `plain-text`. Gradle files rewrite the matched declaration as `version = "VERSION"` and preserve the rest of the file. C# project files rewrite the matched `<Version>` element and preserve the rest of the file. Maven POM files use libxml2 to resolve direct or `${property}` versions and reserialize the document with upstream-compatible formatting and newline behavior for the tested fixtures. JSON package-lock files update only the root package version surfaces. JSON files are reserialized with detected indentation and newline conventions and end with a newline, matching upstream behavior; Python and TOML updates preserve surrounding bytes. YAML and OpenAPI files use libyaml to select the root `version` or `info.version` mapping entry and preserve surrounding bytes; plain-text replaces only the version token.
 
 Other supported keys include `preset`, `infile`, `header`, `releaseAs`, `prerelease`, `releaseCount`, `tagPrefix`, `issuePrefixes`, `path`, `lernaPackage`, `preMajor`, `noBumpWhenEmptyChanges`, `releaseCommitMessageFormat`, `commitUrlFormat`, `compareUrlFormat`, `issueUrlFormat`, `userUrlFormat`, `packageFiles`, `bumpFiles`, `types`, `skip`, and `scripts`. A custom `types` array replaces the default types; each entry uses `type`, optional `section`, and either `hidden` or `effect = "hidden" | "changelog" | "bump"`. The built-in presets are `conventional-changelog-conventionalcommits` (default) and Angular (`angular` or `conventional-changelog-angular`).
 

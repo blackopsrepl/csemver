@@ -10,10 +10,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <yaml.h>
 
 typedef struct {
   size_t start, end;
 } Range;
+typedef struct {
+  bool is_mapping;
+  bool is_root_mapping;
+  bool is_info_mapping;
+  bool expect_key;
+  bool key_is_info;
+  bool key_is_version;
+  bool closes_as_mapping_key;
+} YamlFrame;
 typedef struct {
   const char *text;
   size_t position, length;
@@ -1851,6 +1861,223 @@ static int line_version(const char *content, const char *key, bool colon,
   return 0;
 }
 
+static int yaml_scalar_equals(const yaml_event_t *event, const char *value) {
+  size_t value_size = strlen(value);
+  return event->data.scalar.length == value_size &&
+         memcmp(event->data.scalar.value, value, value_size) == 0;
+}
+
+static int yaml_mark_to_byte_offset(const char *content, size_t character_index,
+                                    size_t *byte_offset) {
+  size_t characters = 0;
+  size_t bytes = 0;
+  while (characters < character_index) {
+    unsigned char first = (unsigned char)content[bytes];
+    if (first == '\0')
+      return 0;
+    if (first < 0x80)
+      ++bytes;
+    else if ((first & 0xe0) == 0xc0)
+      bytes += 2;
+    else if ((first & 0xf0) == 0xe0)
+      bytes += 3;
+    else if ((first & 0xf8) == 0xf0)
+      bytes += 4;
+    else
+      return 0;
+    ++characters;
+  }
+  *byte_offset = bytes;
+  return 1;
+}
+
+static int yaml_scalar_value_range(const char *content,
+                                   const yaml_event_t *event, Range *range,
+                                   char *version, size_t version_size) {
+  size_t start;
+  size_t end;
+  size_t value_length = event->data.scalar.length;
+  yaml_scalar_style_t style = event->data.scalar.style;
+  if (!yaml_mark_to_byte_offset(content, event->start_mark.index, &start) ||
+      !yaml_mark_to_byte_offset(content, event->end_mark.index, &end) ||
+      start > end)
+    return 0;
+  while (start < end && (content[start] == '!' || content[start] == '&')) {
+    while (start < end && content[start] != ' ' && content[start] != '\t' &&
+           content[start] != '\r' && content[start] != '\n')
+      ++start;
+    while (start < end && (content[start] == ' ' || content[start] == '\t'))
+      ++start;
+  }
+  if (style == YAML_SINGLE_QUOTED_SCALAR_STYLE ||
+      style == YAML_DOUBLE_QUOTED_SCALAR_STYLE) {
+    char quote;
+    if (start >= end || (content[start] != '\'' && content[start] != '"'))
+      return 0;
+    quote = content[start++];
+    if (end <= start || content[end - 1] != quote)
+      return 0;
+    --end;
+  } else if (style == YAML_LITERAL_SCALAR_STYLE ||
+             style == YAML_FOLDED_SCALAR_STYLE) {
+    size_t header_end = start;
+    while (header_end < end && content[header_end] != '\n' &&
+           content[header_end] != '\r')
+      ++header_end;
+    if (header_end == end)
+      return 0;
+    start = header_end + 1;
+    if (content[header_end] == '\r' && start < end && content[start] == '\n')
+      ++start;
+    while (start < end && (content[start] == ' ' || content[start] == '\t'))
+      ++start;
+    while (end > start &&
+           (content[end - 1] == '\n' || content[end - 1] == '\r'))
+      --end;
+  }
+  if (start > end)
+    return 0;
+  if (version != NULL) {
+    if (value_length >= version_size)
+      return 0;
+    if (value_length != 0)
+      memcpy(version, event->data.scalar.value, value_length);
+    version[value_length] = '\0';
+  }
+  if (range != NULL) {
+    range->start = start;
+    range->end = end;
+  }
+  return 1;
+}
+
+static int yaml_version_range(const char *content, bool openapi, Range *range,
+                              char *version, size_t version_size) {
+  yaml_parser_t parser;
+  YamlFrame *frames = NULL;
+  size_t depth = 0;
+  size_t capacity = 0;
+  bool found = false;
+  bool failed = false;
+  if (!yaml_parser_initialize(&parser))
+    return 0;
+  yaml_parser_set_input_string(&parser, (const unsigned char *)content,
+                               strlen(content));
+  for (;;) {
+    yaml_event_t event;
+    bool stop;
+    if (!yaml_parser_parse(&parser, &event)) {
+      failed = true;
+      break;
+    }
+    stop = event.type == YAML_STREAM_END_EVENT ||
+           event.type == YAML_DOCUMENT_END_EVENT;
+    switch (event.type) {
+    case YAML_MAPPING_START_EVENT:
+    case YAML_SEQUENCE_START_EVENT: {
+      bool is_mapping = event.type == YAML_MAPPING_START_EVENT;
+      bool is_root_mapping = is_mapping && depth == 0;
+      bool is_info_mapping =
+          is_mapping && openapi && depth > 0 && frames[depth - 1].is_mapping &&
+          frames[depth - 1].is_root_mapping && !frames[depth - 1].expect_key &&
+          frames[depth - 1].key_is_info;
+      bool closes_as_mapping_key = depth > 0 && frames[depth - 1].is_mapping &&
+                                   frames[depth - 1].expect_key;
+      if (depth > 0 && frames[depth - 1].is_mapping &&
+          !frames[depth - 1].expect_key) {
+        frames[depth - 1].expect_key = true;
+        frames[depth - 1].key_is_info = false;
+        frames[depth - 1].key_is_version = false;
+      }
+      if (depth == capacity) {
+        size_t new_capacity = capacity == 0 ? 16 : capacity * 2;
+        YamlFrame *new_frames;
+        if (new_capacity < capacity ||
+            new_capacity > SIZE_MAX / sizeof *frames) {
+          failed = true;
+          break;
+        }
+        new_frames = realloc(frames, new_capacity * sizeof *frames);
+        if (new_frames == NULL) {
+          failed = true;
+          break;
+        }
+        frames = new_frames;
+        capacity = new_capacity;
+      }
+      frames[depth] = (YamlFrame){
+          .is_mapping = is_mapping,
+          .is_root_mapping = is_root_mapping,
+          .is_info_mapping = is_info_mapping,
+          .expect_key = true,
+          .closes_as_mapping_key = closes_as_mapping_key,
+      };
+      ++depth;
+      break;
+    }
+    case YAML_MAPPING_END_EVENT:
+    case YAML_SEQUENCE_END_EVENT:
+      if (depth > 0) {
+        bool closes_as_mapping_key = frames[depth - 1].closes_as_mapping_key;
+        --depth;
+        if (closes_as_mapping_key && depth > 0 &&
+            frames[depth - 1].is_mapping) {
+          frames[depth - 1].expect_key = false;
+          frames[depth - 1].key_is_info = false;
+          frames[depth - 1].key_is_version = false;
+        }
+      }
+      break;
+    case YAML_SCALAR_EVENT:
+      if (depth > 0 && frames[depth - 1].is_mapping) {
+        YamlFrame *frame = &frames[depth - 1];
+        if (frame->expect_key) {
+          frame->key_is_info = openapi && frame->is_root_mapping &&
+                               yaml_scalar_equals(&event, "info");
+          frame->key_is_version = yaml_scalar_equals(&event, "version") &&
+                                  ((openapi && frame->is_info_mapping) ||
+                                   (!openapi && frame->is_root_mapping));
+          frame->expect_key = false;
+        } else {
+          if (frame->key_is_version && !found) {
+            if (!yaml_scalar_value_range(content, &event, range, version,
+                                         version_size))
+              failed = true;
+            else
+              found = true;
+          }
+          frame->expect_key = true;
+          frame->key_is_info = false;
+          frame->key_is_version = false;
+        }
+      }
+      break;
+    case YAML_ALIAS_EVENT:
+      if (depth > 0 && frames[depth - 1].is_mapping) {
+        YamlFrame *frame = &frames[depth - 1];
+        if (frame->expect_key) {
+          frame->key_is_info = false;
+          frame->key_is_version = false;
+          frame->expect_key = false;
+        } else {
+          frame->expect_key = true;
+          frame->key_is_info = false;
+          frame->key_is_version = false;
+        }
+      }
+      break;
+    default:
+      break;
+    }
+    yaml_event_delete(&event);
+    if (failed || stop)
+      break;
+  }
+  yaml_parser_delete(&parser);
+  free(frames);
+  return found && !failed;
+}
+
 static int python_version_range(const char *content, Range *range,
                                 char *version, size_t version_size) {
   static const char keyword[] = "version";
@@ -2099,8 +2326,11 @@ int csemver_version_read_text(const char *filename, const char *type,
   if (strcmp(kind, "toml") == 0 &&
       line_version(content, "version", false, NULL, version, version_size))
     return 1;
-  if ((strcmp(kind, "yaml") == 0 || strcmp(kind, "openapi") == 0) &&
-      line_version(content, "version:", true, NULL, version, version_size))
+  if (strcmp(kind, "yaml") == 0 &&
+      yaml_version_range(content, false, NULL, version, version_size))
+    return 1;
+  if (strcmp(kind, "openapi") == 0 &&
+      yaml_version_range(content, true, NULL, version, version_size))
     return 1;
   if (strcmp(kind, "plain-text") == 0) {
     size_t length = strcspn(content, "\r\n");
@@ -2241,9 +2471,14 @@ int csemver_version_update_text(const char *filename, const char *type,
                       old_version_size))
       goto bad_format;
     ++count;
-  } else if (strcmp(kind, "yaml") == 0 || strcmp(kind, "openapi") == 0) {
-    if (!line_version(content, "version:", true, &ranges[count], old_version,
-                      old_version_size))
+  } else if (strcmp(kind, "yaml") == 0) {
+    if (!yaml_version_range(content, false, &ranges[count], old_version,
+                            old_version_size))
+      goto bad_format;
+    ++count;
+  } else if (strcmp(kind, "openapi") == 0) {
+    if (!yaml_version_range(content, true, &ranges[count], old_version,
+                            old_version_size))
       goto bad_format;
     ++count;
   } else if (strcmp(kind, "plain-text") == 0) {

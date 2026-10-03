@@ -5,6 +5,8 @@ CSEMVER_VERSION ?= 0.1.0
 VERSION_CPPFLAGS = -DCSEMVER_VERSION='"$(CSEMVER_VERSION)"'
 XML2_CFLAGS ?= $(shell pkg-config --cflags libxml-2.0 2>/dev/null || xml2-config --cflags)
 XML2_LIBS ?= $(shell pkg-config --libs libxml-2.0 2>/dev/null || xml2-config --libs)
+YAML_CFLAGS ?= $(shell pkg-config --cflags yaml-0.1 2>/dev/null)
+YAML_LIBS ?= $(shell pkg-config --libs yaml-0.1 2>/dev/null || echo -lyaml)
 WARNINGS = -std=c17 -Wall -Wextra -Wpedantic -Werror
 
 .PHONY: all test clean
@@ -12,13 +14,13 @@ WARNINGS = -std=c17 -Wall -Wextra -Wpedantic -Werror
 all: build/csemver build/commit-and-tag-version
 
 build/csemver: src/main.c src/release.c src/release.h src/common.c src/common.h src/version.c src/version.h src/maven.c src/maven.h src/config.c src/config.h src/semver.c src/semver.h src/toml.c src/toml.h | build
-	$(CC) $(CPPFLAGS) $(VERSION_CPPFLAGS) $(XML2_CFLAGS) $(CFLAGS) $(WARNINGS) -o $@ src/main.c src/release.c src/common.c src/version.c src/maven.c src/config.c src/semver.c src/toml.c $(XML2_LIBS)
+	$(CC) $(CPPFLAGS) $(VERSION_CPPFLAGS) $(XML2_CFLAGS) $(YAML_CFLAGS) $(CFLAGS) $(WARNINGS) -o $@ src/main.c src/release.c src/common.c src/version.c src/maven.c src/config.c src/semver.c src/toml.c $(XML2_LIBS) $(YAML_LIBS)
 
 build/commit-and-tag-version: build/csemver
 	ln -sf csemver $@
 
 build/csemver-version-test: src/main.c src/release.c src/release.h src/common.c src/common.h src/version.c src/version.h src/maven.c src/maven.h src/config.c src/config.h src/semver.c src/semver.h src/toml.c src/toml.h | build
-	$(CC) $(CPPFLAGS) $(XML2_CFLAGS) $(CFLAGS) $(WARNINGS) -DCSEMVER_VERSION='"9.8.7"' -o $@ src/main.c src/release.c src/common.c src/version.c src/maven.c src/config.c src/semver.c src/toml.c $(XML2_LIBS)
+	$(CC) $(CPPFLAGS) $(XML2_CFLAGS) $(YAML_CFLAGS) $(CFLAGS) $(WARNINGS) -DCSEMVER_VERSION='"9.8.7"' -o $@ src/main.c src/release.c src/common.c src/version.c src/maven.c src/config.c src/semver.c src/toml.c $(XML2_LIBS) $(YAML_LIBS)
 
 build/test_config: tests/test_config.c src/config.c src/config.h src/toml.c src/toml.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_config.c src/config.c src/toml.c
@@ -27,7 +29,7 @@ build/test_toml: tests/test_toml.c src/toml.c src/toml.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_toml.c src/toml.c
 
 build/test_version: tests/test_version.c src/version.c src/version.h src/common.c src/common.h src/maven.c src/maven.h | build
-	$(CC) $(CPPFLAGS) $(XML2_CFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_version.c src/version.c src/common.c src/maven.c $(XML2_LIBS)
+	$(CC) $(CPPFLAGS) $(XML2_CFLAGS) $(YAML_CFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_version.c src/version.c src/common.c src/maven.c $(XML2_LIBS) $(YAML_LIBS)
 
 build/test_semver: tests/test_semver.c src/semver.c src/semver.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_semver.c src/semver.c

@@ -568,6 +568,50 @@ static void test_toml_and_yaml_surface(void) {
   free(updated);
 }
 
+static void test_yaml_updater_only_updates_root_version(void) {
+  const char *input = "nested:\n  version: 0.9.1\nversion: 1.2.3\n";
+  const char *expected = "nested:\n  version: 0.9.1\nversion: 1.3.0\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_read_text("config.yaml", "yaml", input, version,
+                                   sizeof version, NULL, error, sizeof error));
+  assert(strcmp(version, "1.2.3") == 0);
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_openapi_uses_info_version_not_nested_schema_version(void) {
+  const char *input =
+      "openapi: 3.0.3\ncomponents:\n  schemas:\n    Widget:\n"
+      "      version: 0.9.1\ninfo:\n  title: café\n  version: \"1.2.3\"\n"
+      "paths: {}\n";
+  const char *expected =
+      "openapi: 3.0.3\ncomponents:\n  schemas:\n    Widget:\n"
+      "      version: 0.9.1\ninfo:\n  title: café\n  version: \"1.3.0\"\n"
+      "paths: {}\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_read_text("openapi.yaml", "openapi", input, version,
+                                   sizeof version, NULL, error, sizeof error));
+  assert(strcmp(version, "1.2.3") == 0);
+  assert(csemver_version_update_text("openapi.yaml", "openapi", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
 static void test_gradle_updater_matches_upstream(void) {
   const char *input =
       "plugins { }\n\nversion='6.3.1'\njava.sourceCompatibility = 8\n";
@@ -794,6 +838,8 @@ int main(void) {
   test_package_lock_adds_missing_root_version_fields();
   test_plain_text_preserves_upstream_write_semantics();
   test_toml_and_yaml_surface();
+  test_openapi_uses_info_version_not_nested_schema_version();
+  test_yaml_updater_only_updates_root_version();
   test_gradle_updater_matches_upstream();
   test_gradle_updater_handles_carriage_return_lines();
   test_csproj_updater_matches_upstream();
