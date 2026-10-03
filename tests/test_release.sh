@@ -1602,6 +1602,32 @@ test "$(git tag --list)" = v1.0.0
 test "$(git status --porcelain)" = ' M package.json'
 test ! -e CHANGELOG.md
 
+mkdir "$tmp/directory-bump-file"
+cd "$tmp/directory-bump-file"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email test@example.invalid
+git config commit.gpgSign false
+mkdir package-lock.json
+printf '{"name":"directory-bump-file","version":"1.0.0"}\n' > package.json
+printf 'untouched\n' > package-lock.json/marker
+git add package.json package-lock.json/marker
+git commit -qm 'chore: initialize directory bump fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise directory bump handling'
+directory_bump_head=$(git rev-parse HEAD)
+directory_bump_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
+expected_directory_bump_output=$(printf '%s\n%s' \
+  '✔ bumping version in package.json from 1.0.0 to 1.0.1' \
+  "Not updating 'package-lock.json', as it is not a file")
+test "$directory_bump_output" = "$expected_directory_bump_output"
+grep -q '"version": "1.0.1"' package.json
+test "$(cat package-lock.json/marker)" = untouched
+test "$(git rev-parse HEAD)" = "$directory_bump_head"
+test "$(git tag --list)" = v1.0.0
+test "$(git status --porcelain)" = ' M package.json'
+test ! -e CHANGELOG.md
+
 mkdir "$tmp/globstar-root-bump-file"
 cd "$tmp/globstar-root-bump-file"
 git init -q -b master

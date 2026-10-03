@@ -2710,6 +2710,19 @@ static int file_is_gitignored(const char *filename) {
   return ignored;
 }
 
+typedef enum {
+  BUMP_FILE_MISSING,
+  BUMP_FILE_REGULAR,
+  BUMP_FILE_OTHER,
+} BumpFileKind;
+
+static BumpFileKind bump_file_kind(const char *filename) {
+  struct stat status;
+  if (lstat(filename, &status) != 0)
+    return BUMP_FILE_MISSING;
+  return S_ISREG(status.st_mode) ? BUMP_FILE_REGULAR : BUMP_FILE_OTHER;
+}
+
 static int update_files(const CsemverConfig *config, const char *version,
                         bool version_is_null,
                         char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX],
@@ -2726,12 +2739,21 @@ static int update_files(const CsemverConfig *config, const char *version,
     char old_version[SEMVER_TEXT_MAX];
     char error[256] = {0};
     size_t updated_size = 0;
+    BumpFileKind file_kind;
     if (strcmp(config->bump_files[i].type, PACKAGE_UNSUPPORTED_FILENAME) == 0) {
       warn_unsupported_package_bump_file(config->bump_files[i].filename);
       continue;
     }
     if (file_is_gitignored(config->bump_files[i].filename)) {
       printf("Not updating file '%s', as it is ignored in Git\n",
+             config->bump_files[i].filename);
+      continue;
+    }
+    file_kind = bump_file_kind(config->bump_files[i].filename);
+    if (file_kind == BUMP_FILE_MISSING)
+      continue;
+    if (file_kind == BUMP_FILE_OTHER) {
+      printf("Not updating '%s', as it is not a file\n",
              config->bump_files[i].filename);
       continue;
     }
@@ -3160,6 +3182,8 @@ int csemver_main(int argc, char **argv) {
       for (size_t i = 0; i < config.bump_file_count; ++i) {
         char *contents = NULL, old[SEMVER_TEXT_MAX], error[256];
         if (file_is_gitignored(config.bump_files[i].filename))
+          continue;
+        if (bump_file_kind(config.bump_files[i].filename) != BUMP_FILE_REGULAR)
           continue;
         if (!csemver_read_file(config.bump_files[i].filename, &contents, NULL))
           continue;
