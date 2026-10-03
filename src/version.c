@@ -3412,6 +3412,82 @@ static void yaml_trim_leading_blank_lines(CsemverBuffer *buffer) {
   }
 }
 
+static int yaml_separate_trailing_root_comments(CsemverBuffer *buffer) {
+  size_t position = 0;
+  size_t content_end = 0;
+  size_t comment_start = 0;
+  size_t index;
+  bool have_content = false;
+  bool has_trailing_comments = false;
+  bool last_content_is_document_end = false;
+  const char *newline = "\n";
+  size_t newline_length = 1;
+  CsemverBuffer separated;
+
+  for (index = 0; index + 1 < buffer->length; ++index) {
+    if (buffer->data[index] == '\r' && buffer->data[index + 1] == '\n') {
+      newline = "\r\n";
+      newline_length = 2;
+      break;
+    }
+    if (buffer->data[index] == '\n')
+      break;
+  }
+  while (position < buffer->length) {
+    size_t line_start = position;
+    size_t line_end = position;
+    size_t next_line;
+    size_t first_nonspace = line_start;
+    bool blank;
+    while (line_end < buffer->length && buffer->data[line_end] != '\r' &&
+           buffer->data[line_end] != '\n')
+      ++line_end;
+    next_line = line_end;
+    if (next_line < buffer->length && buffer->data[next_line] == '\r')
+      ++next_line;
+    if (next_line < buffer->length && buffer->data[next_line] == '\n')
+      ++next_line;
+    while (first_nonspace < line_end && (buffer->data[first_nonspace] == ' ' ||
+                                         buffer->data[first_nonspace] == '\t'))
+      ++first_nonspace;
+    blank = first_nonspace == line_end;
+    if (!blank && buffer->data[line_start] == '#') {
+      if (have_content) {
+        if (!has_trailing_comments)
+          comment_start = line_start;
+        has_trailing_comments = true;
+      }
+    } else if (!blank) {
+      size_t marker_end = line_end;
+      while (marker_end > first_nonspace &&
+             (buffer->data[marker_end - 1] == ' ' ||
+              buffer->data[marker_end - 1] == '\t'))
+        --marker_end;
+      have_content = true;
+      content_end = line_end;
+      has_trailing_comments = false;
+      last_content_is_document_end =
+          marker_end - first_nonspace == 3 &&
+          memcmp(buffer->data + first_nonspace, "...", 3) == 0;
+    }
+    position = next_line;
+  }
+  if (!has_trailing_comments || !have_content || last_content_is_document_end)
+    return 1;
+  csemver_buffer_init(&separated);
+  if (!csemver_buffer_append(&separated, buffer->data, content_end) ||
+      !csemver_buffer_append(&separated, newline, newline_length) ||
+      !csemver_buffer_append(&separated, newline, newline_length) ||
+      !csemver_buffer_append(&separated, buffer->data + comment_start,
+                             buffer->length - comment_start)) {
+    csemver_buffer_free(&separated);
+    return 0;
+  }
+  csemver_buffer_free(buffer);
+  *buffer = separated;
+  return 1;
+}
+
 static int yaml_match_serialized_newline(const char *source,
                                          CsemverBuffer *output) {
   size_t source_length = strlen(source);
@@ -3502,7 +3578,8 @@ static int yaml_normalize_single_line_flow(const char *content, char **output,
       return 0;
     }
     yaml_trim_leading_blank_lines(&buffer);
-    if (!yaml_match_serialized_newline(content, &buffer)) {
+    if (!yaml_match_serialized_newline(content, &buffer) ||
+        !yaml_separate_trailing_root_comments(&buffer)) {
       free(formatted);
       csemver_buffer_free(&buffer);
       return 0;
