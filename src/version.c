@@ -3389,6 +3389,29 @@ static void yaml_trim_trailing_horizontal_space(CsemverBuffer *buffer) {
     buffer->data[buffer->length] = '\0';
 }
 
+static void yaml_trim_leading_blank_lines(CsemverBuffer *buffer) {
+  size_t position = 0;
+  while (position < buffer->length) {
+    size_t line_end = position;
+    while (line_end < buffer->length &&
+           (buffer->data[line_end] == ' ' || buffer->data[line_end] == '\t'))
+      ++line_end;
+    if (line_end == buffer->length ||
+        (buffer->data[line_end] != '\r' && buffer->data[line_end] != '\n'))
+      break;
+    if (buffer->data[line_end] == '\r' && line_end + 1 < buffer->length &&
+        buffer->data[line_end + 1] == '\n')
+      position = line_end + 2;
+    else
+      position = line_end + 1;
+  }
+  if (position > 0) {
+    memmove(buffer->data, buffer->data + position, buffer->length - position);
+    buffer->length -= position;
+    buffer->data[buffer->length] = '\0';
+  }
+}
+
 static int yaml_match_serialized_newline(const char *source,
                                          CsemverBuffer *output) {
   size_t source_length = strlen(source);
@@ -3473,8 +3496,13 @@ static int yaml_normalize_single_line_flow(const char *content, char **output,
     if (!yaml_format_multiline_root_flow(content, &formatted, &formatted_size,
                                          &handled) ||
         (handled ? !csemver_buffer_append(&buffer, formatted, formatted_size)
-                 : !csemver_buffer_append(&buffer, content, length)) ||
-        !yaml_match_serialized_newline(content, &buffer)) {
+                 : !csemver_buffer_append(&buffer, content, length))) {
+      free(formatted);
+      csemver_buffer_free(&buffer);
+      return 0;
+    }
+    yaml_trim_leading_blank_lines(&buffer);
+    if (!yaml_match_serialized_newline(content, &buffer)) {
       free(formatted);
       csemver_buffer_free(&buffer);
       return 0;
