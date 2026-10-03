@@ -2404,6 +2404,78 @@ static int yaml_has_bare_cr_stringifier_error(const char *content) {
   return stringifier_error ? 1 : (failed ? -1 : 0);
 }
 
+static int yaml_escape_bare_cr_in_double_quoted_scalars(const char *content,
+                                                        char **updated,
+                                                        size_t *updated_size) {
+  size_t length = strlen(content);
+  size_t copy_position = 0;
+  bool changed = false;
+  bool failed = false;
+  yaml_parser_t parser;
+  CsemverBuffer escaped;
+  *updated = NULL;
+  *updated_size = 0;
+  if (memchr(content, '\r', length) == NULL)
+    return 1;
+  csemver_buffer_init(&escaped);
+  if (!yaml_parser_initialize(&parser))
+    return 0;
+  yaml_parser_set_input_string(&parser, (const unsigned char *)content, length);
+  for (;;) {
+    yaml_event_t event;
+    bool stream_end;
+    if (!yaml_parser_parse(&parser, &event)) {
+      failed = true;
+      break;
+    }
+    if (event.type == YAML_SCALAR_EVENT &&
+        event.data.scalar.style == YAML_DOUBLE_QUOTED_SCALAR_STYLE) {
+      size_t start;
+      size_t end;
+      size_t position;
+      if (!yaml_mark_to_byte_offset(content, event.start_mark.index, &start) ||
+          !yaml_mark_to_byte_offset(content, event.end_mark.index, &end) ||
+          start < copy_position || end < start || end > length) {
+        failed = true;
+      } else {
+        for (position = start; position < end; ++position) {
+          if (content[position] == '\r' &&
+              (position + 1 == end || content[position + 1] != '\n')) {
+            if (!csemver_buffer_append(&escaped, content + copy_position,
+                                       position - copy_position) ||
+                !csemver_buffer_append(&escaped, "\\r", 2)) {
+              failed = true;
+              break;
+            }
+            copy_position = position + 1;
+            changed = true;
+          }
+        }
+      }
+    }
+    stream_end = event.type == YAML_STREAM_END_EVENT;
+    yaml_event_delete(&event);
+    if (failed || stream_end)
+      break;
+  }
+  yaml_parser_delete(&parser);
+  if (!failed && changed &&
+      !csemver_buffer_append(&escaped, content + copy_position,
+                             length - copy_position))
+    failed = true;
+  if (failed) {
+    csemver_buffer_free(&escaped);
+    return 0;
+  }
+  if (!changed) {
+    csemver_buffer_free(&escaped);
+    return 1;
+  }
+  *updated = escaped.data;
+  *updated_size = escaped.length;
+  return 1;
+}
+
 static int yaml_previous_explicit_version_key(const char *content,
                                               size_t line_start,
                                               size_t key_start,
@@ -4802,6 +4874,18 @@ int csemver_version_update_text(const char *filename, const char *type,
       set_error(error, error_size,
                 "Document with errors cannot be stringified");
       return 0;
+    }
+    if (!yaml_escape_bare_cr_in_double_quoted_scalars(buffer.data, &rewritten,
+                                                      &rewritten_size))
+      goto allocation_error;
+    if (rewritten != NULL) {
+      csemver_buffer_free(&buffer);
+      csemver_buffer_init(&buffer);
+      if (!csemver_buffer_append(&buffer, rewritten, rewritten_size)) {
+        free(rewritten);
+        goto allocation_error;
+      }
+      free(rewritten);
     }
     if (!yaml_normalize_version_line_spacing(&buffer,
                                              strcmp(kind, "openapi") == 0))

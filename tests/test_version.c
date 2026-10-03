@@ -1076,6 +1076,22 @@ static void test_yaml_bare_cr_rows_match_stringifier_error(void) {
   }
 }
 
+static void test_yaml_quoted_bare_cr_matches_upstream_escape(void) {
+  const char *input = "version: \"1.2.3\"\ntext: \"first\rsecond\"\n";
+  const char *expected = "version: \"1.3.0\"\ntext: \"first\\rsecond\"\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
 static void test_yaml_normalizes_explicit_version_mapping_key(void) {
   const struct {
     const char *input;
@@ -1650,6 +1666,7 @@ int main(void) {
   test_yaml_leading_nested_flow_sequence_comment_matches_upstream_error();
   test_yaml_and_openapi_multiple_documents_match_upstream_error();
   test_yaml_bare_cr_rows_match_stringifier_error();
+  test_yaml_quoted_bare_cr_matches_upstream_escape();
   test_yaml_normalizes_explicit_version_mapping_key();
   test_yaml_duplicate_version_key_reports_stringifier_error();
   test_yaml_block_mapping_leading_flow_sequence_comment_matches_error();
