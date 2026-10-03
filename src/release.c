@@ -309,6 +309,9 @@ static int load_package_config(CsemverConfig *config) {
                                                 "release-count"};
   static const char *const skip_options[] = {"bump", "changelog", "commit",
                                              "tag"};
+  static const char *const script_options[] = {
+      "prerelease", "prebump",    "postbump", "prechangelog", "postchangelog",
+      "precommit",  "postcommit", "pretag",   "posttag"};
   static const char *const bump_file_options[] = {"bumpFiles", "bump-files"};
   char *contents = NULL;
   char error[256] = {0};
@@ -359,6 +362,21 @@ static int load_package_config(CsemverConfig *config) {
         continue;
       snprintf(key, sizeof key, "skip.%s", skip_options[option_index]);
       if (!csemver_config_set_bool(config, key, value, error, sizeof error)) {
+        errorf("%s", error);
+        free(contents);
+        return 0;
+      }
+    }
+    for (option_index = 0;
+         option_index < sizeof script_options / sizeof script_options[0];
+         ++option_index) {
+      char command[CSEMVER_VALUE_MAX];
+      if (!csemver_json_object_nested_string(
+              contents, sections[section_index], "scripts",
+              script_options[option_index], command, sizeof command))
+        continue;
+      if (!csemver_config_set_script(config, script_options[option_index],
+                                     command, error, sizeof error)) {
         errorf("%s", error);
         free(contents);
         return 0;
@@ -2058,6 +2076,10 @@ static int run_lifecycle_capture(const CsemverConfig *config, const char *name,
     char **capture = output != NULL && *output == NULL ? output : NULL;
     if (strcmp(config->scripts[i].name, name) != 0)
       continue;
+    if (!config->silent) {
+      printf("✔ Running lifecycle script \"%s\"\n", name);
+      printf("ℹ - execute command: \"%s\"\n", config->scripts[i].command);
+    }
     if (!run_command(argv, capture, &status) || status != 0) {
       errorf("lifecycle script '%s' failed with status %d", name, status);
       return 0;

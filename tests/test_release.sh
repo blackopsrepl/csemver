@@ -1056,4 +1056,41 @@ git commit --allow-empty -qm 'feat: release with package config precedence'
 "$bin" --skip.commit --skip.tag >/dev/null
 test -e CHANGELOG.md
 
+mkdir "$tmp/pkg-lifecycle-scripts"
+cd "$tmp/pkg-lifecycle-scripts"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+package_script_marker="$tmp/package-script-ran"
+package_script_superseded_marker="$tmp/package-script-superseded"
+package_script_command="touch $package_script_marker"
+package_script_superseded_command="touch $package_script_superseded_marker"
+cat > package.json <<JSON
+{
+  "name": "pkg-lifecycle-scripts-fixture",
+  "version": "1.0.0",
+  "commit-and-tag-version": {
+    "scripts": {"prerelease": "$package_script_superseded_command"}
+  },
+  "standard-version": {
+    "scripts": {"prerelease": "$package_script_command"}
+  }
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed package lifecycle script fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: exercise package lifecycle script'
+package_script_output=$("$bin" --skip.commit --skip.tag)
+test -f "$package_script_marker"
+test ! -e "$package_script_superseded_marker"
+printf '%s\n' "$package_script_output" |
+  grep -Fxq '✔ Running lifecycle script "prerelease"'
+printf '%s\n' "$package_script_output" |
+  grep -Fxq "ℹ - execute command: \"$package_script_command\""
+rm -f "$package_script_marker" "$package_script_superseded_marker"
+package_script_output=$("$bin" --silent --skip.commit --skip.tag)
+test -f "$package_script_marker"
+test -z "$package_script_output"
+
 printf '%s\n' 'release workflow tests passed'

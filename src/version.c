@@ -1087,6 +1087,18 @@ static int json_config_nested_field(const char *content, const char *object_key,
   return object_field(&object, field_key, range, decoded, decoded_size);
 }
 
+int csemver_json_object_nested_string(const char *content,
+                                      const char *object_key,
+                                      const char *nested_key,
+                                      const char *field_key, char *value,
+                                      size_t value_size) {
+  if (value == NULL || value_size == 0)
+    return 0;
+  value[0] = '\0';
+  return json_config_nested_field(content, object_key, nested_key, field_key,
+                                  NULL, value, value_size);
+}
+
 static int json_range_boolean(const char *content, Range field, bool *value) {
   size_t length = field.end - field.start;
   if (length == 4 && memcmp(content + field.start, "true", 4) == 0) {
