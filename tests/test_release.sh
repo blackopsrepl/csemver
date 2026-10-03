@@ -622,5 +622,23 @@ printf '%s\n' "$repeated_package_preview" | \
       "$repeated_package_preview" >&2
     exit 1
   }
+legacy_warning_output=$("$bin" --dry-run --message 'chore(release): %s' \
+  --changelogHeader 'Custom header' 2>&1)
+for warning in \
+  '[commit-and-tag-version]: --message (-m) will be removed in the next major release. Use --releaseCommitMessageFormat.' \
+  '[commit-and-tag-version]: --changelogHeader will be removed in the next major release. Use --header.'; do
+  printf '%s\n' "$legacy_warning_output" | grep -Fq "$warning" || {
+    printf 'upstream compatibility warning was missing (%s):\n%s\n' \
+      "$warning" "$legacy_warning_output" >&2
+    exit 1
+  }
+done
+silent_legacy_output=$("$bin" --dry-run --message 'chore(release): %s' \
+  --changelogHeader 'Custom header' --silent 2>&1)
+if printf '%s\n' "$silent_legacy_output" | grep -Fq '[commit-and-tag-version]:'; then
+  printf 'silent should suppress legacy-option warnings:\n%s\n' \
+    "$silent_legacy_output" >&2
+  exit 1
+fi
 
 printf '%s\n' 'release workflow tests passed'

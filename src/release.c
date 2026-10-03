@@ -468,6 +468,15 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
       return 2;
     }
   }
+  if (!config->silent && config->has_message && config->message[0] != '\0')
+    fprintf(stderr,
+            "[commit-and-tag-version]: --message (-m) will be removed in the "
+            "next major release. Use --releaseCommitMessageFormat.\n");
+  if (!config->silent && config->has_changelog_header &&
+      config->header[0] != '\0')
+    fprintf(stderr,
+            "[commit-and-tag-version]: --changelogHeader will be removed in "
+            "the next major release. Use --header.\n");
   return 0;
 }
 
