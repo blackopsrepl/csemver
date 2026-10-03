@@ -12,7 +12,7 @@ if [ "$(readlink "$bin")" != 'csemver' ]; then
   printf 'expected %s to point to csemver\n' "$bin" >&2
   exit 1
 fi
-if [ "$("$bin" --version)" != "csemver $expected_version" ]; then
+if [ "$("$bin" --version)" != "$expected_version" ]; then
   printf '%s\n' 'compatibility executable did not run the csemver binary' >&2
   exit 1
 fi

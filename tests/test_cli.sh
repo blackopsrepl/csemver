@@ -2,22 +2,22 @@
 set -eu
 bin=${1:-./build/csemver}
 expected_version=${2:-0.1.0}
-help=$($bin --help)
-printf '%s\n' "$help" | grep -Fq 'Usage: csemver [options]'
+help=$("$bin" --help)
+program=${bin##*/}
+printf '%s\n' "$help" | grep -Fq "Usage: $program [options]"
 printf '%s\n' "$help" | grep -q -- '--release-as'
 printf '%s\n' "$help" | grep -q -- '--dry-run'
 printf '%s\n' "$help" | grep -q -- '--preset'
-printf '%s\n' "$help" | grep -Fq 'Changelog sections (0 all, N latest)'
-for option in --first-release --packageFiles --bumpFiles --issuePrefixes \
-    --lerna-package --tag-force --git-tag-fallback --noBumpWhenEmptyChanges \
-    --scripts --commitUrlFormat --compareUrlFormat --issueUrlFormat \
-    --userUrlFormat --preMajor; do
+printf '%s\n' "$help" | grep -Fq 'How many releases of changelog you want to generate.'
+for option in --first-release --packageFiles --bumpFiles --lerna-package \
+    --tag-force --git-tag-fallback --noBumpWhenEmptyChanges --scripts --skip \
+    --sign --signoff --silent --changelogHeader; do
     if ! printf '%s\n' "$help" | grep -Fq -- "$option"; then
-        printf 'help is missing %s\n' "$option" >&2
+        printf 'help is missing upstream option %s\n' "$option" >&2
         exit 1
     fi
 done
-[ "$("$bin" --version)" = "csemver $expected_version" ]
+[ "$("$bin" --version)" = "$expected_version" ]
 if ! "$bin" --definitely-not-an-option --help >/dev/null 2>&1; then
     printf '%s\n' 'upstream-compatible unknown option was rejected' >&2
     exit 1

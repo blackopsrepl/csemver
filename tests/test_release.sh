@@ -142,6 +142,31 @@ expected_section_boundary=$(printf '%s\n\n%s' "$candidate_heading" "$latest_tag_
 
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/frontmatter-changelog"
+cd "$tmp/frontmatter-changelog"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "frontmatter-changelog",\n  "version": "1.0.0"\n}\n' > package.json
+printf '%s\n' '---' 'status: new' '---' '' '# Changelog' '' 'All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.' '' '## [1.0.0](https://example.invalid/compare/v0.0.1...v1.0.0) (2026-01-01)' '' '### Features' '' '* existing feature' > CHANGELOG.md
+git add package.json CHANGELOG.md
+git commit -qm 'chore: initialize front matter fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git commit --allow-empty -qm 'fix: update changelog with front matter'
+"$bin" > /dev/null
+IFS= read -r changelog_first_line < CHANGELOG.md
+if [ "$changelog_first_line" != '---' ]; then
+  printf 'expected front matter at changelog start, got: %s\n' \
+    "$changelog_first_line" >&2
+  exit 1
+fi
+test "$(grep -Fc 'status: new' CHANGELOG.md)" -eq 1
+test "$(grep -c '^# Changelog$' CHANGELOG.md)" -eq 1
+grep -q '^## \[1.0.1\]' CHANGELOG.md
+grep -q '^## \[1.0.0\]' CHANGELOG.md
+test -z "$(git status --porcelain)"
+
 mkdir "$tmp/first-release"
 cd "$tmp/first-release"
 git init -q -b master
@@ -237,6 +262,26 @@ feature_count=$(grep -Fc '* add prerelease feature' CHANGELOG.md)
 }
 
 test -z "$(git status --porcelain)"
+
+mkdir "$tmp/prerelease-escalation"
+cd "$tmp/prerelease-escalation"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "prerelease-escalation",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize prerelease escalation fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git commit --allow-empty -qm 'fix: add initial fix'
+"$bin" --prerelease rc > /dev/null
+grep -q '"version": "1.0.1-rc.0"' package.json
+git commit --allow-empty -qm 'feat: add feature during prerelease'
+"$bin" --prerelease rc > /dev/null
+grep -q '"version": "1.1.0-rc.0"' package.json
+test "$(git tag --list v1.1.0-rc.0)" = v1.1.0-rc.0
+test -z "$(git status --porcelain)"
+
 mkdir "$tmp/prerelease-channel-collision"
 cd "$tmp/prerelease-channel-collision"
 git init -q -b master
@@ -253,6 +298,65 @@ git commit --allow-empty -qm 'fix: change prerelease channel'
 grep -q '"version": "1.4.3-xyz.3"' package.json
 test "$(git tag --list v1.4.3-xyz.3)" = v1.4.3-xyz.3
 test -z "$(git status --porcelain)"
+
+mkdir "$tmp/release-as-prerelease"
+cd "$tmp/release-as-prerelease"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "release-as-prerelease",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize release-as prerelease fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git commit --allow-empty -qm 'fix: exercise release-as prerelease'
+"$bin" --release-as 1.2.3 --prerelease alpha > /dev/null
+grep -q '"version": "1.2.3-alpha.0"' package.json
+test "$(git tag --list v1.2.3-alpha.0)" = v1.2.3-alpha.0
+git commit --allow-empty -qm 'fix: exercise matching release-as prerelease identifier'
+"$bin" --release-as 1.2.3-alpha.2 --prerelease alpha > /dev/null
+grep -q '"version": "1.2.3-alpha.2"' package.json
+test "$(git tag --list v1.2.3-alpha.2)" = v1.2.3-alpha.2
+test -z "$(git status --porcelain)"
+
+mkdir "$tmp/release-as-prerelease-conflict"
+cd "$tmp/release-as-prerelease-conflict"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "release-as-prerelease-conflict",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize prerelease conflict fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git commit --allow-empty -qm 'fix: exercise conflicting prerelease identifier'
+conflict_head=$(git rev-parse HEAD)
+if conflict_output=$("$bin" --release-as 1.2.3-beta.0 --prerelease alpha 2>&1); then
+  printf '%s\n' 'csemver accepted conflicting release-as and prerelease identifiers' >&2
+  exit 1
+else
+  conflict_status=$?
+fi
+test "$conflict_status" -eq 1
+printf '%s\n' "$conflict_output" | grep -Fq 'releaseAs and prerelease have conflicting prerelease identifiers'
+test "$(git rev-parse HEAD)" = "$conflict_head"
+grep -q '"version": "1.0.0"' package.json
+test "$(git tag --list)" = v1.0.0
+test ! -e CHANGELOG.md
+if unlabeled_output=$("$bin" --release-as 1.2.3 --prerelease 2>&1); then
+  printf '%s\n' 'csemver accepted an empty prerelease identifier with an exact release version' >&2
+  exit 1
+else
+  unlabeled_status=$?
+fi
+test "$unlabeled_status" -eq 1
+printf '%s\n' "$unlabeled_output" | grep -Fxq 'Invalid Version: 1.2.3-.0'
+test "$(git rev-parse HEAD)" = "$conflict_head"
+grep -q '"version": "1.0.0"' package.json
+test "$(git tag --list)" = v1.0.0
+test ! -e CHANGELOG.md
+test -z "$(git status --porcelain)"
+
 mkdir "$tmp/no-empty-bump"
 cd "$tmp/no-empty-bump"
 git init -q -b master

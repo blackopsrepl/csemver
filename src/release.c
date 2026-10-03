@@ -21,6 +21,9 @@
 #ifndef CSEMVER_VERSION
 #define CSEMVER_VERSION "0.1.0"
 #endif
+#ifndef CSEMVER_COMPAT_VERSION
+#define CSEMVER_COMPAT_VERSION "13.2.1"
+#endif
 
 #define ARG_MAX_COUNT 64
 #define COMMIT_MAX 1024
@@ -66,48 +69,77 @@ static void errorf(const char *format, ...) {
   va_end(args);
 }
 
-static void print_help(void) {
-  puts(
-      "Usage: csemver [options]\n\n"
+// clang-format off
+static void print_help(const char *program_path) {
+  const char *program_name = "commit-and-tag-version";
+  if (program_path != NULL && program_path[0] != '\0') {
+    const char *slash = strrchr(program_path, '/');
+    program_name = slash == NULL ? program_path : slash + 1;
+  }
+  printf("Usage: %s [options]\n\n", program_name);
+  fputs(
       "Options:\n"
-      "  -h, --help                 Show this help\n"
-      "  -v, --version              Show version\n"
-      "  -r, --release-as VERSION   Release type or exact SemVer\n"
-      "  -p, --prerelease [ID]      Create a prerelease\n"
-      "  -f, --first-release        Tag the current version without bumping\n"
-      "  -t, --tag-prefix PREFIX    Git tag prefix (default: v)\n"
-      "  -i, --infile FILE          Changelog path (default: CHANGELOG.md)\n"
-      "  -c, --config FILE          Read configuration from TOML\n"
-      "      --dry-run              Preview without modifying the repository\n"
-      "  -n, --no-verify            Bypass git commit hooks\n"
-      "  -a, --commit-all           Include all staged and working files\n"
-      "      --skip STEP            Skip bump, changelog, commit, or tag\n"
-      "      --path PATH            Include commits under this path\n"
-      "      --lerna-package NAME   Use package tags for bump selection\n"
-      "      --packageFiles FILE... Override package version files\n"
-      "      --bumpFiles FILE...    Override files to update\n"
-      "      --issuePrefixes PFX... Issue prefixes to link\n"
-      "      --release-count N      Changelog sections (0 all, N latest)\n"
-      "      --preset NAME          Select conventional or Angular changelog\n"
-      "      --scripts.EVENT CMD   Override a lifecycle script\n"
-      "      --npmPublishHint TXT Override the release publishing hint\n"
-      "  -s, --sign                 Sign release commit and tag\n"
-      "      --signoff              Add a DCO signoff\n"
-      "  -m, --message FORMAT       Deprecated; use "
-      "--releaseCommitMessageFormat\n"
-      "      --releaseCommitMessageFormat FORMAT\n"
-      "      --header TEXT          Set changelog heading\n"
-      "      --commitUrlFormat URL Set commit links ({{hash}})\n"
-      "      --compareUrlFormat URL Set compare links ({{previousTag}}, "
-      "{{currentTag}})\n"
-      "      --issueUrlFormat URL  Set issue links ({{id}}, {{prefix}})\n"
-      "      --userUrlFormat URL   Set user links ({{user}})\n"
-      "      --preMajor            Apply pre-1.0.0 bump rules\n"
-      "      --tag-force            Replace an existing tag\n"
-      "      --git-tag-fallback     Read version from a tag if no file exists\n"
-      "      --noBumpWhenEmptyChanges\n"
-      "      --silent               Suppress normal progress output\n");
+      "  -h, --help                    Show help                                               [boolean]\n"
+      "  -v, --version                 Show version number                                     [boolean]\n"
+      "      --packageFiles             [array] [default: [\"package.json\",\"bower.json\",\"manifest.json\"]]\n"
+      "      --bumpFiles                                                               [array] [default:\n"
+      "         [\"package.json\",\"bower.json\",\"manifest.json\",\"package-lock.json\",\"npm-shrinkwrap.json\"]]\n"
+      "  -r, --release-as              Specify the release type manually (like npm version\n"
+      "                                <major|minor|patch>)                                     [string]\n"
+      "  -p, --prerelease              make a pre-release with optional option value to specify a tag id\n"
+      "                                                                                         [string]\n"
+      "  -i, --infile                  Read the CHANGELOG from this file       [default: \"CHANGELOG.md\"]\n"
+      "  -m, --message                 [DEPRECATED] Commit message, replaces %s with new version.\n"
+      "                                This option will be removed in the next major version, please use\n"
+      "                                --releaseCommitMessageFormat.                            [string]\n"
+      "  -f, --first-release           Is this the first release?             [boolean] [default: false]\n"
+      "  -s, --sign                    Should the git commit and tag be signed?\n"
+      "                                                                       [boolean] [default: false]\n"
+      "      --signoff                 Should the git commit have a \"Signed-off-by\" trailer\n"
+      "                                                                       [boolean] [default: false]\n"
+      "  -n, --no-verify               Bypass pre-commit or commit-msg git hooks during the commit phase\n"
+      "                                                                       [boolean] [default: false]\n"
+      "  -a, --commit-all              Commit all staged changes, not just files affected by\n"
+      "                                commit-and-tag-version                 [boolean] [default: false]\n"
+      "      --silent                  Don't print logs and errors            [boolean] [default: false]\n"
+      "  -t, --tag-prefix              Set a custom prefix for the git tag to be created\n"
+      "                                                                          [string] [default: \"v\"]\n"
+      "      --release-count           How many releases of changelog you want to generate. It counts\n"
+      "                                from the upcoming release. Useful when you forgot to generate any\n"
+      "                                previous changelog. Set to 0 to regenerate all.\n"
+      "                                                                            [number] [default: 1]\n"
+      "      --tag-force               Allow tag replacement                  [boolean] [default: false]\n"
+      "      --scripts                 Provide scripts to execute for lifecycle events (prebump,\n"
+      "                                precommit, etc.,)                                   [default: {}]\n"
+      "      --skip                    Map of steps in the release process that should be skipped\n"
+      "                                                                                    [default: {}]\n"
+      "      --dry-run                 See the commands that running commit-and-tag-version would run\n"
+      "                                                                       [boolean] [default: false]\n",
+      stdout);
+  fputs(
+      "      --git-tag-fallback        fallback to git tags for version, if no meta-information file is\n"
+      "                                found (e.g., package.json)              [boolean] [default: true]\n"
+      "      --path                    Only populate commits made under this path               [string]\n"
+      "      --changelogHeader         [DEPRECATED] Use a custom header when generating and updating\n"
+      "                                changelog.\n"
+      "                                This option will be removed in the next major version, please use\n"
+      "                                --header.                                                [string]\n"
+      "      --preset                  Commit message guideline preset\n"
+      "                                 [string] [default: \"conventional-changelog-conventionalcommits\"]\n"
+      "      --lerna-package           Name of the package from which the tags will be extracted[string]\n"
+      "      --npmPublishHint          Customized publishing hint                               [string]\n"
+      "  -c, --config                  Path to a custom configuration file                      [string]\n"
+      "      --noBumpWhenEmptyChanges  Avoid bumping files and generating changelog if there are no\n"
+      "                                changes.                               [boolean] [default: false]\n"
+      "\nExamples:\n",
+      stdout);
+  printf("  %s                                     Update changelog and tag release\n",
+         program_name);
+  printf("  %s -m \"%%s: see changelog for details\"  Update changelog and tag release with custom commit\n",
+         program_name);
+  fputs("                                             message\n", stdout);
 }
+// clang-format on
 
 static int run_command(const char *const argv[], char **output, int *status) {
   return csemver_run_process(argv, output, status);
@@ -571,11 +603,17 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
     if (equals != NULL)
       value = equals + 1;
     if (strcmp(key, "--help") == 0 || strcmp(key, "-h") == 0) {
-      print_help();
+      print_help(argv[0]);
       return 1;
     }
     if (strcmp(key, "--version") == 0 || strcmp(key, "-v") == 0) {
-      puts("csemver " CSEMVER_VERSION);
+      const char *program_name = argv[0];
+      const char *slash = strrchr(program_name, '/');
+      if (slash != NULL)
+        program_name = slash + 1;
+      puts(strcmp(program_name, "commit-and-tag-version") == 0
+               ? CSEMVER_COMPAT_VERSION
+               : CSEMVER_VERSION);
       return 1;
     }
     if (strcmp(key, "-c") == 0 || strcmp(key, "--config") == 0) {
@@ -2260,8 +2298,66 @@ static int resolve_unique_prerelease(const CsemverConfig *config,
   return semver_format(&proposed, version_text, version_size);
 }
 
+static int validate_release_as_prerelease(const CsemverConfig *config) {
+  Semver release_version;
+  if (!config->has_prerelease || config->release_as[0] == '\0' ||
+      !semver_parse(config->release_as, &release_version))
+    return 1;
+  if (release_version.has_prerelease) {
+    const char *last_separator = strrchr(release_version.prerelease, '.');
+    size_t release_id_size =
+        last_separator == NULL
+            ? 0
+            : (size_t)(last_separator - release_version.prerelease);
+    size_t requested_id_size = strlen(config->prerelease_id);
+    if (release_id_size != requested_id_size ||
+        strncmp(release_version.prerelease, config->prerelease_id,
+                release_id_size) != 0) {
+      fputs(
+          "releaseAs and prerelease have conflicting prerelease identifiers\n",
+          stderr);
+      return 0;
+    }
+  } else if (config->prerelease_id[0] == '\0') {
+    fprintf(stderr, "Invalid Version: %lu.%lu.%lu-.0\n", release_version.major,
+            release_version.minor, release_version.patch);
+    return 0;
+  }
+  return 1;
+}
+
+static int stable_version_from_tag(const CsemverConfig *config, const char *tag,
+                                   bool lerna_tag, char *version,
+                                   size_t version_size) {
+  const char *version_start;
+  size_t prefix_size;
+  Semver parsed;
+  version[0] = '\0';
+  if (tag == NULL || tag[0] == '\0')
+    return 0;
+  if (lerna_tag) {
+    prefix_size = strlen(config->lerna_package);
+    if (prefix_size == 0 ||
+        strncmp(tag, config->lerna_package, prefix_size) != 0 ||
+        tag[prefix_size] != '@')
+      return 0;
+    version_start = tag + prefix_size + 1;
+  } else {
+    prefix_size = strlen(config->tag_prefix);
+    if (strncmp(tag, config->tag_prefix, prefix_size) != 0)
+      return 0;
+    version_start = tag + prefix_size;
+  }
+  if (strlen(version_start) >= version_size ||
+      !semver_parse(version_start, &parsed) || parsed.has_prerelease)
+    return 0;
+  snprintf(version, version_size, "%s", version_start);
+  return 1;
+}
+
 static int generate_version(const CsemverConfig *config, const char *current,
-                            int bump, char *next, size_t next_size) {
+                            int bump, const char *stable_version, char *next,
+                            size_t next_size) {
   Semver parsed;
   char type[32];
   if (!semver_parse(current, &parsed))
@@ -2270,8 +2366,17 @@ static int generate_version(const CsemverConfig *config, const char *current,
     return semver_format(&parsed, next, next_size);
   if (config->release_as[0] != '\0') {
     Semver release_version;
-    if (semver_parse(config->release_as, &release_version))
+    if (semver_parse(config->release_as, &release_version)) {
+      if (config->has_prerelease && !release_version.has_prerelease) {
+        if (snprintf(release_version.prerelease,
+                     sizeof release_version.prerelease, "%s.0",
+                     config->prerelease_id) >=
+            (int)sizeof release_version.prerelease)
+          return 0;
+        release_version.has_prerelease = 1;
+      }
       return semver_format(&release_version, next, next_size);
+    }
     if (config->has_prerelease) {
       if (snprintf(type, sizeof type, "pre%s", config->release_as) >=
           (int)sizeof type)
@@ -2286,9 +2391,27 @@ static int generate_version(const CsemverConfig *config, const char *current,
     return 0;
   }
   if (config->has_prerelease) {
-    if (parsed.has_prerelease)
+    if (parsed.has_prerelease) {
+      Semver stable, target;
+      char target_text[SEMVER_TEXT_MAX];
+      if (bump > 0 && stable_version != NULL && stable_version[0] != '\0' &&
+          semver_parse(stable_version, &stable) && !stable.has_prerelease &&
+          semver_bump(&stable, bump_name(bump), NULL, target_text,
+                      sizeof target_text) &&
+          semver_parse(target_text, &target) &&
+          (target.major > parsed.major ||
+           (target.major == parsed.major && target.minor > parsed.minor) ||
+           (target.major == parsed.major && target.minor == parsed.minor &&
+            target.patch > parsed.patch))) {
+        if (snprintf(type, sizeof type, "pre%s", bump_name(bump)) >=
+            (int)sizeof type)
+          return 0;
+        return semver_bump(&stable, type, config->prerelease_id, next,
+                           next_size);
+      }
       return semver_bump(&parsed, "prerelease", config->prerelease_id, next,
                          next_size);
+    }
     if (snprintf(type, sizeof type, "pre%s", bump_name(bump)) >=
         (int)sizeof type)
       return 0;
@@ -2604,6 +2727,7 @@ int csemver_main(int argc, char **argv) {
   char latest_version[SEMVER_TEXT_MAX], latest_tag[SEMVER_TEXT_MAX];
   char lerna_tag[CSEMVER_VALUE_MAX];
   char current[SEMVER_TEXT_MAX], next[SEMVER_TEXT_MAX];
+  char stable_version[SEMVER_TEXT_MAX] = "";
   char new_tag[SEMVER_TEXT_MAX];
   char message[CSEMVER_VALUE_MAX];
   bool is_private = false;
@@ -2623,6 +2747,8 @@ int csemver_main(int argc, char **argv) {
   parsed_args = parse_args(argc, argv, &config, &config_path);
   if (parsed_args != 0)
     return parsed_args == 1 ? 0 : parsed_args;
+  if (!validate_release_as_prerelease(&config))
+    return 1;
   if (!preset_is_supported(&config)) {
     errorf("unsupported changelog preset '%s'", config.preset);
     return 2;
@@ -2662,6 +2788,9 @@ int csemver_main(int argc, char **argv) {
     }
     lerna_bump = true;
   }
+  (void)stable_version_from_tag(&config, lerna_bump ? lerna_tag : latest_tag,
+                                lerna_bump, stable_version,
+                                sizeof stable_version);
   if (!semver_parse(current, &current_semver)) {
     errorf("invalid current version '%s'", current);
     return 1;
@@ -2694,7 +2823,8 @@ int csemver_main(int argc, char **argv) {
   } else {
     if (config.release_as[0] == '\0' && bump == 0)
       bump = 1;
-    if (!generate_version(&config, current, bump, next, sizeof next)) {
+    if (!generate_version(&config, current, bump, stable_version, next,
+                          sizeof next)) {
       free(commits);
       errorf(
           "no releasable conventional commits found, or invalid release type");
@@ -2963,6 +3093,7 @@ static int render_changelog(const CsemverConfig *config, const char *version,
   time_t now = time(NULL);
   struct tm utc;
   size_t old_length = 0;
+  size_t front_matter_length = 0;
   repository_base(base, sizeof base);
   if (!config->dry_run && config->release_count != 0 &&
       csemver_read_file(config->infile, &old_content, &old_length)) {
@@ -2978,9 +3109,24 @@ static int render_changelog(const CsemverConfig *config, const char *version,
         break;
       ++line;
     }
+    if (old_body != old_content && strncmp(old_content, "---\n", 4) == 0) {
+      const char *closing = strstr(old_content + 4, "\n---\n");
+      if (closing != NULL) {
+        const char *header = closing + 5;
+        while (*header == '\n' || *header == '\r')
+          ++header;
+        if (header < old_body && strncmp(header, "# ", 2) == 0)
+          front_matter_length = (size_t)(closing + 5 - old_content);
+      }
+    }
   }
   gmtime_r(&now, &utc);
   strftime(date, sizeof date, "%Y-%m-%d", &utc);
+  if (!config->dry_run && front_matter_length > 0) {
+    if (!csemver_buffer_append(output, old_content, front_matter_length) ||
+        (config->header[0] != '\0' && !csemver_buffer_append(output, "\n", 1)))
+      goto fail;
+  }
   if (!config->dry_run && ((config->header[0] != '\0' &&
                             !csemver_buffer_append(output, config->header,
                                                    strlen(config->header))) ||
