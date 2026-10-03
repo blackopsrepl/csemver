@@ -1317,6 +1317,44 @@ printf '%s\n' "$missing_lock_output" |
   grep -Fq '✔ bumping version in package-lock.json from undefined to 1.1.0'
 test "$(grep -c '"version": "1.1.0"' package-lock.json)" -eq 2
 
+mkdir "$tmp/invalid-json-package-lock"
+cd "$tmp/invalid-json-package-lock"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+printf '{\n  "name": "invalid-json-lock-fixture",\n  "version": "1.0.0"\n}\n' > package.json
+cat > package-lock.json <<'JSON'
+{
+  "name": undefined,
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {"name": "invalid-json-lock-fixture"}
+  }
+}
+JSON
+cp package-lock.json "$tmp/invalid-json-lock.expected"
+git add package.json package-lock.json
+git commit -qm 'chore: initialize invalid JSON lock fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: exercise strict JSON parsing'
+invalid_json_lock_preview=$("$bin" --dry-run 2>&1)
+if printf '%s\n' "$invalid_json_lock_preview" |
+  grep -Fq 'bumping version in package-lock.json'; then
+  printf '%s\n' 'dry-run must reject a package-lock with invalid JSON values' >&2
+  exit 1
+fi
+if printf '%s\n' "$invalid_json_lock_preview" |
+  grep -Fq 'committing package-lock.json'; then
+  printf '%s\n' 'dry-run must omit an invalid JSON lockfile from the commit path' >&2
+  exit 1
+fi
+test -z "$(git status --porcelain)"
+invalid_json_lock_output=$("$bin" --skip.commit --skip.tag 2>&1)
+printf '%s\n' "$invalid_json_lock_output" |
+  grep -Fq "Unexpected token 'u', ...\"  \"name\": undefined,\"... is not valid JSON"
+cmp -s package-lock.json "$tmp/invalid-json-lock.expected"
+
 mkdir "$tmp/private-package-hint"
 cd "$tmp/private-package-hint"
 git init -q -b master

@@ -37,7 +37,8 @@ static void set_error(char *error, size_t size, const char *message) {
 
 static void spaces(Scanner *s) {
   while (s->position < s->length &&
-         isspace((unsigned char)s->text[s->position]))
+         (s->text[s->position] == ' ' || s->text[s->position] == '\t' ||
+          s->text[s->position] == '\r' || s->text[s->position] == '\n'))
     ++s->position;
 }
 
@@ -158,11 +159,13 @@ static int skip_object(Scanner *s) {
     if (!skip_value(s, NULL))
       return 0;
     spaces(s);
-    if (s->position < s->length && s->text[s->position] == ',')
+    if (s->position < s->length && s->text[s->position] == ',') {
       ++s->position;
-    else if (s->position >= s->length || s->text[s->position] != '}')
+      spaces(s);
+      if (s->position >= s->length || s->text[s->position] == '}')
+        return 0;
+    } else if (s->position >= s->length || s->text[s->position] != '}')
       return 0;
-    spaces(s);
   }
   if (s->position >= s->length)
     return 0;
@@ -177,17 +180,85 @@ static int skip_array(Scanner *s) {
     if (!skip_value(s, NULL))
       return 0;
     spaces(s);
-    if (s->position < s->length && s->text[s->position] == ',')
+    if (s->position < s->length && s->text[s->position] == ',') {
       ++s->position;
-    else if (s->position >= s->length || s->text[s->position] != ']')
+      spaces(s);
+      if (s->position >= s->length || s->text[s->position] == ']')
+        return 0;
+    } else if (s->position >= s->length || s->text[s->position] != ']')
       return 0;
-    spaces(s);
   }
   if (s->position >= s->length)
     return 0;
   ++s->position;
   return 1;
 }
+static int json_value_terminator(char character) {
+  return character == ',' || character == '}' || character == ']' ||
+         character == ' ' || character == '\t' || character == '\r' ||
+         character == '\n';
+}
+
+static int skip_json_number(Scanner *scanner) {
+  size_t position = scanner->position;
+  if (scanner->text[position] == '-')
+    ++position;
+  if (position >= scanner->length)
+    return 0;
+  if (scanner->text[position] == '0') {
+    ++position;
+    if (position < scanner->length &&
+        isdigit((unsigned char)scanner->text[position]))
+      return 0;
+  } else if (scanner->text[position] >= '1' && scanner->text[position] <= '9') {
+    do {
+      ++position;
+    } while (position < scanner->length &&
+             isdigit((unsigned char)scanner->text[position]));
+  } else {
+    return 0;
+  }
+  if (position < scanner->length && scanner->text[position] == '.') {
+    ++position;
+    if (position >= scanner->length ||
+        !isdigit((unsigned char)scanner->text[position]))
+      return 0;
+    do {
+      ++position;
+    } while (position < scanner->length &&
+             isdigit((unsigned char)scanner->text[position]));
+  }
+  if (position < scanner->length &&
+      (scanner->text[position] == 'e' || scanner->text[position] == 'E')) {
+    ++position;
+    if (position < scanner->length &&
+        (scanner->text[position] == '+' || scanner->text[position] == '-'))
+      ++position;
+    if (position >= scanner->length ||
+        !isdigit((unsigned char)scanner->text[position]))
+      return 0;
+    do {
+      ++position;
+    } while (position < scanner->length &&
+             isdigit((unsigned char)scanner->text[position]));
+  }
+  if (position < scanner->length &&
+      !json_value_terminator(scanner->text[position]))
+    return 0;
+  scanner->position = position;
+  return 1;
+}
+
+static int skip_json_literal(Scanner *scanner, const char *literal,
+                             size_t literal_size) {
+  if (scanner->length - scanner->position < literal_size ||
+      memcmp(scanner->text + scanner->position, literal, literal_size) != 0)
+    return 0;
+  scanner->position += literal_size;
+  return scanner->position == scanner->length ||
+         json_value_terminator(scanner->text[scanner->position]);
+}
+
 static int skip_value(Scanner *s, Range *range) {
   size_t start = s->position;
   char first;
@@ -204,11 +275,21 @@ static int skip_value(Scanner *s, Range *range) {
     }
     return ok;
   }
-  while (s->position < s->length &&
-         strchr(",]} \t\r\n", s->text[s->position]) == NULL)
-    ++s->position;
-  if (s->position == start)
+  if (first == 't') {
+    if (!skip_json_literal(s, "true", 4))
+      return 0;
+  } else if (first == 'f') {
+    if (!skip_json_literal(s, "false", 5))
+      return 0;
+  } else if (first == 'n') {
+    if (!skip_json_literal(s, "null", 4))
+      return 0;
+  } else if (first == '-' || isdigit((unsigned char)first)) {
+    if (!skip_json_number(s))
+      return 0;
+  } else {
     return 0;
+  }
   if (range != NULL) {
     range->start = start;
     range->end = s->position;
@@ -285,6 +366,43 @@ static int json_empty_root_object(const char *content, size_t *position) {
   return 1;
 }
 
+static int json_undefined_position(const char *content, size_t *position) {
+  bool in_string = false, escaped = false;
+  size_t i;
+  for (i = 0; content[i] != '\0'; ++i) {
+    if (in_string) {
+      if (escaped) {
+        escaped = false;
+      } else if (content[i] == '\\') {
+        escaped = true;
+      } else if (content[i] == '"') {
+        in_string = false;
+      }
+    } else if (content[i] == '"') {
+      in_string = true;
+    } else if (content[i] == 'u' &&
+               strncmp(content + i, "undefined", sizeof "undefined" - 1) == 0) {
+      *position = i;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static void json_unexpected_token_error(const char *content,
+                                        size_t token_position, char *error,
+                                        size_t error_size) {
+  size_t length = strlen(content);
+  size_t start = token_position > 10 ? token_position - 10 : 0;
+  size_t end = length - token_position > 10 ? token_position + 10 : length;
+  size_t excerpt_size = end - start;
+  if (error != NULL && error_size > 0)
+    snprintf(error, error_size,
+             "Unexpected token '%c', %s\"%.*s\"%s is not valid JSON",
+             content[token_position], start > 0 ? "..." : "", (int)excerpt_size,
+             content + start, end < length ? "..." : "");
+}
+
 static void json_parse_error(const char *content, char *error,
                              size_t error_size) {
   Scanner scanner = {content, 0, strlen(content)};
@@ -294,29 +412,32 @@ static void json_parse_error(const char *content, char *error,
     set_error(error, error_size, "Unexpected end of JSON input");
     return;
   }
-  if (!json_empty_root_object(content, &position)) {
-    set_error(error, error_size,
-              "JSON version file has no root version string");
+  if (json_empty_root_object(content, &position)) {
+    for (i = 0; i < position; ++i) {
+      if (content[i] == '\r') {
+        ++line;
+        column = 1;
+        if (i + 1 < position && content[i + 1] == '\n')
+          ++i;
+      } else if (content[i] == '\n') {
+        ++line;
+        column = 1;
+      } else {
+        ++column;
+      }
+    }
+    if (error != NULL && error_size > 0)
+      snprintf(error, error_size,
+               "Expected property name or '}' in JSON at position %zu (line "
+               "%zu column %zu)",
+               position, line, column);
     return;
   }
-  for (i = 0; i < position; ++i) {
-    if (content[i] == '\r') {
-      ++line;
-      column = 1;
-      if (i + 1 < position && content[i + 1] == '\n')
-        ++i;
-    } else if (content[i] == '\n') {
-      ++line;
-      column = 1;
-    } else {
-      ++column;
-    }
+  if (json_undefined_position(content, &position)) {
+    json_unexpected_token_error(content, position, error, error_size);
+    return;
   }
-  if (error != NULL && error_size > 0)
-    snprintf(error, error_size,
-             "Expected property name or '}' in JSON at position %zu (line "
-             "%zu column %zu)",
-             position, line, column);
+  set_error(error, error_size, "JSON version file has no root version string");
 }
 
 static int json_fields(const char *content, const char *filename,
@@ -325,15 +446,15 @@ static int json_fields(const char *content, const char *filename,
   Range packages;
   Range raw;
   memset(fields, 0, sizeof(*fields));
+  if (!json_object_range(content, &fields->root_object))
+    return 0;
   spaces(&root);
   fields->has_root_version =
       object_field(&root, "version", &fields->root_version, NULL, 0);
-  if (!fields->has_root_version) {
-    if ((strstr(filename, "package-lock.json") == NULL &&
-         strstr(filename, "npm-shrinkwrap.json") == NULL) ||
-        !json_object_range(content, &fields->root_object))
-      return 0;
-  }
+  if (!fields->has_root_version &&
+      strstr(filename, "package-lock.json") == NULL &&
+      strstr(filename, "npm-shrinkwrap.json") == NULL)
+    return 0;
   root.position = 0;
   spaces(&root);
   if (object_field(&root, "private", &fields->private_value, NULL, 0)) {
