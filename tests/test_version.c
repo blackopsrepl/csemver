@@ -342,6 +342,18 @@ static void test_json_version_with_embedded_nul_is_rejected(void) {
                                     sizeof version, NULL, error, sizeof error));
 }
 
+static void test_truncated_package_lock_reports_parse_error(void) {
+  const char *input = "{\n";
+  const char *expected =
+      "Expected property name or '}' in JSON at position 2 (line 2 column 1)";
+  char version[128];
+  char error[256];
+
+  assert(!csemver_version_read_text("package-lock.json", "json", input, version,
+                                    sizeof version, NULL, error, sizeof error));
+  assert(strcmp(error, expected) == 0);
+}
+
 static void test_package_lock_updates_only_root_package(void) {
   const char *input = "{\n  \"version\": \"1.0.0\",\n"
                       "  \"packages\": {\n    \"\": {\n"
@@ -472,6 +484,7 @@ int main(void) {
   test_json_unicode_escapes_in_version_key_and_value();
   test_json_key_with_embedded_nul_does_not_match_version();
   test_json_version_with_embedded_nul_is_rejected();
+  test_truncated_package_lock_reports_parse_error();
   test_package_lock_updates_only_root_package();
   test_package_lock_adds_missing_root_package_version();
   test_package_lock_adds_missing_root_version_fields();

@@ -1258,6 +1258,14 @@ printf '%s\n' "$malformed_lock_preview" | grep -Fq 'Unexpected end of JSON input
   printf '%s\n' 'dry-run must report and skip an invalid package-lock.json' >&2
   exit 1
 }
+printf '{\n' > package-lock.json
+truncated_lock_preview=$("$bin" --dry-run 2>&1)
+printf '%s\n' "$truncated_lock_preview" |
+  grep -Fq "Expected property name or '}' in JSON at position 2 (line 2 column 1)" || {
+  printf '%s\n' 'dry-run must preserve the JSON parser error for a truncated lockfile' >&2
+  exit 1
+}
+: > package-lock.json
 if printf '%s\n' "$malformed_lock_preview" | grep -Fq 'committing package-lock.json'; then
   printf '%s\n' 'dry-run must not include an invalid package-lock.json in the commit path' >&2
   exit 1

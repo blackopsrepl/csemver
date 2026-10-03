@@ -272,6 +272,53 @@ static int json_object_range(const char *content, Range *range) {
   return scanner.position == scanner.length;
 }
 
+static int json_empty_root_object(const char *content, size_t *position) {
+  Scanner scanner = {content, 0, strlen(content)};
+  spaces(&scanner);
+  if (scanner.position >= scanner.length ||
+      scanner.text[scanner.position++] != '{')
+    return 0;
+  spaces(&scanner);
+  if (scanner.position != scanner.length)
+    return 0;
+  *position = scanner.position;
+  return 1;
+}
+
+static void json_parse_error(const char *content, char *error,
+                             size_t error_size) {
+  Scanner scanner = {content, 0, strlen(content)};
+  size_t position, line = 1, column = 1, i;
+  spaces(&scanner);
+  if (scanner.position >= scanner.length) {
+    set_error(error, error_size, "Unexpected end of JSON input");
+    return;
+  }
+  if (!json_empty_root_object(content, &position)) {
+    set_error(error, error_size,
+              "JSON version file has no root version string");
+    return;
+  }
+  for (i = 0; i < position; ++i) {
+    if (content[i] == '\r') {
+      ++line;
+      column = 1;
+      if (i + 1 < position && content[i + 1] == '\n')
+        ++i;
+    } else if (content[i] == '\n') {
+      ++line;
+      column = 1;
+    } else {
+      ++column;
+    }
+  }
+  if (error != NULL && error_size > 0)
+    snprintf(error, error_size,
+             "Expected property name or '}' in JSON at position %zu (line "
+             "%zu column %zu)",
+             position, line, column);
+}
+
 static int json_fields(const char *content, const char *filename,
                        JsonFields *fields) {
   Scanner root = {content, 0, strlen(content)};
@@ -1466,13 +1513,7 @@ int csemver_version_read_text(const char *filename, const char *type,
   if (strcmp(kind, "json") == 0) {
     JsonFields fields;
     if (!json_fields(content, filename, &fields)) {
-      const char *cursor = content;
-      while (isspace((unsigned char)*cursor))
-        ++cursor;
-      set_error(error, error_size,
-                *cursor == '\0'
-                    ? "Unexpected end of JSON input"
-                    : "JSON version file has no root version string");
+      json_parse_error(content, error, error_size);
       return 0;
     }
     if (!fields.has_root_version &&
