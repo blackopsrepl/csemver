@@ -969,4 +969,34 @@ if grep -Fq 'default feature' CHANGELOG.md; then
   exit 1
 fi
 
+mkdir "$tmp/pkg-package-files-object"
+cd "$tmp/pkg-package-files-object"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-package-files-object-fixture",
+  "version": "1.0.0",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-package-files-object.git"},
+  "commit-and-tag-version": {
+    "packageFiles": [{"filename": "manifest.json", "type": "json"}]
+  }
+}
+JSON
+cat > manifest.json <<'JSON'
+{
+    "name": "manifest",
+    "version": "2.3.4"
+}
+JSON
+git add package.json manifest.json
+git commit -qm 'chore: seed packageFiles object fixture'
+git tag -a v2.3.4 -m 'release 2.3.4'
+git commit --allow-empty -qm 'feat: update object package file'
+"$bin" --skip.commit --skip.tag >/dev/null
+grep -Fq '"version": "2.4.0"' package.json
+grep -Fq '"version": "2.4.0"' manifest.json
+grep -Fq 'compare/v2.3.4...v2.4.0' CHANGELOG.md
+
 printf '%s\n' 'release workflow tests passed'

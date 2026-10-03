@@ -350,22 +350,63 @@ static int load_package_config(CsemverConfig *config) {
          option_index < sizeof array_options / sizeof array_options[0];
          ++option_index) {
       char values[CSEMVER_MAX_FILES][CSEMVER_PATH_MAX];
+      char file_types[CSEMVER_MAX_FILES][32];
       const char *value_pointers[CSEMVER_MAX_FILES];
       size_t value_count, value_index;
+      int typed_package_files = 0;
       if (!csemver_json_object_string_array(
               contents, sections[section_index],
               array_options[option_index].json_key, &values[0][0],
               sizeof values[0], array_options[option_index].max_values,
-              &value_count))
-        continue;
-      for (value_index = 0; value_index < value_count; ++value_index)
+              &value_count)) {
+        if ((strcmp(array_options[option_index].config_key, "packageFiles") !=
+             0) &&
+            (strcmp(array_options[option_index].config_key, "package-files") !=
+             0))
+          continue;
+        if (!csemver_json_object_typed_file_array(
+                contents, sections[section_index],
+                array_options[option_index].json_key, &values[0][0],
+                sizeof values[0], &file_types[0][0], sizeof file_types[0],
+                array_options[option_index].max_values, &value_count))
+          continue;
+        typed_package_files = 1;
+      }
+      for (value_index = 0; value_index < value_count; ++value_index) {
+        if (typed_package_files &&
+            !package_bump_file_type_supported(file_types[value_index])) {
+          errorf("unsupported packageFiles updater type: %s",
+                 file_types[value_index]);
+          free(contents);
+          return 0;
+        }
         value_pointers[value_index] = values[value_index];
+      }
       if (!csemver_config_set_array(
               config, array_options[option_index].config_key, value_pointers,
               value_count, error, sizeof error)) {
         errorf("%s", error);
         free(contents);
         return 0;
+      }
+      if (typed_package_files) {
+        size_t file_index;
+        for (value_index = 0; value_index < value_count; ++value_index) {
+          for (file_index = 0; file_index < config->package_file_count;
+               ++file_index) {
+            if (strcmp(config->package_files[file_index].filename,
+                       values[value_index]) == 0)
+              memcpy(config->package_files[file_index].type,
+                     file_types[value_index], sizeof file_types[value_index]);
+          }
+          for (file_index = 0; file_index < config->bump_file_count;
+               ++file_index) {
+            if (strcmp(config->bump_files[file_index].filename,
+                       values[value_index]) == 0)
+              memcpy(config->bump_files[file_index].type,
+                     file_types[value_index], sizeof file_types[value_index]);
+          }
+        }
       }
     }
     for (option_index = 0;
