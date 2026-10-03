@@ -2051,8 +2051,18 @@ static int yaml_version_range(const char *content, bool openapi, Range *range,
             if (!yaml_scalar_value_range(content, &event, range, version,
                                          version_size))
               failed = true;
-            else
+            else {
+              if (range != NULL &&
+                  event.data.scalar.style == YAML_PLAIN_SCALAR_STYLE) {
+                size_t trailing = range->end;
+                while (content[trailing] == ' ' || content[trailing] == '\t')
+                  ++trailing;
+                if (content[trailing] == '\0' || content[trailing] == '\r' ||
+                    content[trailing] == '\n')
+                  range->end = trailing;
+              }
               found = true;
+            }
           }
           frame->expect_key = true;
           frame->key_is_info = false;
