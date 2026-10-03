@@ -30,6 +30,7 @@ typedef struct {
 typedef struct {
   size_t start, end, next_start;
   size_t comment_start, comment_length;
+  bool comment_on_new_line;
 } YamlFlowSeparator;
 typedef struct {
   const char *text;
@@ -2138,6 +2139,7 @@ static int yaml_format_multiline_root_flow(const char *content, char **output,
   size_t pending_separator = SIZE_MAX;
   size_t root_start = 0;
   size_t root_open_end = 0;
+  size_t root_first_entry_start = SIZE_MAX;
   size_t root_close_start = 0;
   size_t root_close_end = 0;
   size_t root_start_line = 0;
@@ -2147,7 +2149,10 @@ static int yaml_format_multiline_root_flow(const char *content, char **output,
   bool failed = false;
   bool has_inline_comment = false;
   bool has_trailing_comment = false;
+  bool has_leading_comment = false;
   bool trailing_comma = false;
+  size_t leading_comment_start = 0;
+  size_t leading_comment_length = 0;
   size_t trailing_comment_start = 0;
   size_t trailing_comment_length = 0;
   size_t entry_count;
@@ -2173,6 +2178,14 @@ static int yaml_format_multiline_root_flow(const char *content, char **output,
     }
     type = token.type;
     done = type == YAML_STREAM_END_TOKEN;
+    if (root_found && !root_closed && flow_depth == 1 &&
+        root_first_entry_start == SIZE_MAX && type != YAML_FLOW_ENTRY_TOKEN &&
+        type != YAML_FLOW_MAPPING_END_TOKEN &&
+        type != YAML_FLOW_SEQUENCE_END_TOKEN && !done) {
+      if (!yaml_mark_to_byte_offset(content, token.start_mark.index,
+                                    &root_first_entry_start))
+        failed = true;
+    }
     if (pending_separator != SIZE_MAX && flow_depth == 1 &&
         type != YAML_FLOW_ENTRY_TOKEN && type != YAML_FLOW_MAPPING_END_TOKEN &&
         type != YAML_FLOW_SEQUENCE_END_TOKEN && !done) {
@@ -2248,6 +2261,7 @@ static int yaml_format_multiline_root_flow(const char *content, char **output,
           separators[separator_count].next_start = SIZE_MAX;
           separators[separator_count].comment_start = SIZE_MAX;
           separators[separator_count].comment_length = 0;
+          separators[separator_count].comment_on_new_line = false;
           pending_separator = separator_count++;
         }
       }
@@ -2263,7 +2277,10 @@ static int yaml_format_multiline_root_flow(const char *content, char **output,
   }
   if (!root_found || !root_closed || root_close_line == root_start_line ||
       separator_count == 0 || root_start > root_open_end ||
-      root_open_end > root_close_start || root_close_start > root_close_end) {
+      root_open_end > root_close_start || root_close_start > root_close_end ||
+      root_first_entry_start == SIZE_MAX ||
+      root_first_entry_start < root_open_end ||
+      root_first_entry_start > root_close_start) {
     free(separators);
     return 1;
   }
@@ -2271,6 +2288,37 @@ static int yaml_format_multiline_root_flow(const char *content, char **output,
     if (!yaml_flow_whitespace(content[index])) {
       free(separators);
       return 1;
+    }
+  }
+  for (index = root_open_end; index < root_first_entry_start; ++index) {
+    if (content[index] == '#') {
+      size_t comment_end = index;
+      size_t trailing;
+      while (comment_end < root_first_entry_start &&
+             content[comment_end] != '\r' && content[comment_end] != '\n')
+        ++comment_end;
+      for (trailing = root_open_end; trailing < index; ++trailing) {
+        if (!yaml_flow_whitespace(content[trailing])) {
+          free(separators);
+          return 1;
+        }
+      }
+      for (trailing = comment_end; trailing < root_first_entry_start;
+           ++trailing) {
+        if (content[trailing] == '#') {
+          free(separators);
+          return 1;
+        }
+        if (!yaml_flow_whitespace(content[trailing])) {
+          free(separators);
+          return 1;
+        }
+      }
+      leading_comment_start = index;
+      leading_comment_length = comment_end - index;
+      has_leading_comment = true;
+      has_inline_comment = true;
+      break;
     }
   }
   trailing_comma =
@@ -2302,6 +2350,12 @@ static int yaml_format_multiline_root_flow(const char *content, char **output,
         }
         separator->comment_start = position;
         separator->comment_length = comment_end - position;
+        for (trailing = separator->end; trailing < position; ++trailing) {
+          if (content[trailing] == '\r' || content[trailing] == '\n') {
+            separator->comment_on_new_line = true;
+            break;
+          }
+        }
         if (trailing_comma && index + 1 == separator_count) {
           trailing_comment_start = position;
           trailing_comment_length = comment_end - position;
@@ -2317,9 +2371,15 @@ static int yaml_format_multiline_root_flow(const char *content, char **output,
   if (!csemver_buffer_append(&formatted, content, root_start) ||
       !csemver_buffer_append(&formatted, has_inline_comment ? "{\n" : "{ ", 2))
     goto allocation_error;
+  if (has_leading_comment &&
+      (!csemver_buffer_append(&formatted, "  ", 2) ||
+       !csemver_buffer_append(&formatted, content + leading_comment_start,
+                              leading_comment_length) ||
+       !csemver_buffer_append(&formatted, "\n", 1)))
+    goto allocation_error;
   for (index = 0; index < entry_count; ++index) {
     size_t entry_start =
-        index == 0 ? root_open_end : separators[index - 1].next_start;
+        index == 0 ? root_first_entry_start : separators[index - 1].next_start;
     size_t entry_end =
         index < separator_count ? separators[index].start : root_close_start;
     bool final_trailing_separator =
@@ -2334,12 +2394,18 @@ static int yaml_format_multiline_root_flow(const char *content, char **output,
       YamlFlowSeparator *separator = &separators[index];
       if (!csemver_buffer_append(&formatted, ",", 1))
         goto allocation_error;
-      if (separator->comment_length > 0 &&
-          (!csemver_buffer_append(&formatted, " ", 1) ||
-           !csemver_buffer_append(&formatted,
-                                  content + separator->comment_start,
-                                  separator->comment_length)))
-        goto allocation_error;
+      if (separator->comment_length > 0) {
+        if (separator->comment_on_new_line) {
+          if (!csemver_buffer_append(&formatted, "\n  ", 3))
+            goto allocation_error;
+        } else if (!csemver_buffer_append(&formatted, " ", 1)) {
+          goto allocation_error;
+        }
+        if (!csemver_buffer_append(&formatted,
+                                   content + separator->comment_start,
+                                   separator->comment_length))
+          goto allocation_error;
+      }
     }
     if (has_inline_comment && !csemver_buffer_append(&formatted, "\n", 1))
       goto allocation_error;
