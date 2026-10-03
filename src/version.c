@@ -386,8 +386,8 @@ static void json_position_to_line_column(const char *content, size_t position,
   }
 }
 
-static int json_trailing_object_comma_position(const char *content,
-                                               size_t *position) {
+static int json_trailing_comma_position(const char *content, char closing,
+                                        size_t *position) {
   bool in_string = false, escaped = false;
   size_t length = strlen(content), i;
   for (i = 0; i < length; ++i) {
@@ -409,7 +409,7 @@ static int json_trailing_object_comma_position(const char *content,
       while (next < length && (content[next] == ' ' || content[next] == '\t' ||
                                content[next] == '\r' || content[next] == '\n'))
         ++next;
-      if (next < length && content[next] == '}') {
+      if (next < length && content[next] == closing) {
         *position = next;
         return 1;
       }
@@ -512,8 +512,9 @@ static void json_unexpected_token_error(const char *content,
                                         size_t token_position, char *error,
                                         size_t error_size) {
   size_t length = strlen(content);
-  size_t start = token_position > 10 ? token_position - 10 : 0;
-  size_t end = length - token_position > 10 ? token_position + 10 : length;
+  size_t start = length > 20 && token_position > 10 ? token_position - 10 : 0;
+  size_t end = length > 20 && length - token_position > 10 ? token_position + 10
+                                                           : length;
   size_t excerpt_size = end - start;
   if (error != NULL && error_size > 0)
     snprintf(error, error_size,
@@ -525,9 +526,11 @@ static void json_unexpected_token_error(const char *content,
 static void json_parse_error(const char *content, char *error,
                              size_t error_size) {
   Scanner scanner = {content, 0, strlen(content)};
-  size_t position, line, column, invalid_position = 0, trailing_position = 0;
+  size_t position, line, column, invalid_position = 0;
+  size_t object_trailing_position = 0, array_trailing_position = 0;
   size_t leading_zero_position = 0;
-  bool has_invalid, has_trailing, has_leading_zero;
+  bool has_invalid, has_object_trailing, has_array_trailing;
+  bool has_leading_zero;
   spaces(&scanner);
   if (scanner.position >= scanner.length) {
     set_error(error, error_size, "Unexpected end of JSON input");
@@ -543,13 +546,18 @@ static void json_parse_error(const char *content, char *error,
     return;
   }
   has_invalid = json_invalid_token_position(content, &invalid_position);
-  has_trailing =
-      json_trailing_object_comma_position(content, &trailing_position);
+  has_object_trailing =
+      json_trailing_comma_position(content, '}', &object_trailing_position);
+  has_array_trailing =
+      json_trailing_comma_position(content, ']', &array_trailing_position);
   has_leading_zero =
       json_leading_zero_position(content, &leading_zero_position);
   if (has_leading_zero &&
       (!has_invalid || leading_zero_position < invalid_position) &&
-      (!has_trailing || leading_zero_position < trailing_position)) {
+      (!has_object_trailing ||
+       leading_zero_position < object_trailing_position) &&
+      (!has_array_trailing ||
+       leading_zero_position < array_trailing_position)) {
     json_position_to_line_column(content, leading_zero_position, &line,
                                  &column);
     if (error != NULL && error_size > 0)
@@ -559,13 +567,23 @@ static void json_parse_error(const char *content, char *error,
                leading_zero_position, line, column);
     return;
   }
-  if (has_trailing && (!has_invalid || trailing_position < invalid_position)) {
-    json_position_to_line_column(content, trailing_position, &line, &column);
+  if (has_object_trailing &&
+      (!has_invalid || object_trailing_position < invalid_position) &&
+      (!has_array_trailing ||
+       object_trailing_position < array_trailing_position)) {
+    json_position_to_line_column(content, object_trailing_position, &line,
+                                 &column);
     if (error != NULL && error_size > 0)
       snprintf(error, error_size,
                "Expected double-quoted property name in JSON at position %zu "
                "(line %zu column %zu)",
-               trailing_position, line, column);
+               object_trailing_position, line, column);
+    return;
+  }
+  if (has_array_trailing &&
+      (!has_invalid || array_trailing_position < invalid_position)) {
+    json_unexpected_token_error(content, array_trailing_position, error,
+                                error_size);
     return;
   }
   if (has_invalid) {

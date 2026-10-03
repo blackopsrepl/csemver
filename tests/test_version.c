@@ -402,6 +402,18 @@ static void test_json_trailing_comma_diagnostic_matches_node(void) {
   assert(strcmp(error, expected) == 0);
 }
 
+static void test_json_array_trailing_comma_diagnostic_matches_node(void) {
+  const char *input = "{\"name\":[1,]}";
+  const char *expected =
+      "Unexpected token ']', \"{\"name\":[1,]}\" is not valid JSON";
+  char version[128];
+  char error[256];
+
+  assert(!csemver_version_read_text("package-lock.json", "json", input, version,
+                                    sizeof version, NULL, error, sizeof error));
+  assert(strcmp(error, expected) == 0);
+}
+
 static void test_json_leading_zero_diagnostic_matches_node(void) {
   const char *input = "{\"name\":01}";
   const char *expected =
@@ -548,6 +560,7 @@ int main(void) {
   test_package_lock_rejects_non_json_values();
   test_json_invalid_identifier_diagnostics_match_node();
   test_json_trailing_comma_diagnostic_matches_node();
+  test_json_array_trailing_comma_diagnostic_matches_node();
   test_json_leading_zero_diagnostic_matches_node();
   test_package_lock_updates_only_root_package();
   test_package_lock_adds_missing_root_package_version();
