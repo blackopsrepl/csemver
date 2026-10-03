@@ -2905,6 +2905,17 @@ static int render_changelog(const CsemverConfig *config, const char *version,
     free(old_content);
     return 1;
   }
+  if (previous_tag != NULL && strcmp(previous_tag, new_tag) == 0) {
+    if (*old_body != '\0' &&
+        (!csemver_buffer_append(output, "\n", 1) ||
+         !csemver_buffer_append(output, old_body,
+                                old_length - (size_t)(old_body - old_content))))
+      goto fail;
+    if (!normalize_changelog_newlines(output))
+      goto fail;
+    free(old_content);
+    return 1;
+  }
   if (previous_tag != NULL) {
     if (!append_compare_heading(config, output, base, version, previous_tag,
                                 new_tag, date))

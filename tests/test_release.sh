@@ -1236,6 +1236,11 @@ if printf '%s\n' "$skip_bump_preview" | grep -Fq 'npm publish'; then
   printf '%s\n' 'a release that skips version updates must not suggest npm publish' >&2
   exit 1
 fi
+if printf '%s\n' "$skip_bump_preview" | grep -Fq 'exercise disabled tag fallback' ||
+   printf '%s\n' "$skip_bump_preview" | grep -Fq '## [1.0.0]'; then
+  printf '%s\n' 'a preview reusing the latest tag must not duplicate its changelog section' >&2
+  exit 1
+fi
 
 mkdir "$tmp/private-package-hint"
 cd "$tmp/private-package-hint"
