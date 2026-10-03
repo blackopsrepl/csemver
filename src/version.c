@@ -2465,7 +2465,7 @@ static int yaml_rewrite_block_sequence_comments(const char *content,
           size_t node_line_end = yaml_line_end(content, length, start);
           size_t node_span_end = node_line_end;
           size_t indent_length = pending_output_column;
-          size_t dedent = token.start_mark.column - pending_output_column;
+          size_t dedent = 0;
           bool is_block_scalar =
               type == YAML_SCALAR_TOKEN &&
               (token.data.scalar.style == YAML_LITERAL_SCALAR_STYLE ||
@@ -2487,8 +2487,37 @@ static int yaml_rewrite_block_sequence_comments(const char *content,
               if (content[comment_position] >= '1' &&
                   content[comment_position] <= '9')
                 has_explicit_indent = true;
-            if (has_explicit_indent)
-              dedent = 0;
+            if (!has_explicit_indent) {
+              size_t body_position = node_line_end;
+              size_t target_indent = indent_length + 2;
+              while (body_position < node_span_end) {
+                size_t line_end;
+                size_t body_indent = 0;
+                while (body_position < node_span_end &&
+                       (content[body_position] == '\r' ||
+                        content[body_position] == '\n')) {
+                  if (content[body_position] == '\r' &&
+                      body_position + 1 < node_span_end &&
+                      content[body_position + 1] == '\n')
+                    body_position += 2;
+                  else
+                    ++body_position;
+                }
+                if (body_position >= node_span_end)
+                  break;
+                line_end = yaml_line_end(content, node_span_end, body_position);
+                while (body_position + body_indent < line_end &&
+                       (content[body_position + body_indent] == ' ' ||
+                        content[body_position + body_indent] == '\t'))
+                  ++body_indent;
+                if (body_position + body_indent < line_end) {
+                  if (body_indent > target_indent)
+                    dedent = body_indent - target_indent;
+                  break;
+                }
+                body_position = line_end;
+              }
+            }
           }
           for (comment_position = dash_line_start;
                valid && comment_position < pending_start; ++comment_position)
