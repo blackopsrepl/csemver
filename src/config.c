@@ -490,8 +490,8 @@ int csemver_config_parse(CsemverConfig *config, const char *toml, char *error,
   config->has_message = toml_key_exists(root, "message");
   config->has_changelog_header = toml_key_exists(root, "changelogHeader");
   if (config->has_changelog_header &&
-      !read_string_value(root, "changelogHeader", config->header,
-                         sizeof config->header, error, error_size))
+      !read_string_value(root, "changelogHeader", config->changelog_header,
+                         sizeof config->changelog_header, error, error_size))
     goto fail;
   for (index = 0; index < sizeof flag_names / sizeof flag_names[0]; ++index) {
     if (!read_bool_value(root, flag_names[index], flags[index], error,
@@ -557,8 +557,8 @@ int csemver_config_set_string(CsemverConfig *config, const char *key,
   } else if (strcmp(key, "header") == 0)
     target = config->header, target_size = sizeof config->header;
   else if (strcmp(key, "changelogHeader") == 0) {
-    target = config->header;
-    target_size = sizeof config->header;
+    target = config->changelog_header;
+    target_size = sizeof config->changelog_header;
     config->has_changelog_header = true;
   } else if (strcmp(key, "releaseCommitMessageFormat") == 0 ||
              strcmp(key, "release-commit-message-format") == 0)

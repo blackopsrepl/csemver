@@ -59,6 +59,7 @@ typedef struct {
   char tag_prefix[256];
   char infile[CSEMVER_PATH_MAX];
   char header[CSEMVER_VALUE_MAX];
+  char changelog_header[CSEMVER_VALUE_MAX];
   char release_as[128];
   char release_commit_message_format[512];
   char message[512];

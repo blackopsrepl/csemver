@@ -640,5 +640,17 @@ if printf '%s\n' "$silent_legacy_output" | grep -Fq '[commit-and-tag-version]:';
     "$silent_legacy_output" >&2
   exit 1
 fi
+header_precedence_output=$("$bin" --changelogHeader 'Legacy header' \
+  --header 'Modern header' --skip.commit --skip.tag 2>&1)
+grep -Fq 'Legacy header' CHANGELOG.md || {
+  printf 'changelogHeader should override header regardless of CLI order:\n%s\n' \
+    "$header_precedence_output" >&2
+  exit 1
+}
+if grep -Fq 'Modern header' CHANGELOG.md; then
+  printf 'the later header option should not override changelogHeader:\n%s\n' \
+    "$header_precedence_output" >&2
+  exit 1
+fi
 
 printf '%s\n' 'release workflow tests passed'

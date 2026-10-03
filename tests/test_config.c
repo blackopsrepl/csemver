@@ -14,6 +14,8 @@ int main(void) {
       "releaseCount = 0\n"
       "firstRelease = true\n"
       "preMajor = true\n"
+      "header = \"Modern header\"\n"
+      "changelogHeader = \"Legacy header\"\n"
       "packageFiles = [{ filename = \"VERSION\", type = \"plain-text\" }]\n"
       "bumpFiles = [\"VERSION\"]\n"
       "issuePrefixes = [\"#\", \"GH-\"]\n"
@@ -35,6 +37,9 @@ int main(void) {
   assert(strcmp(config.release_as, "minor") == 0);
   assert(config.release_count == 0);
   assert(config.first_release && config.pre_major && config.skip_bump);
+  assert(strcmp(config.header, "Modern header") == 0);
+  assert(strcmp(config.changelog_header, "Legacy header") == 0);
+  assert(config.has_changelog_header);
   assert(config.package_files_explicit && config.package_file_count == 1);
   assert(strcmp(config.package_files[0].filename, "VERSION") == 0);
   assert(strcmp(config.package_files[0].type, "plain-text") == 0);
