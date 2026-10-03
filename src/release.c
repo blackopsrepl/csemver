@@ -154,6 +154,10 @@ static int load_package_config(CsemverConfig *config) {
     const char *json_key;
     const char *config_key;
   } PackageBooleanOption;
+  typedef struct {
+    const char *json_key;
+    const char *config_key;
+  } PackageArrayOption;
   static const char *const sections[] = {"commit-and-tag-version",
                                          "standard-version"};
   static const PackageStringOption options[] = {
@@ -202,6 +206,8 @@ static int load_package_config(CsemverConfig *config) {
       {"no-bump-when-empty-changes", "no-bump-when-empty-changes"},
       {"preMajor", "preMajor"},
       {"pre-major", "pre-major"}};
+  static const PackageArrayOption array_options[] = {
+      {"issuePrefixes", "issuePrefixes"}, {"issue-prefixes", "issue-prefixes"}};
   char *contents = NULL;
   char error[256] = {0};
   size_t section_index, option_index;
@@ -235,6 +241,27 @@ static int load_package_config(CsemverConfig *config) {
       if (!csemver_config_set_bool(config,
                                    boolean_options[option_index].config_key,
                                    value, error, sizeof error)) {
+        errorf("%s", error);
+        free(contents);
+        return 0;
+      }
+    }
+    for (option_index = 0;
+         option_index < sizeof array_options / sizeof array_options[0];
+         ++option_index) {
+      char values[CSEMVER_MAX_PREFIXES][CSEMVER_VALUE_MAX];
+      const char *value_pointers[CSEMVER_MAX_PREFIXES];
+      size_t value_count, value_index;
+      if (!csemver_json_object_string_array(
+              contents, sections[section_index],
+              array_options[option_index].json_key, &values[0][0],
+              sizeof values[0], CSEMVER_MAX_PREFIXES, &value_count))
+        continue;
+      for (value_index = 0; value_index < value_count; ++value_index)
+        value_pointers[value_index] = values[value_index];
+      if (!csemver_config_set_array(
+              config, array_options[option_index].config_key, value_pointers,
+              value_count, error, sizeof error)) {
         errorf("%s", error);
         free(contents);
         return 0;

@@ -4,6 +4,7 @@
 
 #include <ctype.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1087,6 +1088,52 @@ int csemver_json_object_boolean(const char *content, const char *object_key,
     return 1;
   }
   return 0;
+}
+
+int csemver_json_object_string_array(const char *content,
+                                     const char *object_key,
+                                     const char *field_key, char *values,
+                                     size_t value_stride, size_t max_values,
+                                     size_t *value_count) {
+  Range field;
+  Scanner array;
+  size_t count = 0;
+
+  if (value_count != NULL)
+    *value_count = 0;
+  if (values == NULL || value_stride == 0 || value_count == NULL ||
+      max_values > SIZE_MAX / value_stride ||
+      !json_config_field(content, object_key, field_key, &field, NULL, 0) ||
+      field.start >= field.end || content[field.start] != '[')
+    return 0;
+  array.text = content;
+  array.position = field.start + 1;
+  array.length = field.end;
+  spaces(&array);
+  while (array.position < array.length && array.text[array.position] != ']') {
+    if (count >= max_values ||
+        !string_value(&array, values + count * value_stride, value_stride, NULL,
+                      NULL))
+      return 0;
+    ++count;
+    spaces(&array);
+    if (array.position >= array.length)
+      return 0;
+    if (array.text[array.position] == ',') {
+      ++array.position;
+      spaces(&array);
+    } else if (array.text[array.position] != ']') {
+      return 0;
+    }
+  }
+  if (array.position >= array.length || array.text[array.position] != ']')
+    return 0;
+  ++array.position;
+  spaces(&array);
+  if (array.position != array.length)
+    return 0;
+  *value_count = count;
+  return 1;
 }
 
 static int line_version(const char *content, const char *key, bool colon,

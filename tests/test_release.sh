@@ -679,6 +679,35 @@ grep -Fq 'compare/legacy-1.0.0...legacy-1.1.0' CHANGELOG.md || {
   exit 1
 }
 
+mkdir "$tmp/pkg-array-config"
+cd "$tmp/pkg-array-config"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-array-config-fixture",
+  "version": "1.0.0",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-array-config.git"},
+  "commit-and-tag-version": {
+    "issuePrefixes": ["JIRA-", "GH-"],
+    "issueUrlFormat": "https://issues.example/{{prefix}}{{id}}"
+  }
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed package array config fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: address JIRA-7 and GH-42'
+pkg_array_output=$("$bin" --skip.commit --skip.tag 2>&1)
+for issue_ref in '[JIRA-7](https://issues.example/JIRA-7)' \
+  '[GH-42](https://issues.example/GH-42)'; do
+  grep -Fq "$issue_ref" CHANGELOG.md || {
+    printf 'package.json issuePrefixes missing link: %s\n' "$issue_ref" >&2
+    exit 1
+  }
+done
+
 mkdir "$tmp/pkg-bool-config"
 cd "$tmp/pkg-bool-config"
 git init -q -b master

@@ -57,6 +57,28 @@ static void test_json_package_config_booleans(void) {
   assert(value);
 }
 
+static void test_json_package_config_string_arrays(void) {
+  const char *package_json =
+      "{\"standard-version\":{\"issuePrefixes\":[\"JIRA-\",\"GH-\","
+      "\"hash\\u002d\"]}}";
+  const char *not_strings =
+      "{\"standard-version\":{\"issuePrefixes\":[\"GH-\",2]}}";
+  char values[4][64];
+  size_t count = 99;
+
+  assert(csemver_json_object_string_array(
+      package_json, "standard-version", "issuePrefixes", &values[0][0],
+      sizeof values[0], sizeof values / sizeof values[0], &count));
+  assert(count == 3);
+  assert(strcmp(values[0], "JIRA-") == 0);
+  assert(strcmp(values[1], "GH-") == 0);
+  assert(strcmp(values[2], "hash-") == 0);
+  assert(!csemver_json_object_string_array(
+      not_strings, "standard-version", "issuePrefixes", &values[0][0],
+      sizeof values[0], sizeof values / sizeof values[0], &count));
+  assert(count == 0);
+}
+
 static void test_json_round_trip(void) {
   const char *input = "{\r\n\t\"name\": \"fixture\",\r\n"
                       "\t\"version\": \"1.2.3\",\r\n"
@@ -310,6 +332,7 @@ int main(void) {
   test_repository_url_forms();
   test_json_package_config_strings();
   test_json_package_config_booleans();
+  test_json_package_config_string_arrays();
   test_json_round_trip();
   test_json_compact_input_uses_default_upstream_indent();
   test_json_escape_sequences_normalize_like_upstream();

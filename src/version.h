@@ -20,5 +20,10 @@ int csemver_json_object_string(const char *content, const char *object_key,
                                size_t value_size);
 int csemver_json_object_boolean(const char *content, const char *object_key,
                                 const char *field_key, bool *value);
+int csemver_json_object_string_array(const char *content,
+                                     const char *object_key,
+                                     const char *field_key, char *values,
+                                     size_t value_stride, size_t max_values,
+                                     size_t *value_count);
 
 #endif
