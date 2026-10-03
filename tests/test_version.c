@@ -631,6 +631,61 @@ static void test_openapi_flow_maps_match_upstream_spacing(void) {
   free(updated);
 }
 
+static void test_openapi_multiline_flow_comment_matches_upstream(void) {
+  const char *input =
+      "{openapi: 3.0.3, info: {version: 1.2.3}, # cmt\npaths: {}}\n";
+  const char *expected =
+      "{\n  openapi: 3.0.3,\n  info: { version: 1.3.0 }, # cmt\n"
+      "  paths: {}\n}\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_read_text("openapi.yaml", "openapi", input, version,
+                                   sizeof version, NULL, error, sizeof error));
+  assert(strcmp(version, "1.2.3") == 0);
+  assert(csemver_version_update_text("openapi.yaml", "openapi", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_yaml_multiline_flow_map_without_comments_collapses(void) {
+  const char *input = "{version: 1.2.3,\nother: x}\n";
+  const char *expected = "{ version: 1.3.0, other: x }\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void
+test_yaml_multiline_flow_comment_before_close_matches_upstream(void) {
+  const char *input = "{version: 1.2.3, # cmt\n}\n";
+  const char *expected = "{ version: 1.3.0 } # cmt\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
 static void test_yaml_no_newline_matches_upstream_output(void) {
   const char *input = "version: 1.2.3";
   const char *expected = "version: 1.3.0undefined";
@@ -891,6 +946,9 @@ int main(void) {
   test_toml_and_yaml_surface();
   test_openapi_uses_info_version_not_nested_schema_version();
   test_openapi_flow_maps_match_upstream_spacing();
+  test_openapi_multiline_flow_comment_matches_upstream();
+  test_yaml_multiline_flow_map_without_comments_collapses();
+  test_yaml_multiline_flow_comment_before_close_matches_upstream();
   test_yaml_no_newline_matches_upstream_output();
   test_yaml_mixed_newlines_match_upstream();
   test_yaml_updater_only_updates_root_version();

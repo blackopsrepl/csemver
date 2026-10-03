@@ -28,6 +28,10 @@ typedef struct {
   size_t output_start;
 } YamlFlowFrame;
 typedef struct {
+  size_t start, end, next_start;
+  size_t comment_start, comment_length;
+} YamlFlowSeparator;
+typedef struct {
   const char *text;
   size_t position, length;
 } Scanner;
@@ -2081,6 +2085,289 @@ static int yaml_version_range(const char *content, bool openapi, Range *range,
   return found && !failed;
 }
 
+static int yaml_normalize_single_line_flow(const char *content, char **output,
+                                           size_t *output_size);
+
+static bool yaml_flow_whitespace(char byte) {
+  return byte == ' ' || byte == '\t' || byte == '\r' || byte == '\n';
+}
+
+static int yaml_append_normalized_flow_fragment(const char *content,
+                                                size_t start, size_t end,
+                                                CsemverBuffer *output) {
+  char *fragment;
+  char *normalized = NULL;
+  size_t normalized_size = 0;
+  size_t length;
+  int success = 0;
+  if (end < start)
+    return 0;
+  while (start < end && yaml_flow_whitespace(content[start]))
+    ++start;
+  while (end > start && yaml_flow_whitespace(content[end - 1]))
+    --end;
+  length = end - start;
+  if (length == 0 || memchr(content + start, '\n', length) != NULL ||
+      memchr(content + start, '\r', length) != NULL ||
+      memchr(content + start, '#', length) != NULL)
+    return 0;
+  fragment = malloc(length + 1);
+  if (fragment == NULL)
+    return 0;
+  memcpy(fragment, content + start, length);
+  fragment[length] = '\0';
+  if (yaml_normalize_single_line_flow(fragment, &normalized,
+                                      &normalized_size) &&
+      normalized_size >= 9 &&
+      memcmp(normalized + normalized_size - 9, "undefined", 9) == 0) {
+    normalized_size -= 9;
+    success = csemver_buffer_append(output, normalized, normalized_size);
+  }
+  free(normalized);
+  free(fragment);
+  return success;
+}
+
+static int yaml_format_multiline_root_flow(const char *content, char **output,
+                                           size_t *output_size, bool *handled) {
+  yaml_parser_t parser;
+  YamlFlowSeparator *separators = NULL;
+  size_t separator_count = 0;
+  size_t separator_capacity = 0;
+  size_t flow_depth = 0;
+  size_t pending_separator = SIZE_MAX;
+  size_t root_start = 0;
+  size_t root_open_end = 0;
+  size_t root_close_start = 0;
+  size_t root_close_end = 0;
+  size_t root_start_line = 0;
+  size_t root_close_line = 0;
+  bool root_found = false;
+  bool root_closed = false;
+  bool failed = false;
+  bool has_inline_comment = false;
+  bool has_trailing_comment = false;
+  bool trailing_comma = false;
+  size_t trailing_comment_start = 0;
+  size_t trailing_comment_length = 0;
+  size_t entry_count;
+  size_t index;
+  CsemverBuffer formatted;
+
+  *output = NULL;
+  *output_size = 0;
+  *handled = false;
+  if (!yaml_parser_initialize(&parser))
+    return 0;
+  yaml_parser_set_input_string(&parser, (const unsigned char *)content,
+                               strlen(content));
+  for (;;) {
+    yaml_token_t token;
+    yaml_token_type_t type;
+    bool done;
+    size_t start;
+    size_t end;
+    if (!yaml_parser_scan(&parser, &token)) {
+      failed = true;
+      break;
+    }
+    type = token.type;
+    done = type == YAML_STREAM_END_TOKEN;
+    if (pending_separator != SIZE_MAX && flow_depth == 1 &&
+        type != YAML_FLOW_ENTRY_TOKEN && type != YAML_FLOW_MAPPING_END_TOKEN &&
+        type != YAML_FLOW_SEQUENCE_END_TOKEN && !done) {
+      if (!yaml_mark_to_byte_offset(content, token.start_mark.index, &start))
+        failed = true;
+      else {
+        separators[pending_separator].next_start = start;
+        pending_separator = SIZE_MAX;
+      }
+    }
+    if (type == YAML_FLOW_MAPPING_START_TOKEN ||
+        type == YAML_FLOW_SEQUENCE_START_TOKEN) {
+      if (flow_depth == 0 && !root_found &&
+          type == YAML_FLOW_MAPPING_START_TOKEN) {
+        if (!yaml_mark_to_byte_offset(content, token.start_mark.index,
+                                      &root_start) ||
+            !yaml_mark_to_byte_offset(content, token.end_mark.index,
+                                      &root_open_end))
+          failed = true;
+        else {
+          root_found = true;
+          root_start_line = token.start_mark.line;
+        }
+      }
+      ++flow_depth;
+    } else if (type == YAML_FLOW_MAPPING_END_TOKEN ||
+               type == YAML_FLOW_SEQUENCE_END_TOKEN) {
+      if (flow_depth == 1 && root_found && !root_closed &&
+          type == YAML_FLOW_MAPPING_END_TOKEN) {
+        if (!yaml_mark_to_byte_offset(content, token.start_mark.index,
+                                      &root_close_start) ||
+            !yaml_mark_to_byte_offset(content, token.end_mark.index,
+                                      &root_close_end))
+          failed = true;
+        else {
+          root_closed = true;
+          root_close_line = token.start_mark.line;
+          if (pending_separator != SIZE_MAX) {
+            separators[pending_separator].next_start = root_close_start;
+            pending_separator = SIZE_MAX;
+          }
+        }
+      }
+      if (flow_depth > 0)
+        --flow_depth;
+    } else if (type == YAML_FLOW_ENTRY_TOKEN && flow_depth == 1 && root_found &&
+               !root_closed) {
+      if (!yaml_mark_to_byte_offset(content, token.start_mark.index, &start) ||
+          !yaml_mark_to_byte_offset(content, token.end_mark.index, &end)) {
+        failed = true;
+      } else {
+        if (separator_count == separator_capacity) {
+          size_t new_capacity =
+              separator_capacity == 0 ? 8 : separator_capacity * 2;
+          YamlFlowSeparator *new_separators;
+          if (new_capacity < separator_capacity ||
+              new_capacity > SIZE_MAX / sizeof *separators) {
+            failed = true;
+          } else {
+            new_separators =
+                realloc(separators, new_capacity * sizeof *separators);
+            if (new_separators == NULL)
+              failed = true;
+            else {
+              separators = new_separators;
+              separator_capacity = new_capacity;
+            }
+          }
+        }
+        if (!failed) {
+          separators[separator_count].start = start;
+          separators[separator_count].end = end;
+          separators[separator_count].next_start = SIZE_MAX;
+          separators[separator_count].comment_start = SIZE_MAX;
+          separators[separator_count].comment_length = 0;
+          pending_separator = separator_count++;
+        }
+      }
+    }
+    yaml_token_delete(&token);
+    if (failed || done)
+      break;
+  }
+  yaml_parser_delete(&parser);
+  if (failed) {
+    free(separators);
+    return 0;
+  }
+  if (!root_found || !root_closed || root_close_line == root_start_line ||
+      separator_count == 0 || root_start > root_open_end ||
+      root_open_end > root_close_start || root_close_start > root_close_end) {
+    free(separators);
+    return 1;
+  }
+  for (index = 0; index < root_start; ++index) {
+    if (!yaml_flow_whitespace(content[index])) {
+      free(separators);
+      return 1;
+    }
+  }
+  trailing_comma =
+      separator_count > 0 &&
+      separators[separator_count - 1].next_start == root_close_start;
+  entry_count = separator_count + (trailing_comma ? 0 : 1);
+  for (index = 0; index < separator_count; ++index) {
+    size_t position;
+    YamlFlowSeparator *separator = &separators[index];
+    if (separator->next_start == SIZE_MAX ||
+        separator->next_start < separator->end) {
+      free(separators);
+      return 1;
+    }
+    for (position = separator->end; position < separator->next_start;
+         ++position) {
+      if (content[position] == '#') {
+        size_t comment_end = position;
+        size_t trailing;
+        while (comment_end < separator->next_start &&
+               content[comment_end] != '\r' && content[comment_end] != '\n')
+          ++comment_end;
+        for (trailing = comment_end; trailing < separator->next_start;
+             ++trailing) {
+          if (content[trailing] == '#') {
+            free(separators);
+            return 1;
+          }
+        }
+        separator->comment_start = position;
+        separator->comment_length = comment_end - position;
+        if (trailing_comma && index + 1 == separator_count) {
+          trailing_comment_start = position;
+          trailing_comment_length = comment_end - position;
+          has_trailing_comment = true;
+        } else {
+          has_inline_comment = true;
+        }
+        break;
+      }
+    }
+  }
+  csemver_buffer_init(&formatted);
+  if (!csemver_buffer_append(&formatted, content, root_start) ||
+      !csemver_buffer_append(&formatted, has_inline_comment ? "{\n" : "{ ", 2))
+    goto allocation_error;
+  for (index = 0; index < entry_count; ++index) {
+    size_t entry_start =
+        index == 0 ? root_open_end : separators[index - 1].next_start;
+    size_t entry_end =
+        index < separator_count ? separators[index].start : root_close_start;
+    bool final_trailing_separator =
+        trailing_comma && index + 1 == separator_count;
+    if ((has_inline_comment && !csemver_buffer_append(&formatted, "  ", 2)) ||
+        (!has_inline_comment && index > 0 &&
+         !csemver_buffer_append(&formatted, " ", 1)) ||
+        !yaml_append_normalized_flow_fragment(content, entry_start, entry_end,
+                                              &formatted))
+      goto unsupported;
+    if (index < separator_count && !final_trailing_separator) {
+      YamlFlowSeparator *separator = &separators[index];
+      if (!csemver_buffer_append(&formatted, ",", 1))
+        goto allocation_error;
+      if (separator->comment_length > 0 &&
+          (!csemver_buffer_append(&formatted, " ", 1) ||
+           !csemver_buffer_append(&formatted,
+                                  content + separator->comment_start,
+                                  separator->comment_length)))
+        goto allocation_error;
+    }
+    if (has_inline_comment && !csemver_buffer_append(&formatted, "\n", 1))
+      goto allocation_error;
+  }
+  if (!csemver_buffer_append(&formatted, has_inline_comment ? "}" : " }",
+                             has_inline_comment ? 1 : 2) ||
+      (has_trailing_comment &&
+       (!csemver_buffer_append(&formatted, " ", 1) ||
+        !csemver_buffer_append(&formatted, content + trailing_comment_start,
+                               trailing_comment_length))) ||
+      !csemver_buffer_append(&formatted, content + root_close_end,
+                             strlen(content) - root_close_end))
+    goto allocation_error;
+  free(separators);
+  *output = formatted.data;
+  *output_size = formatted.length;
+  *handled = true;
+  return 1;
+unsupported:
+  csemver_buffer_free(&formatted);
+  free(separators);
+  return 1;
+allocation_error:
+  csemver_buffer_free(&formatted);
+  free(separators);
+  return 0;
+}
+
 static void yaml_trim_trailing_horizontal_space(CsemverBuffer *buffer) {
   while (buffer->length > 0 && (buffer->data[buffer->length - 1] == ' ' ||
                                 buffer->data[buffer->length - 1] == '\t'))
@@ -2166,12 +2453,20 @@ static int yaml_normalize_single_line_flow(const char *content, char **output,
   }
   if (memchr(content, '\n', line_length) != NULL ||
       memchr(content, '\r', line_length) != NULL) {
+    char *formatted = NULL;
+    size_t formatted_size = 0;
+    bool handled = false;
     csemver_buffer_init(&buffer);
-    if (!csemver_buffer_append(&buffer, content, length) ||
+    if (!yaml_format_multiline_root_flow(content, &formatted, &formatted_size,
+                                         &handled) ||
+        (handled ? !csemver_buffer_append(&buffer, formatted, formatted_size)
+                 : !csemver_buffer_append(&buffer, content, length)) ||
         !yaml_match_serialized_newline(content, &buffer)) {
+      free(formatted);
       csemver_buffer_free(&buffer);
       return 0;
     }
+    free(formatted);
     *output = buffer.data;
     *output_size = buffer.length;
     return 1;
