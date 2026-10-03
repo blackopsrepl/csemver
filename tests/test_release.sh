@@ -280,6 +280,34 @@ new_tag_target=$(git rev-parse 'refs/tags/v1.0.1^{}')
 [ "$(grep -c '"version": "1.0.1"' package.json)" -eq 1 ]
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/no-verify"
+cd "$tmp/no-verify"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "no-verify",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize no-verify fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+printf 'feature\n' > feature.txt
+git add feature.txt
+git commit -qm 'fix: add no-verify test feature'
+hook_marker="$tmp/no-verify-hook-ran"
+printf '#!/bin/sh\ntouch "%s"\nexit 1\n' "$hook_marker" > .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+if git commit --allow-empty -qm 'test: confirm pre-commit hook is active'; then
+  printf '%s\n' 'pre-commit hook control unexpectedly succeeded' >&2
+  exit 1
+fi
+test -f "$hook_marker"
+rm -f "$hook_marker"
+"$bin" --no-verify > /dev/null
+test ! -e "$hook_marker"
+grep -q '"version": "1.0.1"' package.json
+test "$(git cat-file -t refs/tags/v1.0.1)" = tag
+test -z "$(git status --porcelain)"
+
 mkdir "$tmp/lifecycle"
 cd "$tmp/lifecycle"
 git init -q -b master
