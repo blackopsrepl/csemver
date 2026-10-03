@@ -2436,19 +2436,19 @@ print_publish_hint(const CsemverConfig *config, bool is_private,
   size_t i;
   int status = 0;
   bool updated_package = false;
-  if (config->silent || config->skip_tag || config->skip_bump || is_private)
+  bool publish_package;
+  if (config->silent || config->skip_tag)
     return 1;
   for (i = 0; i < path_count; ++i)
     if (strcmp(paths[i], "package.json") == 0)
       updated_package = true;
-  if (!updated_package)
-    return 1;
+  publish_package = updated_package && !is_private;
   if (!run_git(branch_args, &branch_output, &status) || status != 0 ||
       branch_output == NULL) {
     free(branch_output);
     return 1;
   }
-  if (publish_command[0] == '\0') {
+  if (publish_package && publish_command[0] == '\0') {
     if (access("yarn.lock", F_OK) == 0)
       publish_command = "yarn publish";
     else if (access("pnpm-lock.yaml", F_OK) == 0)
@@ -2456,13 +2456,15 @@ print_publish_hint(const CsemverConfig *config, bool is_private,
     else
       publish_command = "npm publish";
   }
-  printf("ℹ Run `git push --follow-tags origin %s && %s", trim(branch_output),
-         publish_command);
+  printf("ℹ Run `git push --follow-tags origin %s", trim(branch_output));
   free(branch_output);
-  if (config->has_prerelease)
-    printf(" --tag %s", config->prerelease_id[0] == '\0'
-                            ? "prerelease"
-                            : config->prerelease_id);
+  if (publish_package) {
+    printf(" && %s", publish_command);
+    if (config->has_prerelease)
+      printf(" --tag %s", config->prerelease_id[0] == '\0'
+                              ? "prerelease"
+                              : config->prerelease_id);
+  }
   puts("` to publish");
   return 1;
 }

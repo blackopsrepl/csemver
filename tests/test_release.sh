@@ -1216,5 +1216,54 @@ test -z "$fallback_silent_output"
 test "$(git rev-parse HEAD)" = "$head_before"
 test "$(git tag --list)" = 'v1.0.0'
 test ! -e CHANGELOG.md
+fallback_preview=$("$bin" --dry-run)
+printf '%s\n' "$fallback_preview" |
+  grep -Fq 'ℹ Run `git push --follow-tags origin master` to publish' || {
+  printf '%s\n' 'fallback without package.json must still show the Git push hint' >&2
+  exit 1
+}
+if printf '%s\n' "$fallback_preview" | grep -Fq 'npm publish'; then
+  printf '%s\n' 'fallback without package.json must not suggest npm publish' >&2
+  exit 1
+fi
+skip_bump_preview=$("$bin" --dry-run --skip.bump)
+printf '%s\n' "$skip_bump_preview" |
+  grep -Fq 'ℹ Run `git push --follow-tags origin master` to publish' || {
+  printf '%s\n' 'a release that skips version updates must still show the Git push hint' >&2
+  exit 1
+}
+if printf '%s\n' "$skip_bump_preview" | grep -Fq 'npm publish'; then
+  printf '%s\n' 'a release that skips version updates must not suggest npm publish' >&2
+  exit 1
+fi
+
+mkdir "$tmp/private-package-hint"
+cd "$tmp/private-package-hint"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "private-package-hint-fixture",
+  "version": "1.0.0",
+  "private": true
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed private package'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: exercise private package hint'
+private_preview=$("$bin" --dry-run)
+printf '%s\n' "$private_preview" |
+  grep -Fq 'ℹ Run `git push --follow-tags origin master` to publish' || {
+  printf '%s\n' 'private package must still show the Git push hint' >&2
+  exit 1
+}
+if printf '%s\n' "$private_preview" | grep -Fq 'npm publish'; then
+  printf '%s\n' 'private package must not suggest npm publish' >&2
+  exit 1
+fi
+
+test -z "$(git status --porcelain)"
 
 printf '%s\n' 'release workflow tests passed'
