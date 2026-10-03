@@ -1700,6 +1700,82 @@ cmp "$tmp/extglob-package.expected" package.json
 cmp "$tmp/extglob-lock.expected" package-lock.json
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/gitignore-trim-patterns"
+cd "$tmp/gitignore-trim-patterns"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email test@example.invalid
+git config commit.gpgSign false
+printf ' \302\240package.json\302\240 \npackage-lock.json\\ \n' > .gitignore
+printf '{"name":"gitignore-trim-patterns","version":"1.0.0"}\n' > package.json
+printf '{"name":"gitignore-trim-patterns","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"gitignore-trim-patterns","version":"1.0.0"}}}\n' > package-lock.json
+git add .gitignore package.json package-lock.json
+git commit -qm 'chore: initialize trimmed ignore pattern fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise ignore whitespace trimming'
+cp package.json "$tmp/gitignore-trim-package.expected"
+gitignore_trim_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
+expected_gitignore_trim_output=$(printf '%s\n' \
+  "Not updating file 'package.json', as it is ignored in Git" \
+  '✔ bumping version in package-lock.json from 1.0.0 to 1.0.1')
+test "$gitignore_trim_output" = "$expected_gitignore_trim_output"
+cmp "$tmp/gitignore-trim-package.expected" package.json
+grep -q '"version": "1.0.1"' package-lock.json
+test "$(git status --porcelain)" = ' M package-lock.json'
+
+mkdir "$tmp/gitignore-trim-negation"
+cd "$tmp/gitignore-trim-negation"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email test@example.invalid
+git config commit.gpgSign false
+printf ' !package.json\n' > .gitignore
+printf '{"name":"gitignore-trim-negation","version":"1.0.0"}\n' > package.json
+printf '{"name":"gitignore-trim-negation","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"gitignore-trim-negation","version":"1.0.0"}}}\n' > package-lock.json
+git add .gitignore package.json package-lock.json
+git commit -qm 'chore: initialize trimmed negation fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: exercise trimmed negation matching'
+cp package-lock.json "$tmp/gitignore-negation-lock.expected"
+gitignore_negation_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
+expected_gitignore_negation_output=$(printf '%s\n' \
+  '✔ bumping version in package.json from 1.0.0 to 1.1.0' \
+  "Not updating file 'bower.json', as it is ignored in Git" \
+  "Not updating file 'manifest.json', as it is ignored in Git" \
+  "Not updating file 'package-lock.json', as it is ignored in Git" \
+  "Not updating file 'npm-shrinkwrap.json', as it is ignored in Git")
+test "$gitignore_negation_output" = "$expected_gitignore_negation_output"
+grep -q '"version": "1.1.0"' package.json
+cmp "$tmp/gitignore-negation-lock.expected" package-lock.json
+test "$(git status --porcelain)" = ' M package.json'
+
+mkdir "$tmp/gitignore-trim-negated-comment"
+cd "$tmp/gitignore-trim-negated-comment"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email test@example.invalid
+git config commit.gpgSign false
+printf ' !#comment\n' > .gitignore
+printf '{"name":"gitignore-trim-negated-comment","version":"1.0.0"}\n' > package.json
+printf '{"name":"gitignore-trim-negated-comment","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"gitignore-trim-negated-comment","version":"1.0.0"}}}\n' > package-lock.json
+git add .gitignore package.json package-lock.json
+git commit -qm 'chore: initialize negated comment fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: exercise negated comment matching'
+cp package.json "$tmp/gitignore-negated-comment-package.expected"
+cp package-lock.json "$tmp/gitignore-negated-comment-lock.expected"
+negated_comment_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
+expected_negated_comment_output=$(printf '%s\n' \
+  "Not updating file 'package.json', as it is ignored in Git" \
+  "Not updating file 'bower.json', as it is ignored in Git" \
+  "Not updating file 'manifest.json', as it is ignored in Git" \
+  "Not updating file 'package-lock.json', as it is ignored in Git" \
+  "Not updating file 'npm-shrinkwrap.json', as it is ignored in Git")
+test "$negated_comment_output" = "$expected_negated_comment_output"
+cmp "$tmp/gitignore-negated-comment-package.expected" package.json
+cmp "$tmp/gitignore-negated-comment-lock.expected" package-lock.json
+test -z "$(git status --porcelain)"
+
 mkdir "$tmp/ignored-bump-files"
 cd "$tmp/ignored-bump-files"
 git init -q -b master

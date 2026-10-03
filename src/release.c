@@ -2630,8 +2630,8 @@ static int ignore_path_pattern_matches(const char *pattern,
   return ignore_path_pattern_matches(pattern_slash + 1, filename_slash + 1);
 }
 
-static int ignore_pattern_matches(const char *pattern, const char *filename,
-                                  int rooted);
+static int ignore_pattern_matches_core(const char *pattern,
+                                       const char *filename, int rooted);
 
 static char *ignore_pattern_replace_brace(const char *pattern, const char *open,
                                           const char *close,
@@ -2781,7 +2781,7 @@ static int ignore_brace_sequence_matches(const char *pattern, const char *open,
       free(body);
       return 0;
     }
-    int matches = ignore_pattern_matches(expanded, filename, rooted);
+    int matches = ignore_pattern_matches_core(expanded, filename, rooted);
     free(expanded);
     if (matches) {
       free(body);
@@ -2803,8 +2803,8 @@ static int ignore_brace_sequence_matches(const char *pattern, const char *open,
   return 0;
 }
 
-static int ignore_pattern_matches(const char *pattern, const char *filename,
-                                  int rooted) {
+static int ignore_pattern_matches_core(const char *pattern,
+                                       const char *filename, int rooted) {
   const char *open = NULL;
   for (const char *cursor = pattern; *cursor != '\0'; ++cursor) {
     if (*cursor == '\\' && cursor[1] != '\0') {
@@ -2870,7 +2870,7 @@ static int ignore_pattern_matches(const char *pattern, const char *filename,
           memcpy(expanded + prefix_alternative_length, close + 1,
                  suffix_length);
           expanded[expanded_length] = '\0';
-          int matches = ignore_pattern_matches(expanded, filename, rooted);
+          int matches = ignore_pattern_matches_core(expanded, filename, rooted);
           free(expanded);
           if (matches)
             return 1;
@@ -2905,6 +2905,87 @@ static int ignore_pattern_matches(const char *pattern, const char *filename,
       return 0;
     filename = slash + 1;
   }
+}
+
+static size_t minimatch_whitespace_length(const unsigned char *text,
+                                          size_t length) {
+  if (length == 0)
+    return 0;
+  if (text[0] == 0x09 || text[0] == 0x0a ||
+      (text[0] >= 0x0b && text[0] <= 0x0d) || text[0] == 0x20)
+    return 1;
+  if (length >= 2 && text[0] == 0xc2 && text[1] == 0xa0)
+    return 2;
+  if (length >= 3 && text[0] == 0xe1 && text[1] == 0x9a && text[2] == 0x80)
+    return 3;
+  if (length >= 3 && text[0] == 0xe2 && text[1] == 0x80 &&
+      ((text[2] >= 0x80 && text[2] <= 0x8a) || text[2] == 0xa8 ||
+       text[2] == 0xa9 || text[2] == 0xaf))
+    return 3;
+  if (length >= 3 && text[0] == 0xe2 && text[1] == 0x81 && text[2] == 0x9f)
+    return 3;
+  if (length >= 3 && text[0] == 0xe3 && text[1] == 0x80 && text[2] == 0x80)
+    return 3;
+  if (length >= 3 && text[0] == 0xef && text[1] == 0xbb && text[2] == 0xbf)
+    return 3;
+  return 0;
+}
+
+static size_t utf8_character_length(const unsigned char *text, size_t length) {
+  unsigned char first = text[0];
+  if (first < 0x80)
+    return 1;
+  if (first >= 0xc2 && first <= 0xdf && length >= 2)
+    return 2;
+  if (first >= 0xe0 && first <= 0xef && length >= 3)
+    return 3;
+  if (first >= 0xf0 && first <= 0xf4 && length >= 4)
+    return 4;
+  return 1;
+}
+
+static int ignore_pattern_matches(const char *pattern, const char *filename,
+                                  int rooted) {
+  const unsigned char *text = (const unsigned char *)pattern;
+  size_t length = strlen(pattern);
+  size_t start = 0;
+  size_t offset;
+  size_t retained;
+  size_t whitespace;
+  size_t negations = 0;
+  size_t match_start;
+  char *trimmed;
+  int matches;
+  while ((whitespace =
+              minimatch_whitespace_length(text + start, length - start)) != 0)
+    start += whitespace;
+  if (start == length || text[start] == '#')
+    return 0;
+  offset = retained = start;
+  while (offset < length) {
+    whitespace = minimatch_whitespace_length(text + offset, length - offset);
+    if (whitespace != 0) {
+      offset += whitespace;
+      continue;
+    }
+    offset += utf8_character_length(text + offset, length - offset);
+    retained = offset;
+  }
+  while (start + negations < retained && text[start + negations] == '!')
+    ++negations;
+  match_start = start + negations;
+  if (match_start == retained)
+    return 0;
+  if (start == 0 && retained == length && negations == 0)
+    return ignore_pattern_matches_core(pattern, filename, rooted);
+  trimmed = malloc(retained - match_start + 1);
+  if (trimmed == NULL)
+    return 0;
+  memcpy(trimmed, pattern + match_start, retained - match_start);
+  trimmed[retained - match_start] = '\0';
+  matches = ignore_pattern_matches_core(trimmed, filename, rooted);
+  free(trimmed);
+  return (negations & 1) != 0 ? !matches : matches;
 }
 
 static int nearest_gitignore_path(char path[CSEMVER_PATH_MAX]) {
