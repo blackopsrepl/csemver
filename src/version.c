@@ -82,6 +82,8 @@ static int string_value(Scanner *s, char *out, size_t out_size,
   ++s->position;
   while (s->position < s->length) {
     unsigned char c = (unsigned char)s->text[s->position++];
+    if (c < 0x20)
+      return 0;
     if (c == '"') {
       if (out != NULL) {
         if (used >= out_size)
@@ -128,8 +130,6 @@ static int string_value(Scanner *s, char *out, size_t out_size,
       else if (c != '"' && c != '\\' && c != '/')
         return 0;
     }
-    if (c < 0x20)
-      return 0;
     if (out != NULL) {
       if (used + 1 >= out_size)
         return 0;
@@ -1037,6 +1037,28 @@ int csemver_json_repository_url(const char *content, char *url,
     return 0;
   }
   return 1;
+}
+
+int csemver_json_object_string(const char *content, const char *object_key,
+                               const char *field_key, char *value,
+                               size_t value_size) {
+  Scanner root;
+  Range object;
+
+  if (content == NULL || object_key == NULL || field_key == NULL ||
+      value == NULL || value_size == 0)
+    return 0;
+  value[0] = '\0';
+  root.text = content;
+  root.position = 0;
+  root.length = strlen(content);
+  spaces(&root);
+  if (!object_field(&root, object_key, &object, NULL, 0) ||
+      object.start >= root.length || content[object.start] != '{')
+    return 0;
+  root.position = object.start;
+  root.length = object.end;
+  return object_field(&root, field_key, NULL, value, value_size);
 }
 
 static int line_version(const char *content, const char *key, bool colon,

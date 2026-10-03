@@ -20,6 +20,26 @@ static void test_repository_url_forms(void) {
   assert(strcmp(url, "https://github.com/example/other.git") == 0);
 }
 
+static void test_json_package_config_strings(void) {
+  const char *package_json =
+      "{\"name\":\"fixture\",\"standard-version\":{"
+      "\"tagPrefix\":\"legacy-\"},\"commit-and-tag-version\":{"
+      "\"tagPrefix\":\"release-\",\"header\":\"Line\\nHeader\"}}";
+  char value[128];
+
+  assert(csemver_json_object_string(package_json, "standard-version",
+                                    "tagPrefix", value, sizeof value));
+  assert(strcmp(value, "legacy-") == 0);
+  assert(csemver_json_object_string(package_json, "commit-and-tag-version",
+                                    "tagPrefix", value, sizeof value));
+  assert(strcmp(value, "release-") == 0);
+  assert(csemver_json_object_string(package_json, "commit-and-tag-version",
+                                    "header", value, sizeof value));
+  assert(strcmp(value, "Line\nHeader") == 0);
+  assert(!csemver_json_object_string(package_json, "missing", "tagPrefix",
+                                     value, sizeof value));
+}
+
 static void test_json_round_trip(void) {
   const char *input = "{\r\n\t\"name\": \"fixture\",\r\n"
                       "\t\"version\": \"1.2.3\",\r\n"
@@ -271,6 +291,7 @@ static void test_toml_and_yaml_surface(void) {
 
 int main(void) {
   test_repository_url_forms();
+  test_json_package_config_strings();
   test_json_round_trip();
   test_json_compact_input_uses_default_upstream_indent();
   test_json_escape_sequences_normalize_like_upstream();

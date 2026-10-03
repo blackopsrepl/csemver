@@ -145,6 +145,66 @@ static int load_config(CsemverConfig *config, const char *path) {
   return 1;
 }
 
+static int load_package_config(CsemverConfig *config) {
+  typedef struct {
+    const char *json_key;
+    const char *config_key;
+  } PackageStringOption;
+  static const char *const sections[] = {"commit-and-tag-version",
+                                         "standard-version"};
+  static const PackageStringOption options[] = {
+      {"release-as", "release-as"},
+      {"releaseAs", "releaseAs"},
+      {"prerelease", "prerelease"},
+      {"infile", "infile"},
+      {"message", "message"},
+      {"tag-prefix", "tag-prefix"},
+      {"tagPrefix", "tagPrefix"},
+      {"header", "header"},
+      {"changelogHeader", "changelogHeader"},
+      {"releaseCommitMessageFormat", "releaseCommitMessageFormat"},
+      {"release-commit-message-format", "release-commit-message-format"},
+      {"path", "path"},
+      {"preset", "preset"},
+      {"lerna-package", "lerna-package"},
+      {"lernaPackage", "lernaPackage"},
+      {"npmPublishHint", "npmPublishHint"},
+      {"npm-publish-hint", "npm-publish-hint"},
+      {"commitUrlFormat", "commitUrlFormat"},
+      {"commit-url-format", "commit-url-format"},
+      {"compareUrlFormat", "compareUrlFormat"},
+      {"compare-url-format", "compare-url-format"},
+      {"issueUrlFormat", "issueUrlFormat"},
+      {"issue-url-format", "issue-url-format"},
+      {"userUrlFormat", "userUrlFormat"},
+      {"user-url-format", "user-url-format"}};
+  char *contents = NULL;
+  char error[256] = {0};
+  size_t section_index, option_index;
+
+  if (!csemver_read_file("package.json", &contents, NULL))
+    return 1;
+  for (section_index = 0; section_index < sizeof sections / sizeof sections[0];
+       ++section_index) {
+    for (option_index = 0; option_index < sizeof options / sizeof options[0];
+         ++option_index) {
+      char value[CSEMVER_VALUE_MAX];
+      if (!csemver_json_object_string(contents, sections[section_index],
+                                      options[option_index].json_key, value,
+                                      sizeof value))
+        continue;
+      if (!csemver_config_set_string(config, options[option_index].config_key,
+                                     value, error, sizeof error)) {
+        errorf("%s", error);
+        free(contents);
+        return 0;
+      }
+    }
+  }
+  free(contents);
+  return 1;
+}
+
 static int set_negated_boolean_option(CsemverConfig *config, const char *key) {
   char name[128];
   const char *start;
@@ -2076,7 +2136,7 @@ int csemver_main(int argc, char **argv) {
   config_path =
       find_config_path(argc, argv, config_storage, sizeof config_storage);
   csemver_config_defaults(&config);
-  if (!load_config(&config, config_path))
+  if (!load_package_config(&config) || !load_config(&config, config_path))
     return 2;
   parsed_args = parse_args(argc, argv, &config, &config_path);
   if (parsed_args != 0)

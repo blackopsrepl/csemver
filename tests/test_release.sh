@@ -653,4 +653,30 @@ if grep -Fq 'Modern header' CHANGELOG.md; then
   exit 1
 fi
 
+mkdir "$tmp/pkg-config"
+cd "$tmp/pkg-config"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-config-fixture",
+  "version": "1.0.0",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-config.git"},
+  "standard-version": {"tagPrefix": "legacy-"},
+  "commit-and-tag-version": {"tagPrefix": "release-"}
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed package config fixture'
+git tag -a legacy-1.0.0 -m 'legacy release'
+git tag -a release-1.0.0 -m 'release'
+git commit --allow-empty -qm 'feat: use package config'
+pkg_config_output=$("$bin" --skip.commit --skip.tag 2>&1)
+grep -Fq 'compare/legacy-1.0.0...legacy-1.1.0' CHANGELOG.md || {
+  printf 'package.json commit-and-tag-version config should set tagPrefix:\n%s\n' \
+    "$pkg_config_output" >&2
+  exit 1
+}
+
 printf '%s\n' 'release workflow tests passed'
