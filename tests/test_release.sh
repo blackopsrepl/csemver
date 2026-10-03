@@ -1015,4 +1015,45 @@ grep -Fq '"version": "2.4.0"' package.json
 test "$(cat VERSION.txt)" = '2.3.4'
 grep -Fq 'compare/v2.3.4...v2.4.0' CHANGELOG.md
 
+mkdir "$tmp/pkg-skip-config"
+cd "$tmp/pkg-skip-config"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-skip-config-fixture",
+  "version": "1.0.0",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-skip-config.git"},
+  "commit-and-tag-version": {"skip": {"changelog": true}}
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed package skip fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: release with changelog skipped'
+"$bin" --skip.commit --skip.tag >/dev/null
+test ! -e CHANGELOG.md
+
+mkdir "$tmp/pkg-skip-precedence"
+cd "$tmp/pkg-skip-precedence"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-skip-precedence-fixture",
+  "version": "1.0.0",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-skip-precedence.git"},
+  "commit-and-tag-version": {"skip": {"changelog": true}},
+  "standard-version": {"skip": {"changelog": false}}
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed package skip precedence fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: release with package config precedence'
+"$bin" --skip.commit --skip.tag >/dev/null
+test -e CHANGELOG.md
+
 printf '%s\n' 'release workflow tests passed'

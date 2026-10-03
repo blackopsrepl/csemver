@@ -18,6 +18,10 @@ int csemver_json_repository_url(const char *content, char *url,
 int csemver_json_object_string(const char *content, const char *object_key,
                                const char *field_key, char *value,
                                size_t value_size);
+int csemver_json_object_nested_boolean(const char *content,
+                                       const char *object_key,
+                                       const char *nested_key,
+                                       const char *field_key, bool *value);
 int csemver_json_object_boolean(const char *content, const char *object_key,
                                 const char *field_key, bool *value);
 int csemver_json_object_string_array(const char *content,

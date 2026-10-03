@@ -1071,15 +1071,24 @@ int csemver_json_object_string(const char *content, const char *object_key,
                            value_size);
 }
 
-int csemver_json_object_boolean(const char *content, const char *object_key,
-                                const char *field_key, bool *value) {
-  Range field;
-  size_t length;
+static int json_config_nested_field(const char *content, const char *object_key,
+                                    const char *nested_key,
+                                    const char *field_key, Range *range,
+                                    char *decoded, size_t decoded_size) {
+  Range nested;
+  Scanner object;
 
-  if (value == NULL ||
-      !json_config_field(content, object_key, field_key, &field, NULL, 0))
+  if (!json_config_field(content, object_key, nested_key, &nested, NULL, 0) ||
+      nested.start >= nested.end || content[nested.start] != '{')
     return 0;
-  length = field.end - field.start;
+  object.text = content;
+  object.position = nested.start;
+  object.length = nested.end;
+  return object_field(&object, field_key, range, decoded, decoded_size);
+}
+
+static int json_range_boolean(const char *content, Range field, bool *value) {
+  size_t length = field.end - field.start;
   if (length == 4 && memcmp(content + field.start, "true", 4) == 0) {
     *value = true;
     return 1;
@@ -1089,6 +1098,27 @@ int csemver_json_object_boolean(const char *content, const char *object_key,
     return 1;
   }
   return 0;
+}
+
+int csemver_json_object_nested_boolean(const char *content,
+                                       const char *object_key,
+                                       const char *nested_key,
+                                       const char *field_key, bool *value) {
+  Range field;
+  return value != NULL &&
+         json_config_nested_field(content, object_key, nested_key, field_key,
+                                  &field, NULL, 0) &&
+         json_range_boolean(content, field, value);
+}
+
+int csemver_json_object_boolean(const char *content, const char *object_key,
+                                const char *field_key, bool *value) {
+  Range field;
+
+  if (value == NULL ||
+      !json_config_field(content, object_key, field_key, &field, NULL, 0))
+    return 0;
+  return json_range_boolean(content, field, value);
 }
 
 int csemver_json_object_string_array(const char *content,

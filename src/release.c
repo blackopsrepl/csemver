@@ -11,9 +11,9 @@
 #include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -307,6 +307,8 @@ static int load_package_config(CsemverConfig *config) {
       {"issue-prefixes", "issue-prefixes", CSEMVER_MAX_PREFIXES}};
   static const char *const numeric_options[] = {"releaseCount",
                                                 "release-count"};
+  static const char *const skip_options[] = {"bump", "changelog", "commit",
+                                             "tag"};
   static const char *const bump_file_options[] = {"bumpFiles", "bump-files"};
   char *contents = NULL;
   char error[256] = {0};
@@ -341,6 +343,22 @@ static int load_package_config(CsemverConfig *config) {
       if (!csemver_config_set_bool(config,
                                    boolean_options[option_index].config_key,
                                    value, error, sizeof error)) {
+        errorf("%s", error);
+        free(contents);
+        return 0;
+      }
+    }
+    for (option_index = 0;
+         option_index < sizeof skip_options / sizeof skip_options[0];
+         ++option_index) {
+      bool value;
+      char key[64];
+      if (!csemver_json_object_nested_boolean(
+              contents, sections[section_index], "skip",
+              skip_options[option_index], &value))
+        continue;
+      snprintf(key, sizeof key, "skip.%s", skip_options[option_index]);
+      if (!csemver_config_set_bool(config, key, value, error, sizeof error)) {
         errorf("%s", error);
         free(contents);
         return 0;

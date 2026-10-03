@@ -57,6 +57,23 @@ static void test_json_package_config_booleans(void) {
   assert(value);
 }
 
+static void test_json_package_config_nested_booleans(void) {
+  const char *package_json = "{\"commit-and-tag-version\":{\"skip\":{"
+                             "\"changelog\":true,\"commit\":false}}}";
+  bool value = false;
+
+  assert(csemver_json_object_nested_boolean(
+      package_json, "commit-and-tag-version", "skip", "changelog", &value));
+  assert(value);
+  assert(csemver_json_object_nested_boolean(
+      package_json, "commit-and-tag-version", "skip", "commit", &value));
+  assert(!value);
+  value = true;
+  assert(!csemver_json_object_nested_boolean(
+      package_json, "commit-and-tag-version", "skip", "missing", &value));
+  assert(value);
+}
+
 static void test_json_package_config_string_arrays(void) {
   const char *package_json =
       "{\"standard-version\":{\"issuePrefixes\":[\"JIRA-\",\"GH-\","
@@ -415,6 +432,7 @@ int main(void) {
   test_repository_url_forms();
   test_json_package_config_strings();
   test_json_package_config_booleans();
+  test_json_package_config_nested_booleans();
   test_json_package_config_string_arrays();
   test_json_package_config_unsigned();
   test_json_package_config_commit_types();
