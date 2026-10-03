@@ -209,7 +209,9 @@ static void csemver_close_descriptor(int *descriptor) {
 
 int csemver_run_process_capture_streams(const char *const argv[],
                                         char **stdout_output,
-                                        char **stderr_output, int *exit_code) {
+                                        char **stderr_output, size_t max_buffer,
+                                        int *max_buffer_stream,
+                                        int *exit_code) {
   int stdout_sockets[2] = {-1, -1};
   int stderr_sockets[2] = {-1, -1};
   struct pollfd streams[2];
@@ -223,6 +225,7 @@ int csemver_run_process_capture_streams(const char *const argv[],
   int active_streams = 0;
   int read_ok = 1;
   int success = 0;
+  int max_buffer_stream_value = 0;
   size_t i;
   char chunk[4096];
   ssize_t count;
@@ -230,6 +233,8 @@ int csemver_run_process_capture_streams(const char *const argv[],
 
   if (stdout_output == NULL || stderr_output == NULL)
     return 0;
+  if (max_buffer_stream != NULL)
+    *max_buffer_stream = 0;
   *stdout_output = NULL;
   *stderr_output = NULL;
   csemver_buffer_init(&stdout_buffer);
@@ -288,7 +293,24 @@ int csemver_run_process_capture_streams(const char *const argv[],
       }
       count = read(streams[i].fd, chunk, sizeof chunk);
       if (count > 0) {
-        if (!csemver_buffer_append(buffers[i], chunk, (size_t)count))
+        size_t append_count = (size_t)count;
+        if (max_buffer > 0 &&
+            (buffers[i]->length >= max_buffer ||
+             append_count > max_buffer - buffers[i]->length)) {
+          append_count = buffers[i]->length < max_buffer
+                             ? max_buffer - buffers[i]->length
+                             : 0;
+          if (max_buffer_stream_value == 0) {
+            max_buffer_stream_value = i == 0
+                                          ? CSEMVER_CAPTURE_STDOUT_MAX_BUFFER
+                                          : CSEMVER_CAPTURE_STDERR_MAX_BUFFER;
+            if (max_buffer_stream != NULL)
+              *max_buffer_stream = max_buffer_stream_value;
+            kill(child, SIGTERM);
+          }
+        }
+        if (append_count > 0 &&
+            !csemver_buffer_append(buffers[i], chunk, append_count))
           read_ok = 0;
       } else if (count == 0) {
         csemver_close_descriptor(parent_sockets[i]);

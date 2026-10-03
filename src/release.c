@@ -35,6 +35,9 @@
 #define COMMIT_MAX 1024
 #define ISSUE_REFERENCE_MAX 64
 #define ISSUE_REFERENCE_TEXT_MAX 128
+#define LIFECYCLE_SCRIPT_MAX_BUFFER (1024U * 1024U)
+/* Match Node's truncated pipe flush on maxBuffer failure. */
+#define LIFECYCLE_PIPE_ERROR_FLUSH_LIMIT (64U * 1024U)
 #define PACKAGE_UNSUPPORTED_FILENAME "__unsupported_filename"
 
 typedef struct {
@@ -2189,14 +2192,43 @@ static const char *bump_name(int bump) {
 }
 
 static int run_lifecycle_command(const char *command, char **stdout_output,
-                                 char **stderr_output, int *exit_code) {
+                                 char **stderr_output, int *max_buffer_stream,
+                                 int *exit_code) {
   const char *argv[] = {"/bin/sh", "-c", command, NULL};
   return csemver_run_process_capture_streams(argv, stdout_output, stderr_output,
-                                             exit_code);
+                                             LIFECYCLE_SCRIPT_MAX_BUFFER,
+                                             max_buffer_stream, exit_code);
 }
 
 static void print_lifecycle_message(const char *message) {
   fprintf(stderr, "%s\n", message);
+}
+
+static int lifecycle_stderr_is_pipe(void) {
+  struct stat status;
+  if (fstat(STDERR_FILENO, &status) != 0)
+    return 0;
+  return S_ISFIFO(status.st_mode) || S_ISSOCK(status.st_mode);
+}
+
+static void print_lifecycle_max_buffer_error(const CsemverConfig *config,
+                                             int max_buffer_stream,
+                                             const char *captured_error,
+                                             const char *error_message) {
+  if (config->silent)
+    return;
+  if (max_buffer_stream == CSEMVER_CAPTURE_STDERR_MAX_BUFFER &&
+      lifecycle_stderr_is_pipe()) {
+    size_t length = strlen(captured_error);
+    if (length > LIFECYCLE_PIPE_ERROR_FLUSH_LIMIT)
+      length = LIFECYCLE_PIPE_ERROR_FLUSH_LIMIT;
+    (void)fwrite(captured_error, 1, length, stderr);
+    (void)fflush(stderr);
+    return;
+  }
+  print_lifecycle_message(captured_error[0] != '\0' ? captured_error
+                                                    : error_message);
+  print_lifecycle_message(error_message);
 }
 
 static char *lifecycle_error_message(const char *command,
@@ -2224,6 +2256,7 @@ static int run_lifecycle_capture(const CsemverConfig *config, const char *name,
     *output = NULL;
   for (i = 0; i < config->script_count; ++i) {
     int status = 0;
+    int max_buffer_stream = 0;
     char *captured_output = NULL;
     char *captured_error = NULL;
     char *error_message;
@@ -2238,8 +2271,19 @@ static int run_lifecycle_capture(const CsemverConfig *config, const char *name,
       continue;
     keep_output = output != NULL && *output == NULL;
     if (!run_lifecycle_command(config->scripts[i].command, &captured_output,
-                               &captured_error, &status)) {
+                               &captured_error, &max_buffer_stream, &status)) {
       errorf("unable to capture lifecycle script output");
+      free(captured_output);
+      free(captured_error);
+      return 0;
+    }
+    if (max_buffer_stream != 0) {
+      const char *max_buffer_error =
+          max_buffer_stream == CSEMVER_CAPTURE_STDOUT_MAX_BUFFER
+              ? "stdout maxBuffer length exceeded"
+              : "stderr maxBuffer length exceeded";
+      print_lifecycle_max_buffer_error(config, max_buffer_stream,
+                                       captured_error, max_buffer_error);
       free(captured_output);
       free(captured_error);
       return 0;

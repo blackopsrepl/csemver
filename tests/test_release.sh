@@ -1642,6 +1642,82 @@ git commit --allow-empty -qm 'feat: inspect lifecycle output descriptors'
 timeout 30 "$bin" --skip.changelog --skip.commit --skip.tag > "$tmp/lifecycle-stream-fds.stdout" 2> "$tmp/lifecycle-stream-fds.stderr"
 test "$(wc -c < "$tmp/lifecycle-stream-fds.stderr")" -eq 262145
 
+mkdir "$tmp/lifecycle-max-buffer"
+cd "$tmp/lifecycle-max-buffer"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "lifecycle-max-buffer-fixture",
+  "version": "1.0.0",
+  "commit-and-tag-version": {
+    "scripts": {"prerelease": "yes x | head -c 1100000"}
+  }
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed lifecycle max buffer fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: exceed lifecycle output buffer'
+set +e
+timeout 30 "$bin" --skip.changelog --skip.commit --skip.tag > "$tmp/lifecycle-max-buffer.stdout" 2> "$tmp/lifecycle-max-buffer.stderr"
+lifecycle_max_buffer_status=$?
+set -e
+test "$lifecycle_max_buffer_status" -eq 1
+printf '%s\n' \
+  '✔ Running lifecycle script "prerelease"' \
+  'ℹ - execute command: "yes x | head -c 1100000"' \
+  > "$tmp/lifecycle-max-buffer.stdout.expected"
+cmp "$tmp/lifecycle-max-buffer.stdout.expected" "$tmp/lifecycle-max-buffer.stdout"
+printf '%s\n' \
+  'stdout maxBuffer length exceeded' \
+  'stdout maxBuffer length exceeded' \
+  > "$tmp/lifecycle-max-buffer.stderr.expected"
+cmp "$tmp/lifecycle-max-buffer.stderr.expected" "$tmp/lifecycle-max-buffer.stderr"
+set +e
+timeout 30 "$bin" --silent --skip.changelog --skip.commit --skip.tag > "$tmp/lifecycle-max-buffer-silent.stdout" 2> "$tmp/lifecycle-max-buffer-silent.stderr"
+lifecycle_max_buffer_silent_status=$?
+set -e
+test "$lifecycle_max_buffer_silent_status" -eq 1
+test ! -s "$tmp/lifecycle-max-buffer-silent.stdout"
+test ! -s "$tmp/lifecycle-max-buffer-silent.stderr"
+test -z "$(git status --porcelain)"
+test "$(git tag --list 'v1.1.0')" = ''
+
+mkdir "$tmp/lifecycle-max-buffer-stderr"
+cd "$tmp/lifecycle-max-buffer-stderr"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "lifecycle-max-buffer-stderr-fixture",
+  "version": "1.0.0",
+  "commit-and-tag-version": {
+    "scripts": {"prerelease": "yes x | head -c 1100000 >&2"}
+  }
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed lifecycle stderr max buffer fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: exceed lifecycle stderr output buffer'
+mkfifo "$tmp/lifecycle-max-buffer-stderr.pipe"
+cat "$tmp/lifecycle-max-buffer-stderr.pipe" > "$tmp/lifecycle-max-buffer-stderr.actual" &
+stderr_reader_pid=$!
+set +e
+timeout 30 "$bin" --skip.changelog --skip.commit --skip.tag > "$tmp/lifecycle-max-buffer-stderr.stdout" 2> "$tmp/lifecycle-max-buffer-stderr.pipe"
+lifecycle_stderr_max_buffer_status=$?
+set -e
+wait "$stderr_reader_pid"
+test "$lifecycle_stderr_max_buffer_status" -eq 1
+yes x | head -c 1100000 > "$tmp/lifecycle-max-buffer-stderr.raw"
+head -c 65536 "$tmp/lifecycle-max-buffer-stderr.raw" > "$tmp/lifecycle-max-buffer-stderr.expected"
+cmp "$tmp/lifecycle-max-buffer-stderr.expected" "$tmp/lifecycle-max-buffer-stderr.actual"
+test -z "$(git status --porcelain)"
+test "$(git tag --list 'v1.1.0')" = ''
+
 mkdir "$tmp/no-package-fallback-disabled"
 cd "$tmp/no-package-fallback-disabled"
 git init -q -b master
