@@ -19,7 +19,7 @@ make test
 ./build/commit-and-tag-version --version
 ```
 
-`make` emits `build/commit-and-tag-version` as a symlink to the same native C binary, so existing scripts can invoke csemver under the upstream command name without a Node.js wrapper.
+`make` emits `build/commit-and-tag-version` as a symlink to the same native C binary, so existing scripts can invoke csemver under the upstream command name without a Node.js wrapper. `csemver --version` prints its embedded build version. The compatibility alias mirrors upstream's package lookup and prints the nearest `package.json` version, or `unknown` when none is found.
 
 `make test` exercises the SemVer and TOML code, version-file updates, CLI parsing, and release operations in isolated Git repositories. Set `TMPDIR` to a writable scratch directory if `/tmp` is unavailable.
 

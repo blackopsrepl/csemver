@@ -15,14 +15,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
 #ifndef CSEMVER_VERSION
 #define CSEMVER_VERSION "0.1.0"
-#endif
-#ifndef CSEMVER_COMPAT_VERSION
-#define CSEMVER_COMPAT_VERSION "13.2.1"
 #endif
 
 #define ARG_MAX_COUNT 64
@@ -67,6 +65,77 @@ static void errorf(const char *format, ...) {
   vfprintf(stderr, format, args);
   fputc('\n', stderr);
   va_end(args);
+}
+
+static int path_has_extension(const char *path) {
+  const char *basename = strrchr(path, '/');
+  const char *dot;
+  const char *cursor;
+  if (basename != NULL)
+    ++basename;
+  else
+    basename = path;
+  dot = strrchr(basename, '.');
+  if (dot == NULL || dot == basename)
+    return 0;
+  for (cursor = basename; *cursor != '\0'; ++cursor)
+    if (*cursor != '.')
+      return 1;
+  return 0;
+}
+
+static const char *compatibility_package_version(void) {
+  static char version[CSEMVER_VALUE_MAX];
+  char directory[CSEMVER_PATH_MAX];
+  char package_path[CSEMVER_PATH_MAX + sizeof "/package.json"];
+  if (getcwd(directory, sizeof directory) == NULL)
+    return "unknown";
+  if (path_has_extension(directory)) {
+    char *slash = strrchr(directory, '/');
+    if (slash == NULL)
+      return "unknown";
+    if (slash == directory)
+      directory[1] = '\0';
+    else
+      *slash = '\0';
+  }
+  for (;;) {
+    struct stat info;
+    const char *suffix =
+        strcmp(directory, "/") == 0 ? "package.json" : "/package.json";
+    int path_length =
+        snprintf(package_path, sizeof package_path, "%s%s", directory, suffix);
+    if (path_length < 0 || (size_t)path_length >= sizeof package_path)
+      return "unknown";
+    if (stat(package_path, &info) == 0) {
+      char *contents = NULL;
+      char parse_error[256];
+      int found;
+      if (!csemver_read_file(package_path, &contents, NULL))
+        return "unknown";
+      found = csemver_version_read_text(package_path, "json", contents, version,
+                                        sizeof version, NULL, parse_error,
+                                        sizeof parse_error);
+      free(contents);
+      if (!found || version[0] == '\0')
+        return "unknown";
+      return version;
+    }
+    if (errno != ENOENT && errno != ENOTDIR)
+      return "unknown";
+    if (strcmp(directory, "/") == 0)
+      break;
+    {
+      char *slash = strrchr(directory, '/');
+      if (slash == NULL)
+        break;
+      if (slash == directory)
+        directory[1] = '\0';
+      else
+        *slash = '\0';
+    }
+  }
+  return "unknown";
 }
 
 // clang-format off
@@ -608,12 +677,13 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
     }
     if (strcmp(key, "--version") == 0 || strcmp(key, "-v") == 0) {
       const char *program_name = argv[0];
+      const char *version = CSEMVER_VERSION;
       const char *slash = strrchr(program_name, '/');
       if (slash != NULL)
         program_name = slash + 1;
-      puts(strcmp(program_name, "commit-and-tag-version") == 0
-               ? CSEMVER_COMPAT_VERSION
-               : CSEMVER_VERSION);
+      if (strcmp(program_name, "commit-and-tag-version") == 0)
+        version = compatibility_package_version();
+      puts(version);
       return 1;
     }
     if (strcmp(key, "-c") == 0 || strcmp(key, "--config") == 0) {

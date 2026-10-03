@@ -2,9 +2,7 @@ CC ?= cc
 CFLAGS ?= -O2
 CPPFLAGS ?=
 CSEMVER_VERSION ?= 0.1.0
-UPSTREAM_COMPAT_VERSION ?= 13.2.1
-VERSION_CPPFLAGS = -DCSEMVER_VERSION='"$(CSEMVER_VERSION)"' \
-	-DCSEMVER_COMPAT_VERSION='"$(UPSTREAM_COMPAT_VERSION)"'
+VERSION_CPPFLAGS = -DCSEMVER_VERSION='"$(CSEMVER_VERSION)"'
 WARNINGS = -std=c17 -Wall -Wextra -Wpedantic -Werror
 
 .PHONY: all test clean
@@ -42,7 +40,7 @@ test: build/csemver build/commit-and-tag-version build/csemver-version-test buil
 	./build/test_version
 	./tests/test_cli.sh ./build/csemver $(CSEMVER_VERSION)
 	./tests/test_cli.sh ./build/csemver-version-test 9.8.7
-	./tests/test_compat_alias.sh ./build/commit-and-tag-version $(UPSTREAM_COMPAT_VERSION)
+	./tests/test_compat_alias.sh ./build/commit-and-tag-version
 	./tests/test_help.sh ./build/commit-and-tag-version
 	./tests/test_release.sh
 
