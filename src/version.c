@@ -1960,7 +1960,9 @@ static int yaml_scalar_value_range(const char *content,
 }
 
 static int yaml_version_range(const char *content, bool openapi, Range *range,
-                              char *version, size_t version_size) {
+                              char *version, size_t version_size,
+                              size_t *scalar_end,
+                              yaml_scalar_style_t *scalar_style) {
   yaml_parser_t parser;
   YamlFrame *frames = NULL;
   size_t depth = 0;
@@ -2049,9 +2051,14 @@ static int yaml_version_range(const char *content, bool openapi, Range *range,
         } else {
           if (frame->key_is_version && !found) {
             if (!yaml_scalar_value_range(content, &event, range, version,
-                                         version_size))
+                                         version_size) ||
+                (scalar_end != NULL &&
+                 !yaml_mark_to_byte_offset(content, event.end_mark.index,
+                                           scalar_end))) {
               failed = true;
-            else {
+            } else {
+              if (scalar_style != NULL)
+                *scalar_style = event.data.scalar.style;
               if (range != NULL &&
                   event.data.scalar.style == YAML_PLAIN_SCALAR_STYLE) {
                 size_t trailing = range->end;
@@ -2094,6 +2101,48 @@ static int yaml_version_range(const char *content, bool openapi, Range *range,
   yaml_parser_delete(&parser);
   free(frames);
   return found && !failed;
+}
+
+static int yaml_normalize_version_line_spacing(CsemverBuffer *buffer,
+                                               bool openapi) {
+  size_t scalar_end;
+  size_t whitespace_end;
+  yaml_scalar_style_t style;
+  bool before_comment;
+  CsemverBuffer normalized;
+  if (!yaml_version_range(buffer->data, openapi, NULL, NULL, 0, &scalar_end,
+                          &style) ||
+      scalar_end > buffer->length ||
+      (style != YAML_PLAIN_SCALAR_STYLE &&
+       style != YAML_SINGLE_QUOTED_SCALAR_STYLE &&
+       style != YAML_DOUBLE_QUOTED_SCALAR_STYLE))
+    return 1;
+  whitespace_end = scalar_end;
+  while (whitespace_end < buffer->length &&
+         (buffer->data[whitespace_end] == ' ' ||
+          buffer->data[whitespace_end] == '\t'))
+    ++whitespace_end;
+  before_comment =
+      whitespace_end > scalar_end && buffer->data[whitespace_end] == '#';
+  if (!before_comment && buffer->data[whitespace_end] != '\0' &&
+      buffer->data[whitespace_end] != '\r' &&
+      buffer->data[whitespace_end] != '\n')
+    return 1;
+  if ((!before_comment && whitespace_end == scalar_end) ||
+      (before_comment && whitespace_end == scalar_end + 1 &&
+       buffer->data[scalar_end] == ' '))
+    return 1;
+  csemver_buffer_init(&normalized);
+  if (!csemver_buffer_append(&normalized, buffer->data, scalar_end) ||
+      (before_comment && !csemver_buffer_append(&normalized, " ", 1)) ||
+      !csemver_buffer_append(&normalized, buffer->data + whitespace_end,
+                             buffer->length - whitespace_end)) {
+    csemver_buffer_free(&normalized);
+    return 0;
+  }
+  csemver_buffer_free(buffer);
+  *buffer = normalized;
+  return 1;
 }
 
 static int yaml_normalize_single_line_flow(const char *content, char **output,
@@ -3968,10 +4017,12 @@ int csemver_version_read_text(const char *filename, const char *type,
       line_version(content, "version", false, NULL, version, version_size))
     return 1;
   if (strcmp(kind, "yaml") == 0 &&
-      yaml_version_range(content, false, NULL, version, version_size))
+      yaml_version_range(content, false, NULL, version, version_size, NULL,
+                         NULL))
     return 1;
   if (strcmp(kind, "openapi") == 0 &&
-      yaml_version_range(content, true, NULL, version, version_size))
+      yaml_version_range(content, true, NULL, version, version_size, NULL,
+                         NULL))
     return 1;
   if (strcmp(kind, "plain-text") == 0) {
     size_t length = strcspn(content, "\r\n");
@@ -4114,12 +4165,12 @@ int csemver_version_update_text(const char *filename, const char *type,
     ++count;
   } else if (strcmp(kind, "yaml") == 0) {
     if (!yaml_version_range(content, false, &ranges[count], old_version,
-                            old_version_size))
+                            old_version_size, NULL, NULL))
       goto bad_format;
     ++count;
   } else if (strcmp(kind, "openapi") == 0) {
     if (!yaml_version_range(content, true, &ranges[count], old_version,
-                            old_version_size))
+                            old_version_size, NULL, NULL))
       goto bad_format;
     ++count;
   } else if (strcmp(kind, "plain-text") == 0) {
@@ -4150,6 +4201,9 @@ int csemver_version_update_text(const char *filename, const char *type,
     size_t rewritten_size;
     char *normalized;
     size_t normalized_size;
+    if (!yaml_normalize_version_line_spacing(&buffer,
+                                             strcmp(kind, "openapi") == 0))
+      goto allocation_error;
     if (!yaml_rewrite_block_sequence_comments(buffer.data, &rewritten,
                                               &rewritten_size))
       goto allocation_error;

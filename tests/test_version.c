@@ -640,6 +640,30 @@ static void test_yaml_removes_trailing_spaces_after_plain_version(void) {
   free(updated);
 }
 
+static void test_yaml_normalizes_trailing_spaces_around_version(void) {
+  const struct {
+    const char *input;
+    const char *expected;
+  } cases[] = {
+      {"version: \"1.2.3\"   \n", "version: \"1.3.0\"\n"},
+      {"version: 1.2.3   # note\n", "version: 1.3.0 # note\n"},
+  };
+  char version[128];
+  char error[256];
+  size_t index;
+
+  for (index = 0; index < sizeof cases / sizeof cases[0]; ++index) {
+    char *updated = NULL;
+    size_t updated_size = 0;
+    assert(csemver_version_update_text(
+        "config.yaml", "yaml", cases[index].input, "1.3.0", &updated,
+        &updated_size, version, sizeof version, error, sizeof error));
+    assert(updated_size == strlen(cases[index].expected));
+    assert(memcmp(updated, cases[index].expected, updated_size) == 0);
+    free(updated);
+  }
+}
+
 static void test_yaml_updater_only_updates_root_version(void) {
   const char *input = "nested:\n  version: 0.9.1\nversion: 1.2.3\n";
   const char *expected = "nested:\n  version: 0.9.1\nversion: 1.3.0\n";
@@ -1402,6 +1426,7 @@ int main(void) {
   test_yaml_strips_leading_blank_lines_like_upstream();
   test_yaml_separates_trailing_root_comments();
   test_yaml_removes_trailing_spaces_after_plain_version();
+  test_yaml_normalizes_trailing_spaces_around_version();
   test_openapi_uses_info_version_not_nested_schema_version();
   test_openapi_flow_maps_match_upstream_spacing();
   test_openapi_multiline_flow_comment_matches_upstream();
