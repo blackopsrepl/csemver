@@ -308,6 +308,27 @@ grep -q '"version": "1.0.1"' package.json
 test "$(git cat-file -t refs/tags/v1.0.1)" = tag
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/commit-all"
+cd "$tmp/commit-all"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "commit-all",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize commit-all fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+printf 'feature\n' > feature.txt
+git add feature.txt
+git commit -qm 'fix: trigger commit-all release'
+printf 'user-staged work\n' > STUFF.md
+git add STUFF.md
+"$bin" --commit-all > /dev/null
+test -z "$(git status --porcelain)"
+git show --pretty= --name-only HEAD | grep -Fxq STUFF.md
+grep -q '"version": "1.0.1"' package.json
+test "$(git cat-file -t refs/tags/v1.0.1)" = tag
+
 mkdir "$tmp/lifecycle"
 cd "$tmp/lifecycle"
 git init -q -b master
