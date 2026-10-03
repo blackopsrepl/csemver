@@ -2186,6 +2186,16 @@ static const char *find_config_path(int argc, char **argv, char *storage,
   return NULL;
 }
 
+static int uses_plain_text_updater(const CsemverFile *file) {
+  if (file->type[0] != '\0')
+    return strcmp(file->type, "plain-text") == 0;
+  return strstr(file->filename, ".json") == NULL &&
+         strstr(file->filename, "pyproject.toml") == NULL &&
+         strstr(file->filename, ".toml") == NULL &&
+         strstr(file->filename, ".yaml") == NULL &&
+         strstr(file->filename, ".yml") == NULL;
+}
+
 int csemver_main(int argc, char **argv) {
   CsemverConfig config;
   const char *config_path;
@@ -2303,9 +2313,12 @@ int csemver_main(int argc, char **argv) {
           continue;
         if (csemver_version_read_text(config.bump_files[i].filename,
                                       config.bump_files[i].type, contents, old,
-                                      sizeof old, NULL, error, sizeof error))
+                                      sizeof old, NULL, error, sizeof error)) {
+          const char *display_old =
+              uses_plain_text_updater(&config.bump_files[i]) ? contents : old;
           printf("✔ bumping version in %s from %s to %s\n",
-                 config.bump_files[i].filename, old, next);
+                 config.bump_files[i].filename, display_old, next);
+        }
         free(contents);
       }
     }

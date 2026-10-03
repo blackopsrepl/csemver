@@ -42,7 +42,8 @@ printf '%s\n' "$dry_run_output" | grep -Fq "($expected_release_date)" || {
     "$expected_release_date" "$dry_run_output" >&2
   exit 1
 }
-printf '%s\n' "$dry_run_output" | grep -q 'bumping version in VERSION from 1.0.0 to 1.1.0'
+printf '%s\n' "$dry_run_output" | grep -Fq 'bumping version in VERSION from 1.0.0'
+printf '%s\n' "$dry_run_output" | grep -Fxq ' to 1.1.0'
 printf '%s\n' "$dry_run_output" | grep -q '^## \[1.1.0\]'
 ! printf '%s\n' "$dry_run_output" | grep -q '^# Changelog'
 test ! -e "$marker"
@@ -302,8 +303,13 @@ printf 'patch\n' > fix.txt
 git add fix.txt
 git commit -qm 'fix: correct package behavior'
 lerna_dry_run=$("$bin" --dry-run --lerna-package '@scope/pkg')
-printf '%s\n' "$lerna_dry_run" | grep -q 'bumping version in VERSION from 1.0.0 to 1.0.1' || {
+printf '%s\n' "$lerna_dry_run" | grep -Fq 'bumping version in VERSION from 1.0.0' || {
   printf 'lerna package tag was not used as the bump boundary:\n%s\n' \
+    "$lerna_dry_run" >&2
+  exit 1
+}
+printf '%s\n' "$lerna_dry_run" | grep -Fxq ' to 1.0.1' || {
+  printf 'lerna package bump report omitted the new version:\n%s\n' \
     "$lerna_dry_run" >&2
   exit 1
 }
@@ -320,8 +326,14 @@ printf 'follow-up fix\n' > follow-up.txt
 git add follow-up.txt
 git commit -qm 'fix: correct package after prerelease'
 lerna_prerelease_dry_run=$("$bin" --dry-run --lerna-package '@scope/pkg')
-printf '%s\n' "$lerna_prerelease_dry_run" | grep -q 'bumping version in VERSION from 1.0.0 to 1.1.0' || {
-  printf 'unstable package tag replaced the last stable bump boundary:\n%s\n' \
+printf '%s\n' "$lerna_prerelease_dry_run" | \
+  grep -Fq 'bumping version in VERSION from 1.0.0' || {
+    printf 'unstable package tag replaced the last stable bump boundary:\n%s\n' \
+      "$lerna_prerelease_dry_run" >&2
+    exit 1
+  }
+printf '%s\n' "$lerna_prerelease_dry_run" | grep -Fxq ' to 1.1.0' || {
+  printf 'unstable package bump report omitted the new version:\n%s\n' \
     "$lerna_prerelease_dry_run" >&2
   exit 1
 }
@@ -581,6 +593,34 @@ printf '%s\n' "$repeated_bump_preview" | \
       "$repeated_bump_preview" >&2
     exit 1
   }
+mkdir "$tmp/plain-text-bump-file"
+cd "$tmp/plain-text-bump-file"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "plain-text-bump-file",
+  "version": "1.0.0"
+}
+JSON
+printf '2.0.0\n' > version.txt
+git add package.json version.txt
+git commit -qm 'chore: initialize plain-text bump file fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git commit --allow-empty -qm 'fix: exercise plain-text bump file'
+plain_text_bump_preview=$("$bin" --dry-run --bumpFiles version.txt)
+printf '%s\n' "$plain_text_bump_preview" | \
+  grep -Fq 'bumping version in version.txt from 2.0.0' || {
+    printf '%s\n' 'plain-text bumpFiles should print the original file contents' >&2
+    exit 1
+  }
+printf '%s\n' "$plain_text_bump_preview" | grep -Fxq ' to 1.0.1' || {
+  printf '%s\n' 'plain-text bumpFiles should preserve its embedded newline in output' >&2
+  exit 1
+}
+
+cd "$tmp/repeated-bump-files"
 repeated_prefix_preview=$("$bin" --dry-run --issuePrefixes GH- --issuePrefixes '#' \
   --issueUrlFormat='https://issues.example/{{id}}')
 for issue_url in 'https://issues.example/42' 'https://issues.example/8'; do

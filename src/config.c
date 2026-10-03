@@ -41,6 +41,7 @@ static int add_file(CsemverFile *files, size_t *count, const char *filename,
     return 0;
   }
   file = &files[*count];
+  memset(file, 0, sizeof *file);
   if (!copy_text(file->filename, sizeof file->filename, filename, error,
                  error_size))
     return 0;
