@@ -2200,13 +2200,13 @@ static int generate_version(const CsemverConfig *config, const char *current,
 
 static int update_files(const CsemverConfig *config, const char *version,
                         char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX],
-                        size_t *path_count) {
+                        size_t *path_count, bool dry_run) {
   size_t i;
   *path_count = 0;
   if (config->skip_bump)
     return 1;
   if (config->first_release)
-    return run_lifecycle(config, "postbump");
+    return dry_run ? 1 : run_lifecycle(config, "postbump");
   for (i = 0; i < config->bump_file_count; ++i) {
     char *content = NULL;
     char *updated = NULL;
@@ -2223,12 +2223,14 @@ static int update_files(const CsemverConfig *config, const char *version,
             config->bump_files[i].filename, config->bump_files[i].type, content,
             version, &updated, &updated_size, old_version, sizeof old_version,
             error, sizeof error)) {
-      errorf("%s: %s", config->bump_files[i].filename, error);
+      fflush(stdout);
+      fprintf(stderr, "%s\n", error);
       free(content);
-      return 0;
+      free(updated);
+      continue;
     }
-    if (!csemver_write_file(config->bump_files[i].filename, updated,
-                            updated_size)) {
+    if (!dry_run && !csemver_write_file(config->bump_files[i].filename, updated,
+                                        updated_size)) {
       errorf("cannot write %s", config->bump_files[i].filename);
       free(content);
       free(updated);
@@ -2240,7 +2242,7 @@ static int update_files(const CsemverConfig *config, const char *version,
       snprintf(paths[(*path_count)++], CSEMVER_PATH_MAX, "%s",
                config->bump_files[i].filename);
   }
-  return run_lifecycle(config, "postbump");
+  return dry_run ? 1 : run_lifecycle(config, "postbump");
 }
 
 static int write_changelog(const CsemverConfig *config, const char *version,
@@ -2627,7 +2629,8 @@ int csemver_main(int argc, char **argv) {
       }
     }
   }
-  if (!config.dry_run && !update_files(&config, next, paths, &path_count)) {
+  if (!config.dry_run &&
+      !update_files(&config, next, paths, &path_count, false)) {
     free(commits);
     return 1;
   }
@@ -2639,11 +2642,10 @@ int csemver_main(int argc, char **argv) {
                           : "cannot reread Git history after release hooks");
     return 1;
   }
-  if (config.dry_run && !config.skip_bump && !config.first_release) {
-    for (size_t i = 0; i < config.bump_file_count; ++i)
-      if (access(config.bump_files[i].filename, F_OK) == 0)
-        snprintf(paths[path_count++], CSEMVER_PATH_MAX, "%s",
-                 config.bump_files[i].filename);
+  if (config.dry_run && !config.skip_bump && !config.first_release &&
+      !update_files(&config, next, paths, &path_count, true)) {
+    free(commits);
+    return 1;
   }
   if (config.dry_run && !config.skip_bump &&
       !run_lifecycle(&config, "postbump")) {

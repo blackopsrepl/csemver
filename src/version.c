@@ -19,9 +19,11 @@ typedef struct {
 } Scanner;
 
 typedef struct {
-  Range root_version, private_value, lock_version, lock_package_version;
+  Range root_version, root_object, private_value, lock_version,
+      lock_package_version;
   Range lock_package_object;
-  bool has_private, is_private, has_lock_version, has_lock_package;
+  bool has_private, is_private, has_root_version, has_lock_version,
+      has_lock_package;
   bool has_lock_package_version;
 } JsonFields;
 
@@ -256,6 +258,20 @@ static int object_field(Scanner *s, const char *wanted, Range *range,
   return found;
 }
 
+static int json_object_range(const char *content, Range *range) {
+  Scanner scanner = {content, 0, strlen(content)};
+  spaces(&scanner);
+  if (scanner.position >= scanner.length ||
+      scanner.text[scanner.position] != '{')
+    return 0;
+  range->start = scanner.position;
+  if (!skip_object(&scanner))
+    return 0;
+  range->end = scanner.position;
+  spaces(&scanner);
+  return scanner.position == scanner.length;
+}
+
 static int json_fields(const char *content, const char *filename,
                        JsonFields *fields) {
   Scanner root = {content, 0, strlen(content)};
@@ -263,8 +279,14 @@ static int json_fields(const char *content, const char *filename,
   Range raw;
   memset(fields, 0, sizeof(*fields));
   spaces(&root);
-  if (!object_field(&root, "version", &fields->root_version, NULL, 0))
-    return 0;
+  fields->has_root_version =
+      object_field(&root, "version", &fields->root_version, NULL, 0);
+  if (!fields->has_root_version) {
+    if ((strstr(filename, "package-lock.json") == NULL &&
+         strstr(filename, "npm-shrinkwrap.json") == NULL) ||
+        !json_object_range(content, &fields->root_object))
+      return 0;
+  }
   root.position = 0;
   spaces(&root);
   if (object_field(&root, "private", &fields->private_value, NULL, 0)) {
@@ -315,8 +337,8 @@ typedef struct {
 typedef struct {
   Scanner scanner;
   const Range *versions;
-  const Range *insert_version_object;
-  size_t version_count;
+  const Range *insert_version_objects;
+  size_t version_count, insert_version_object_count;
   const char *replacement;
   char indent_char;
   size_t indent_size;
@@ -663,8 +685,13 @@ static int json_print_object(JsonPrinter *printer, size_t depth) {
   JsonProperty *properties = NULL;
   size_t count = 0, capacity = 0, close_position, i;
   size_t object_start = scanner->position;
-  bool insert_version = printer->insert_version_object != NULL &&
-                        printer->insert_version_object->start == object_start;
+  bool insert_version = false;
+
+  for (i = 0; i < printer->insert_version_object_count; ++i)
+    if (printer->insert_version_objects[i].start == object_start) {
+      insert_version = true;
+      break;
+    }
 
   if (scanner->text[scanner->position++] != '{')
     return 0;
@@ -974,7 +1001,8 @@ static int json_print_value(JsonPrinter *printer, size_t depth) {
 
 static int json_update_formatted(const char *content, const Range *versions,
                                  size_t version_count, const char *new_version,
-                                 const Range *insert_version_object,
+                                 const Range *insert_version_objects,
+                                 size_t insert_version_object_count,
                                  char **updated, size_t *updated_size) {
   JsonPrinter printer;
   CsemverBuffer output;
@@ -988,7 +1016,8 @@ static int json_update_formatted(const char *content, const Range *versions,
   printer.scanner.text = content;
   printer.scanner.length = strlen(content);
   printer.versions = versions;
-  printer.insert_version_object = insert_version_object;
+  printer.insert_version_objects = insert_version_objects;
+  printer.insert_version_object_count = insert_version_object_count;
   printer.version_count = version_count;
   printer.replacement = new_version;
   printer.newline = newline;
@@ -1436,8 +1465,27 @@ int csemver_version_read_text(const char *filename, const char *type,
     *is_private = false;
   if (strcmp(kind, "json") == 0) {
     JsonFields fields;
-    if (!json_fields(content, filename, &fields) ||
-        !copy_json_string(content, fields.root_version, version,
+    if (!json_fields(content, filename, &fields)) {
+      const char *cursor = content;
+      while (isspace((unsigned char)*cursor))
+        ++cursor;
+      set_error(error, error_size,
+                *cursor == '\0'
+                    ? "Unexpected end of JSON input"
+                    : "JSON version file has no root version string");
+      return 0;
+    }
+    if (!fields.has_root_version &&
+        (strstr(filename, "package-lock.json") != NULL ||
+         strstr(filename, "npm-shrinkwrap.json") != NULL)) {
+      if (version_size < sizeof "undefined") {
+        set_error(error, error_size, "version output buffer too small");
+        return 0;
+      }
+      memcpy(version, "undefined", sizeof "undefined");
+      return 1;
+    }
+    if (!copy_json_string(content, fields.root_version, version,
                           version_size)) {
       set_error(error, error_size,
                 "JSON version file has no root version string");
@@ -1492,23 +1540,27 @@ int csemver_version_update_text(const char *filename, const char *type,
                  ? "yaml"
                  : "plain-text");
   Range ranges[3];
-  size_t count = 0, i, j, pos = 0, length = strlen(content);
+  Range insertions[2];
+  size_t count = 0, insertion_count = 0, i, j, pos = 0,
+         length = strlen(content);
   CsemverBuffer buffer;
   if (!csemver_version_read_text(filename, type, content, old_version,
                                  old_version_size, NULL, error, error_size))
     return 0;
   if (strcmp(kind, "json") == 0) {
     JsonFields fields;
-    const Range *insert_version_object = NULL;
     if (!json_fields(content, filename, &fields))
       goto bad_format;
-    ranges[count++] = fields.root_version;
+    if (fields.has_root_version)
+      ranges[count++] = fields.root_version;
+    else
+      insertions[insertion_count++] = fields.root_object;
     if (fields.has_lock_package_version)
       ranges[count++] = fields.lock_package_version;
     else if (fields.has_lock_package)
-      insert_version_object = &fields.lock_package_object;
-    if (!json_update_formatted(content, ranges, count, new_version,
-                               insert_version_object, updated, updated_size)) {
+      insertions[insertion_count++] = fields.lock_package_object;
+    if (!json_update_formatted(content, ranges, count, new_version, insertions,
+                               insertion_count, updated, updated_size)) {
       set_error(error, error_size,
                 "malformed JSON or out of memory updating version file");
       return 0;

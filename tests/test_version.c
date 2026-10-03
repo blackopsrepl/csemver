@@ -390,6 +390,32 @@ static void test_package_lock_adds_missing_root_package_version(void) {
   free(updated);
 }
 
+static void test_package_lock_adds_missing_root_version_fields(void) {
+  const char *input = "{\n  \"name\": \"missing-root-lock-version\",\n"
+                      "  \"lockfileVersion\": 3,\n  \"requires\": true,\n"
+                      "  \"packages\": {\n    \"\": {\n"
+                      "      \"name\": \"missing-root-lock-version\"\n"
+                      "    }\n  }\n}\n";
+  const char *expected = "{\n  \"name\": \"missing-root-lock-version\",\n"
+                         "  \"lockfileVersion\": 3,\n  \"requires\": true,\n"
+                         "  \"packages\": {\n    \"\": {\n"
+                         "      \"name\": \"missing-root-lock-version\",\n"
+                         "      \"version\": \"1.1.0\"\n    }\n  },\n"
+                         "  \"version\": \"1.1.0\"\n}\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("package-lock.json", "json", input,
+                                     "1.1.0", &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(strcmp(version, "undefined") == 0);
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
 static void test_plain_text_preserves_upstream_write_semantics(void) {
   char version[128];
   char error[256];
@@ -448,6 +474,7 @@ int main(void) {
   test_json_version_with_embedded_nul_is_rejected();
   test_package_lock_updates_only_root_package();
   test_package_lock_adds_missing_root_package_version();
+  test_package_lock_adds_missing_root_version_fields();
   test_plain_text_preserves_upstream_write_semantics();
   test_toml_and_yaml_surface();
   puts("version file tests passed");

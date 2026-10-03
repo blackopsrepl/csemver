@@ -1242,6 +1242,73 @@ if printf '%s\n' "$skip_bump_preview" | grep -Fq 'exercise disabled tag fallback
   exit 1
 fi
 
+mkdir "$tmp/malformed-package-lock"
+cd "$tmp/malformed-package-lock"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+printf '{\n  "name": "malformed-lock-fixture",\n  "version": "1.0.0"\n}\n' > package.json
+: > package-lock.json
+git add package.json package-lock.json
+git commit -qm 'chore: initialize malformed lock fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: exercise malformed lock handling'
+malformed_lock_preview=$("$bin" --dry-run 2>&1)
+printf '%s\n' "$malformed_lock_preview" | grep -Fq 'Unexpected end of JSON input' || {
+  printf '%s\n' 'dry-run must report and skip an invalid package-lock.json' >&2
+  exit 1
+}
+if printf '%s\n' "$malformed_lock_preview" | grep -Fq 'committing package-lock.json'; then
+  printf '%s\n' 'dry-run must not include an invalid package-lock.json in the commit path' >&2
+  exit 1
+fi
+malformed_lock_output=$("$bin" --skip.commit --skip.tag 2>&1) || {
+  printf '%s\n' 'a malformed package-lock.json must not abort the release' >&2
+  printf '%s\n' "$malformed_lock_output" >&2
+  exit 1
+}
+printf '%s\n' "$malformed_lock_output" | grep -Fq 'Unexpected end of JSON input' || {
+  printf '%s\n' 'release must report and skip an invalid package-lock.json' >&2
+  exit 1
+}
+grep -Fq '"version": "1.1.0"' package.json
+test ! -s package-lock.json
+
+mkdir "$tmp/missing-package-lock-version"
+cd "$tmp/missing-package-lock-version"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+printf '{\n  "name": "missing-lock-version-fixture",\n  "version": "1.0.0"\n}\n' > package.json
+cat > package-lock.json <<'JSON'
+{
+  "name": "missing-lock-version-fixture",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "missing-lock-version-fixture"
+    }
+  }
+}
+JSON
+git add package.json package-lock.json
+git commit -qm 'chore: initialize missing lock version fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: exercise missing lock version handling'
+missing_lock_preview=$("$bin" --dry-run)
+printf '%s\n' "$missing_lock_preview" |
+  grep -Fq '✔ bumping version in package-lock.json from undefined to 1.1.0'
+if grep -Fq '"version": "1.1.0"' package-lock.json; then
+  printf '%s\n' 'dry-run must not mutate a lockfile missing its version' >&2
+  exit 1
+fi
+test -z "$(git status --porcelain)"
+missing_lock_output=$("$bin" --skip.commit --skip.tag)
+printf '%s\n' "$missing_lock_output" |
+  grep -Fq '✔ bumping version in package-lock.json from undefined to 1.1.0'
+test "$(grep -c '"version": "1.1.0"' package-lock.json)" -eq 2
+
 mkdir "$tmp/private-package-hint"
 cd "$tmp/private-package-hint"
 git init -q -b master
