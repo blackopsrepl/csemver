@@ -2390,6 +2390,23 @@ static int parse_release_as_version(const char *text, Semver *version) {
   return semver_parse(normalized, version);
 }
 
+static int release_as_is_valid(const char *release_as) {
+  Semver exact_version;
+  char release_type[SEMVER_TEXT_MAX];
+  size_t length = strlen(release_as);
+  size_t index;
+  if (length == 0 || parse_release_as_version(release_as, &exact_version))
+    return 1;
+  if (length >= sizeof release_type)
+    return 0;
+  for (index = 0; index < length; ++index)
+    release_type[index] = (char)tolower((unsigned char)release_as[index]);
+  release_type[length] = '\0';
+  return strcmp(release_type, "major") == 0 ||
+         strcmp(release_type, "minor") == 0 ||
+         strcmp(release_type, "patch") == 0;
+}
+
 static int validate_release_as_prerelease(const CsemverConfig *config) {
   Semver release_version;
   if (!config->has_prerelease || config->release_as[0] == '\0' ||
@@ -2839,8 +2856,17 @@ int csemver_main(int argc, char **argv) {
   parsed_args = parse_args(argc, argv, &config, &config_path);
   if (parsed_args != 0)
     return parsed_args == 1 ? 0 : parsed_args;
-  if (!validate_release_as_prerelease(&config))
-    return 1;
+  if (!config.skip_bump) {
+    if (!release_as_is_valid(config.release_as)) {
+      if (!config.silent)
+        fputs("releaseAs must be one of 'major', 'minor' or 'patch', or a "
+              "valid semvar version.\n",
+              stderr);
+      return 1;
+    }
+    if (!config.first_release && !validate_release_as_prerelease(&config))
+      return 1;
+  }
   if (!preset_is_supported(&config)) {
     errorf("unsupported changelog preset '%s'", config.preset);
     return 2;

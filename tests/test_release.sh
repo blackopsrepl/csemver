@@ -315,6 +315,42 @@ grep -q '"version": "2.0.0"' package.json
 test "$(git tag --list v2.0.0)" = v2.0.0
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/release-as-invalid"
+cd "$tmp/release-as-invalid"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "release-as-invalid",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize invalid release-as fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git commit --allow-empty -qm 'fix: exercise invalid release-as'
+invalid_release_head=$(git rev-parse HEAD)
+if invalid_release_output=$("$bin" --release-as invalid 2>&1); then
+  printf '%s\n' 'csemver accepted an invalid release-as value' >&2
+  exit 1
+else
+  invalid_release_status=$?
+fi
+test "$invalid_release_status" -eq 1
+test "$invalid_release_output" = "releaseAs must be one of 'major', 'minor' or 'patch', or a valid semvar version."
+test "$(git rev-parse HEAD)" = "$invalid_release_head"
+grep -q '"version": "1.0.0"' package.json
+test "$(git tag --list)" = v1.0.0
+test ! -e CHANGELOG.md
+if silent_invalid_release_output=$("$bin" --silent --release-as invalid 2>&1); then
+  printf '%s\n' 'csemver accepted an invalid release-as value in silent mode' >&2
+  exit 1
+else
+  silent_invalid_release_status=$?
+fi
+test "$silent_invalid_release_status" -eq 1
+test -z "$silent_invalid_release_output"
+"$bin" --release-as invalid --skip.bump --skip.changelog --skip.commit --skip.tag --silent
+test "$(git rev-parse HEAD)" = "$invalid_release_head"
+test -z "$(git status --porcelain)"
+
 mkdir "$tmp/release-as-prerelease"
 cd "$tmp/release-as-prerelease"
 git init -q -b master
