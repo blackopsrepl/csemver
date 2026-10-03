@@ -2161,6 +2161,105 @@ fail:
   return 0;
 }
 
+static int parse_prerelease_number(const char *text, unsigned long *number) {
+  const unsigned char *cursor = (const unsigned char *)text;
+  char *end;
+  unsigned long parsed;
+  if (text == NULL || text[0] == '\0')
+    return 0;
+  for (; *cursor != '\0'; ++cursor)
+    if (!isdigit(*cursor))
+      return 0;
+  errno = 0;
+  parsed = strtoul(text, &end, 10);
+  if (errno == ERANGE || end == text || *end != '\0')
+    return 0;
+  *number = parsed;
+  return 1;
+}
+
+static void split_prerelease_tokens(const Semver *version, char *first,
+                                    size_t first_size, char *second,
+                                    size_t second_size) {
+  char *dot;
+  snprintf(first, first_size, "%s", version->prerelease);
+  dot = strchr(first, '.');
+  if (dot == NULL) {
+    second[0] = '\0';
+    return;
+  }
+  *dot++ = '\0';
+  snprintf(second, second_size, "%s", dot);
+  dot = strchr(second, '.');
+  if (dot != NULL)
+    *dot = '\0';
+}
+
+static unsigned long proposed_prerelease_number(const Semver *version,
+                                                const char *identifier) {
+  char first[SEMVER_IDENTIFIER_MAX], second[SEMVER_IDENTIFIER_MAX];
+  unsigned long number;
+  split_prerelease_tokens(version, first, sizeof first, second, sizeof second);
+  if (identifier[0] == '\0')
+    return parse_prerelease_number(first, &number) ? number : 0;
+  return parse_prerelease_number(second, &number) ? number : 0;
+}
+
+static int tag_prerelease_number(const Semver *version, const char *identifier,
+                                 unsigned long *number) {
+  char first[SEMVER_IDENTIFIER_MAX], second[SEMVER_IDENTIFIER_MAX];
+  split_prerelease_tokens(version, first, sizeof first, second, sizeof second);
+  if (identifier[0] == '\0')
+    return parse_prerelease_number(first, number);
+  if (strcmp(first, identifier) != 0)
+    return 0;
+  if (!parse_prerelease_number(second, number))
+    *number = 0;
+  return 1;
+}
+
+static int resolve_unique_prerelease(const CsemverConfig *config,
+                                     char tags[][SEMVER_TEXT_MAX],
+                                     size_t tag_count, char *version_text,
+                                     size_t version_size) {
+  Semver proposed;
+  unsigned long current_number, max_number = 0;
+  size_t prefix_length = strlen(config->tag_prefix);
+  bool found = false;
+  if (!config->has_prerelease || !semver_parse(version_text, &proposed) ||
+      !proposed.has_prerelease)
+    return 1;
+  current_number = proposed_prerelease_number(&proposed, config->prerelease_id);
+  for (size_t i = 0; i < tag_count; ++i) {
+    Semver tagged;
+    unsigned long tagged_number;
+    if (strncmp(tags[i], config->tag_prefix, prefix_length) != 0 ||
+        !semver_parse(tags[i] + prefix_length, &tagged) ||
+        tagged.major != proposed.major || tagged.minor != proposed.minor ||
+        tagged.patch != proposed.patch || !tagged.has_prerelease ||
+        !tag_prerelease_number(&tagged, config->prerelease_id, &tagged_number))
+      continue;
+    if (!found || tagged_number > max_number)
+      max_number = tagged_number;
+    found = true;
+  }
+  if (!found || current_number > max_number)
+    return 1;
+  if (max_number == ULONG_MAX)
+    return 0;
+  if (config->prerelease_id[0] == '\0') {
+    if (snprintf(proposed.prerelease, sizeof proposed.prerelease, "%lu",
+                 max_number + 1) >= (int)sizeof proposed.prerelease)
+      return 0;
+  } else if (snprintf(proposed.prerelease, sizeof proposed.prerelease, "%s.%lu",
+                      config->prerelease_id,
+                      max_number + 1) >= (int)sizeof proposed.prerelease) {
+    return 0;
+  }
+  proposed.has_prerelease = 1;
+  return semver_format(&proposed, version_text, version_size);
+}
+
 static int generate_version(const CsemverConfig *config, const char *current,
                             int bump, char *next, size_t next_size) {
   Semver parsed;
@@ -2599,6 +2698,12 @@ int csemver_main(int argc, char **argv) {
       free(commits);
       errorf(
           "no releasable conventional commits found, or invalid release type");
+      return 1;
+    }
+    if (!resolve_unique_prerelease(&config, tags, tag_count, next,
+                                   sizeof next)) {
+      free(commits);
+      errorf("cannot resolve unique prerelease version");
       return 1;
     }
   }

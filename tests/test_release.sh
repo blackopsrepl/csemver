@@ -237,6 +237,22 @@ feature_count=$(grep -Fc '* add prerelease feature' CHANGELOG.md)
 }
 
 test -z "$(git status --porcelain)"
+mkdir "$tmp/prerelease-channel-collision"
+cd "$tmp/prerelease-channel-collision"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "prerelease-channel-collision",\n  "version": "1.4.3-abc.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize prerelease channel collision fixture'
+git tag -a v1.4.3-xyz.0 -m 'chore(release): 1.4.3-xyz.0'
+git tag -a v1.4.3-xyz.2 -m 'chore(release): 1.4.3-xyz.2'
+git commit --allow-empty -qm 'fix: change prerelease channel'
+"$bin" --prerelease xyz > /dev/null
+grep -q '"version": "1.4.3-xyz.3"' package.json
+test "$(git tag --list v1.4.3-xyz.3)" = v1.4.3-xyz.3
+test -z "$(git status --porcelain)"
 mkdir "$tmp/no-empty-bump"
 cd "$tmp/no-empty-bump"
 git init -q -b master
