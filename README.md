@@ -107,7 +107,7 @@ Lifecycle commands run through `/bin/sh -c`; only use scripts from a trusted con
     --silent               Suppress normal progress output
 ```
 
-`--release-as` accepts `major`, `minor`, `patch`, or an exact SemVer version without the tag prefix. `--skip STEP` can be repeated. CLI flags override the TOML values. `--dry-run` does not execute configured lifecycle scripts. With `--lerna-package NAME`, bump recommendation starts after the package's latest stable `NAME@VERSION` tag; changelog ranges and the created release tag continue to use `tagPrefix`. A positive `--release-count` regenerates that many recent release sections and retains older changelog content; `--release-count 0` rebuilds all tagged history.
+`--release-as` accepts `major`, `minor`, `patch`, or an exact SemVer version without the tag prefix. `--skip STEP` can be repeated. CLI flags override the TOML values. `--dry-run` logs configured lifecycle hooks without executing them. With `--lerna-package NAME`, bump recommendation starts after the package's latest stable `NAME@VERSION` tag; changelog ranges and the created release tag continue to use `tagPrefix`. A positive `--release-count` regenerates that many recent release sections and retains older changelog content; `--release-count 0` rebuilds all tagged history.
 
 ## Release builds
 

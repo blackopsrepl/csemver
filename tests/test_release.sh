@@ -1093,4 +1093,63 @@ package_script_output=$("$bin" --silent --skip.commit --skip.tag)
 test -f "$package_script_marker"
 test -z "$package_script_output"
 
+mkdir "$tmp/dry-run-lifecycle-scripts"
+cd "$tmp/dry-run-lifecycle-scripts"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<JSON
+{
+  "name": "dry-run-lifecycle-scripts-fixture",
+  "version": "1.0.0",
+  "commit-and-tag-version": {
+    "scripts": {
+      "prerelease": "touch $tmp/dryrun-prerelease",
+      "prebump": "touch $tmp/dryrun-prebump",
+      "postbump": "touch $tmp/dryrun-postbump",
+      "prechangelog": "touch $tmp/dryrun-prechangelog",
+      "postchangelog": "touch $tmp/dryrun-postchangelog",
+      "precommit": "touch $tmp/dryrun-precommit",
+      "postcommit": "touch $tmp/dryrun-postcommit",
+      "pretag": "touch $tmp/dryrun-pretag",
+      "posttag": "touch $tmp/dryrun-posttag"
+    }
+  }
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed dry-run lifecycle fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'feat: exercise dry-run lifecycle scripts'
+dry_run_script_output=$("$bin" --dry-run)
+expected_dry_run_hooks=$(printf '✔ Running lifecycle script "%s"\n' \
+  prerelease prebump postbump prechangelog postchangelog precommit postcommit \
+  pretag posttag)
+actual_dry_run_hooks=$(printf '%s\n' "$dry_run_script_output" |
+  command grep -F '✔ Running lifecycle script')
+test "$actual_dry_run_hooks" = "$expected_dry_run_hooks"
+expected_dry_run_stages=$(printf '%s\n' \
+  '✔ Running lifecycle script "prerelease"' \
+  '✔ Running lifecycle script "prebump"' \
+  '✔ Running lifecycle script "postbump"' \
+  '✔ Running lifecycle script "prechangelog"' \
+  '✔ Running lifecycle script "postchangelog"' \
+  '✔ Running lifecycle script "precommit"' \
+  '✔ committing package.json and CHANGELOG.md' \
+  '✔ Running lifecycle script "postcommit"' \
+  '✔ Running lifecycle script "pretag"' \
+  '✔ tagging release v1.1.0' \
+  'ℹ Run `git push --follow-tags origin master && npm publish` to publish' \
+  '✔ Running lifecycle script "posttag"')
+actual_dry_run_stages=$(printf '%s\n' "$dry_run_script_output" |
+  command grep -E 'Running lifecycle script|✔ committing|✔ tagging release|Run `git push')
+test "$actual_dry_run_stages" = "$expected_dry_run_stages"
+for hook in prerelease prebump postbump prechangelog postchangelog precommit \
+  postcommit pretag posttag; do
+  printf '%s\n' "$dry_run_script_output" |
+    grep -Fq "✔ Running lifecycle script \"$hook\""
+  test ! -e "$tmp/dryrun-$hook"
+done
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'

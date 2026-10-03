@@ -2080,6 +2080,8 @@ static int run_lifecycle_capture(const CsemverConfig *config, const char *name,
       printf("✔ Running lifecycle script \"%s\"\n", name);
       printf("ℹ - execute command: \"%s\"\n", config->scripts[i].command);
     }
+    if (config->dry_run)
+      continue;
     if (!run_command(argv, capture, &status) || status != 0) {
       errorf("lifecycle script '%s' failed with status %d", name, status);
       return 0;
@@ -2098,7 +2100,7 @@ static int prepare_bump(CsemverConfig *config) {
   char version[SEMVER_TEXT_MAX];
   size_t used = 0;
   Semver parsed;
-  if (config->skip_bump || config->dry_run)
+  if (config->skip_bump)
     return 1;
   if (!run_lifecycle(config, "prerelease") ||
       !run_lifecycle_capture(config, "prebump", &output)) {
@@ -2251,7 +2253,7 @@ static int write_changelog(const CsemverConfig *config, const char *version,
   int ok;
   if (config->skip_changelog)
     return 1;
-  if (!config->dry_run && !run_lifecycle(config, "prechangelog"))
+  if (!run_lifecycle(config, "prechangelog"))
     return 0;
   if (!config->silent && access(config->infile, F_OK) != 0)
     printf("✔ created %s\n", config->infile);
@@ -2278,7 +2280,7 @@ static int write_changelog(const CsemverConfig *config, const char *version,
   if (ok && *path_count < CSEMVER_MAX_FILES + 1)
     snprintf(paths[(*path_count)++], CSEMVER_PATH_MAX, "%s", config->infile);
   csemver_buffer_free(&content);
-  if (ok && !config->dry_run)
+  if (ok)
     ok = run_lifecycle(config, "postchangelog");
   return ok;
 }
@@ -2379,6 +2381,33 @@ static int tag_release(const CsemverConfig *config, const char *tag,
     return 0;
   }
   return run_lifecycle(config, "posttag");
+}
+
+static void
+print_commit_summary(const CsemverConfig *config,
+                     char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX],
+                     size_t path_count) {
+  if (config->silent || config->skip_commit)
+    return;
+  fputs("✔ committing ", stdout);
+  if (config->commit_all)
+    fputs("all staged files", stdout);
+  else {
+    bool has_changelog = !config->skip_changelog && path_count > 0 &&
+                         strcmp(paths[path_count - 1], config->infile) == 0;
+    size_t version_path_count = path_count - (has_changelog ? 1 : 0);
+    for (size_t i = version_path_count; i > 0; --i) {
+      if (i != version_path_count)
+        fputs(" and ", stdout);
+      fputs(paths[i - 1], stdout);
+    }
+    if (has_changelog) {
+      if (version_path_count != 0)
+        fputs(" and ", stdout);
+      fputs(paths[path_count - 1], stdout);
+    }
+  }
+  fputc('\n', stdout);
 }
 
 static int
@@ -2593,6 +2622,11 @@ int csemver_main(int argc, char **argv) {
         snprintf(paths[path_count++], CSEMVER_PATH_MAX, "%s",
                  config.bump_files[i].filename);
   }
+  if (config.dry_run && !config.skip_bump &&
+      !run_lifecycle(&config, "postbump")) {
+    free(commits);
+    return 1;
+  }
   if (!config.skip_changelog &&
       !write_changelog(&config, next, latest_tag[0] == '\0' ? NULL : latest_tag,
                        new_tag, commits, commit_count, tags, tag_count, paths,
@@ -2607,33 +2641,38 @@ int csemver_main(int argc, char **argv) {
       free(commits);
       return 1;
     }
-  }
-  if (!config.silent) {
+  } else {
     if (!config.skip_commit) {
-      fputs("✔ committing ", stdout);
-      if (config.commit_all)
-        fputs("all staged files", stdout);
-      else {
-        bool has_changelog = !config.skip_changelog && path_count > 0 &&
-                             strcmp(paths[path_count - 1], config.infile) == 0;
-        size_t version_path_count = path_count - (has_changelog ? 1 : 0);
-        for (size_t i = version_path_count; i > 0; --i) {
-          if (i != version_path_count)
-            fputs(" and ", stdout);
-          fputs(paths[i - 1], stdout);
-        }
-        if (has_changelog) {
-          if (version_path_count != 0)
-            fputs(" and ", stdout);
-          fputs(paths[path_count - 1], stdout);
-        }
+      if (!run_lifecycle(&config, "precommit")) {
+        free(commits);
+        return 1;
       }
-      fputc('\n', stdout);
+      print_commit_summary(&config, paths, path_count);
+      if (!run_lifecycle(&config, "postcommit")) {
+        free(commits);
+        return 1;
+      }
     }
-    if (!config.skip_tag)
-      printf("✔ tagging release %s\n", new_tag);
+    if (!config.skip_tag) {
+      if (!run_lifecycle(&config, "pretag")) {
+        free(commits);
+        return 1;
+      }
+      if (!config.silent)
+        printf("✔ tagging release %s\n", new_tag);
+      if (!print_publish_hint(&config, is_private, paths, path_count) ||
+          !run_lifecycle(&config, "posttag")) {
+        free(commits);
+        return 1;
+      }
+    }
   }
-  (void)print_publish_hint(&config, is_private, paths, path_count);
+  if (!config.dry_run) {
+    print_commit_summary(&config, paths, path_count);
+    if (!config.silent && !config.skip_tag)
+      printf("✔ tagging release %s\n", new_tag);
+    (void)print_publish_hint(&config, is_private, paths, path_count);
+  }
   free(commits);
   (void)tag_count;
   (void)is_private;
