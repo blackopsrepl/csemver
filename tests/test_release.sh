@@ -992,7 +992,7 @@ if printf '%s\n' "$types_override_preview" | grep -Fq '### Features'; then
 fi
 git commit --allow-empty -m 'feat!: change the contract' -m 'BREAKING CHANGE: incompatible API.'
 if [ "${CSEMVER_TEST_TRACE:-0}" = 1 ]; then
-  PS4='+${LINENO}: '
+  PS4='+ '
   set -x
 fi
 breaking_preview=$("$bin" --dry-run)
@@ -1467,7 +1467,11 @@ printf '%s\n' \
   'Unable to obtain updater for: {"type":"custom","filename":"custom.dat","label":"retained"}' \
   ' - Error: Unable to locate updater for provided type (custom).' \
   ' - Skipping...' > "$tmp/typed-unsupported.expected.stderr"
-cmp "$tmp/typed-unsupported.expected.stderr" "$tmp/typed-unsupported.stderr"
+if ! cmp "$tmp/typed-unsupported.expected.stderr" "$tmp/typed-unsupported.stderr"; then
+  printf 'actual typed-updater diagnostics:\n' >&2
+  cat "$tmp/typed-unsupported.stderr" >&2
+  exit 1
+fi
 grep -Fq '"version": "1.0.1"' package.json
 test "$(cat metadata.toml)" = 'version = "1.0.0"'
 test "$(cat custom.dat)" = 'version=1.0.0'
