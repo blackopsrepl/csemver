@@ -3607,14 +3607,7 @@ static int commit_release(CsemverConfig *config, const char *version,
   }
   free(hook_message);
   print_commit_summary(config, paths, path_count);
-  if (config->commit_all) {
-    args[index++] = "add";
-    args[index++] = "-A";
-    args[index] = NULL;
-    if (!run_git(args, NULL, &status) || status != 0)
-      return 0;
-    index = 0;
-  } else if (path_count > 0) {
+  if (path_count > 0) {
     args[index++] = "add";
     args[index++] = "--";
     for (size_t i = 0; i < path_count && index + 1 < ARG_MAX_COUNT; ++i)
@@ -3685,22 +3678,23 @@ print_commit_summary(const CsemverConfig *config,
   if (config->silent || config->skip_commit)
     return;
   fputs("✔ committing ", stdout);
-  if (config->commit_all)
+  bool has_changelog = !config->skip_changelog && path_count > 0 &&
+                       strcmp(paths[path_count - 1], config->infile) == 0;
+  size_t version_path_count = path_count - (has_changelog ? 1 : 0);
+  for (size_t i = version_path_count; i > 0; --i) {
+    if (i != version_path_count)
+      fputs(" and ", stdout);
+    fputs(paths[i - 1], stdout);
+  }
+  if (has_changelog) {
+    if (version_path_count != 0)
+      fputs(" and ", stdout);
+    fputs(paths[path_count - 1], stdout);
+  }
+  if (config->commit_all) {
+    if (path_count > 0)
+      fputs(" and ", stdout);
     fputs("all staged files", stdout);
-  else {
-    bool has_changelog = !config->skip_changelog && path_count > 0 &&
-                         strcmp(paths[path_count - 1], config->infile) == 0;
-    size_t version_path_count = path_count - (has_changelog ? 1 : 0);
-    for (size_t i = version_path_count; i > 0; --i) {
-      if (i != version_path_count)
-        fputs(" and ", stdout);
-      fputs(paths[i - 1], stdout);
-    }
-    if (has_changelog) {
-      if (version_path_count != 0)
-        fputs(" and ", stdout);
-      fputs(paths[path_count - 1], stdout);
-    }
   }
   fputc('\n', stdout);
 }

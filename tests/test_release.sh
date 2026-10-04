@@ -3190,4 +3190,37 @@ run_publish_hint_case yarn 'yarn publish' yarn.lock
 run_publish_hint_case pnpm-over-npm 'pnpm publish' package-lock.json pnpm-lock.yaml
 run_publish_hint_case yarn-over-pnpm 'yarn publish' pnpm-lock.yaml yarn.lock
 
+mkdir "$tmp/commit-all-scope"
+cd "$tmp/commit-all-scope"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{"name":"commit-all-scope","version":"1.2.3","repository":{"type":"git","url":"https://github.com/example/commit-all-scope.git"}}\n' > package.json
+printf 'committed\n' > tracked.txt
+git add package.json tracked.txt
+git commit -qm 'chore: initialize commit-all scope fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+git commit --allow-empty -qm 'fix: exercise commit-all scope'
+printf 'staged\n' > staged.txt
+git add staged.txt
+printf 'unstaged modification\n' > tracked.txt
+printf 'untracked\n' > untracked.txt
+"$bin" --commit-all > "$tmp/commit-all-scope.stdout" \
+  2> "$tmp/commit-all-scope.stderr"
+printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ created CHANGELOG.md\n✔ outputting changes to CHANGELOG.md\n✔ committing package.json and CHANGELOG.md and all staged files\n✔ tagging release v1.2.4\nℹ Run `git push --follow-tags origin master && npm publish` to publish\n' \
+  > "$tmp/commit-all-scope.expected.stdout"
+cmp "$tmp/commit-all-scope.expected.stdout" \
+  "$tmp/commit-all-scope.stdout"
+test ! -s "$tmp/commit-all-scope.stderr"
+test "$(git show --pretty=format: --name-only HEAD | LC_ALL=C sort)" = \
+  "$(printf 'CHANGELOG.md\npackage.json\nstaged.txt')"
+test "$(git show HEAD:tracked.txt)" = committed
+printf 'unstaged modification\n' | cmp - tracked.txt
+test "$(git show HEAD:staged.txt)" = staged
+test -f untracked.txt
+! git cat-file -e HEAD:untracked.txt 2>/dev/null
+test "$(git tag --list v1.2.4)" = v1.2.4
+test "$(git status --porcelain)" = "$(printf ' M tracked.txt\n?? untracked.txt')"
+
 printf '%s\n' 'release workflow tests passed'
