@@ -3693,8 +3693,8 @@ static int commit_release(CsemverConfig *config, const char *version,
     free(hook_message);
     return 0;
   }
-  if (hook_message != NULL && trim(hook_message)[0] != '\0') {
-    const char *format = trim(hook_message);
+  if (hook_message != NULL && hook_message[0] != '\0') {
+    const char *format = hook_message;
     if (strlen(format) >= sizeof config->release_commit_message_format) {
       errorf("precommit message is too long");
       free(hook_message);

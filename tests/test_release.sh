@@ -3861,4 +3861,50 @@ test "$(git tag --list)" = "$(printf 'v1.2.3\nv1.2.4')"
 test "$(git rev-parse 'v1.2.4^{}')" = "$(git rev-parse HEAD)"
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/precommit-blank-message"
+cd "$tmp/precommit-blank-message"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+cat > package.json <<'JSON'
+{
+  "name": "precommit-blank-message",
+  "version": "1.2.3",
+  "repository": {"type": "git", "url": "https://github.com/example/precommit-blank-message.git"},
+  "commit-and-tag-version": {"scripts": {"precommit": "./blank-message.sh"}}
+}
+JSON
+cat > blank-message.sh <<'SH'
+#!/bin/sh
+printf '\n'
+SH
+chmod +x blank-message.sh
+git add package.json blank-message.sh
+git commit -qm 'chore: initialize blank precommit fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+printf 'fix\n' > fix.txt
+git add fix.txt
+git commit -qm 'fix: trigger blank precommit output'
+if "$bin" > "$tmp/precommit-blank-message.stdout" \
+  2> "$tmp/precommit-blank-message.stderr"; then
+  printf '%s\n' 'release unexpectedly succeeded with a whitespace-only precommit message' >&2
+  exit 1
+else
+  precommit_blank_status=$?
+fi
+test "$precommit_blank_status" -eq 1
+printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ created CHANGELOG.md\n✔ outputting changes to CHANGELOG.md\n✔ Running lifecycle script "precommit"\nℹ - execute command: "./blank-message.sh"\n✔ committing package.json and CHANGELOG.md\n' \
+  > "$tmp/precommit-blank-message.expected.stdout"
+printf 'Aborting commit due to empty commit message.\n\nCommand failed: git commit CHANGELOG.md package.json -m \n\nAborting commit due to empty commit message.\n\n' \
+  > "$tmp/precommit-blank-message.expected.stderr"
+cmp "$tmp/precommit-blank-message.expected.stdout" \
+  "$tmp/precommit-blank-message.stdout"
+cmp "$tmp/precommit-blank-message.expected.stderr" \
+  "$tmp/precommit-blank-message.stderr"
+test "$(git tag --list)" = v1.2.3
+test "$(git log -1 --format=%s)" = 'fix: trigger blank precommit output'
+test "$(git status --porcelain)" = \
+  "$(printf 'A  CHANGELOG.md\nM  package.json')"
+
 printf '%s\n' 'release workflow tests passed'
