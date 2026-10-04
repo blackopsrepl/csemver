@@ -2829,4 +2829,29 @@ printf '1.0.0 \n' > "$tmp/plain-text-whitespace.expected.version"
 cmp "$tmp/plain-text-whitespace.expected.version" VERSION.txt
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/tag-fallback-prerelease-filter"
+cd "$tmp/tag-fallback-prerelease-filter"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+printf '{"name":"tag-fallback-prerelease-filter","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/tag-fallback-prerelease-filter.git"},"commit-and-tag-version":{"packageFiles":[]}}\n' > package.json
+git add package.json
+git commit -qm 'chore: seed prerelease fallback fixture'
+git tag -a v1.2.3-beta.0 -m 'release 1.2.3-beta.0'
+git commit --allow-empty -qm 'fix: exercise prerelease fallback filtering'
+if "$bin" --dry-run --skip.changelog --skip.commit --skip.tag --prerelease rc \
+  > "$tmp/tag-fallback-prerelease-filter.stdout" \
+  2> "$tmp/tag-fallback-prerelease-filter.stderr"; then
+  tag_fallback_status=0
+else
+  tag_fallback_status=$?
+fi
+test "$tag_fallback_status" -eq 1
+test ! -s "$tmp/tag-fallback-prerelease-filter.stdout"
+printf '%s\n' 'Invalid version. Must be a string. Got type "undefined".' \
+  > "$tmp/tag-fallback-prerelease-filter.expected.stderr"
+cmp "$tmp/tag-fallback-prerelease-filter.expected.stderr" \
+  "$tmp/tag-fallback-prerelease-filter.stderr"
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'

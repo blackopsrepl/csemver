@@ -3734,7 +3734,13 @@ static int csemver_main_impl(int argc, char **argv) {
     }
     if (latest_version[0] != '\0')
       snprintf(current, sizeof current, "%s", latest_version);
-    else
+    else if (tag_count != 0 && config.has_prerelease &&
+             config.prerelease_id[0] != '\0') {
+      if (!config.silent)
+        fputs("Invalid version. Must be a string. Got type \"undefined\".\n",
+              stderr);
+      return 1;
+    } else
       snprintf(current, sizeof current, "1.0.0");
   }
   if (!prepare_bump(&config))
