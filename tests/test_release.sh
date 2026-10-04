@@ -3676,4 +3676,54 @@ test "$(git tag --list)" = v1.2.3
 test "$(git log -1 --format=%s)" = 'fix: trigger postbump script failure'
 test "$(git status --porcelain)" = ' M package.json'
 
+mkdir "$tmp/postchangelog-script-failure"
+cd "$tmp/postchangelog-script-failure"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+cat > package.json <<'JSON'
+{
+  "name": "postchangelog-script-failure",
+  "version": "1.2.3",
+  "repository": {"type": "git", "url": "https://github.com/example/postchangelog-script-failure.git"},
+  "commit-and-tag-version": {"scripts": {"postchangelog": "./fail-postchangelog.sh"}}
+}
+JSON
+cat > fail-postchangelog.sh <<'SH'
+#!/bin/sh
+printf 'stdout-marker\n'
+printf 'stderr-marker\n' >&2
+exit 7
+SH
+chmod +x fail-postchangelog.sh
+git add package.json fail-postchangelog.sh
+git commit -qm 'chore: initialize postchangelog script fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+printf 'fix\n' > fix.txt
+git add fix.txt
+git commit -qm 'fix: trigger postchangelog script failure'
+if "$bin" > "$tmp/postchangelog-script-failure.stdout" \
+  2> "$tmp/postchangelog-script-failure.stderr"; then
+  printf '%s\n' 'release unexpectedly succeeded with a failing postchangelog script' >&2
+  exit 1
+else
+  postchangelog_script_failure_status=$?
+fi
+test "$postchangelog_script_failure_status" -eq 1
+printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ created CHANGELOG.md\n✔ outputting changes to CHANGELOG.md\n✔ Running lifecycle script "postchangelog"\nℹ - execute command: "./fail-postchangelog.sh"\n' \
+  > "$tmp/postchangelog-script-failure.expected.stdout"
+printf 'stderr-marker\n\nCommand failed: ./fail-postchangelog.sh\nstderr-marker\n\n' \
+  > "$tmp/postchangelog-script-failure.expected.stderr"
+cmp "$tmp/postchangelog-script-failure.expected.stdout" \
+  "$tmp/postchangelog-script-failure.stdout"
+cmp "$tmp/postchangelog-script-failure.expected.stderr" \
+  "$tmp/postchangelog-script-failure.stderr"
+grep -q '"version": "1.2.4"' package.json
+test -e CHANGELOG.md
+test "$(git tag --list)" = v1.2.3
+test "$(git log -1 --format=%s)" = 'fix: trigger postchangelog script failure'
+test "$(git status --porcelain)" = \
+  "$(printf ' M package.json\n?? CHANGELOG.md')"
+
 printf '%s\n' 'release workflow tests passed'
