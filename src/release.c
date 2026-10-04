@@ -269,6 +269,26 @@ static int run_git_capture_streams(const char *const args[],
   return 1;
 }
 
+static int append_git_execfile_error(const char *const args[],
+                                     const char *git_stderr,
+                                     CsemverBuffer *message) {
+  size_t index;
+  if (!csemver_buffer_append(message, "Command failed: git",
+                             sizeof("Command failed: git") - 1))
+    return 0;
+  for (index = 0; args[index] != NULL; ++index)
+    if (!csemver_buffer_appendf(message, " %s", args[index]))
+      return 0;
+  return git_stderr[0] == '\0' ||
+         (csemver_buffer_append(message, "\n", 1) &&
+          csemver_buffer_append(message, git_stderr, strlen(git_stderr)));
+}
+
+static void print_execfile_error(const char *message) {
+  fputs(message, stderr);
+  fputc('\n', stderr);
+}
+
 static int run_git_execfile(const CsemverConfig *config,
                             const char *const args[], char **output,
                             int *status) {
@@ -285,8 +305,21 @@ static int run_git_execfile(const CsemverConfig *config,
       fputs(git_stderr, stderr);
       fputc('\n', stderr);
     }
-  } else if (git_stderr[0] != '\0') {
-    fputs(git_stderr, stderr);
+  } else {
+    CsemverBuffer error_message;
+    int error_message_valid;
+    csemver_buffer_init(&error_message);
+    error_message_valid =
+        append_git_execfile_error(args, git_stderr, &error_message);
+    if (!config->silent) {
+      if (git_stderr[0] != '\0')
+        print_execfile_error(git_stderr);
+      else if (error_message_valid)
+        print_execfile_error(error_message.data);
+      if (error_message_valid)
+        print_execfile_error(error_message.data);
+    }
+    csemver_buffer_free(&error_message);
   }
   free(git_stderr);
   if (output != NULL)
@@ -3628,6 +3661,22 @@ print_publish_hint(const CsemverConfig *config, bool is_private,
                    char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX],
                    size_t path_count);
 
+static size_t
+append_release_paths(const CsemverConfig *config,
+                     char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX],
+                     size_t path_count, const char *args[], size_t index) {
+  bool changelog_is_last = !config->skip_changelog && path_count > 0 &&
+                           strcmp(paths[path_count - 1], config->infile) == 0;
+  size_t path_limit = path_count - (changelog_is_last ? 1 : 0);
+  size_t path_index;
+  if (changelog_is_last && index + 1 < ARG_MAX_COUNT)
+    args[index++] = paths[path_count - 1];
+  for (path_index = 0; path_index < path_limit && index + 1 < ARG_MAX_COUNT;
+       ++path_index)
+    args[index++] = paths[path_index];
+  return index;
+}
+
 static int commit_release(CsemverConfig *config, const char *version,
                           char *message, size_t message_size,
                           char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX],
@@ -3664,11 +3713,13 @@ static int commit_release(CsemverConfig *config, const char *version,
   print_commit_summary(config, paths, path_count);
   if (path_count > 0) {
     args[index++] = "add";
-    args[index++] = "--";
-    for (size_t i = 0; i < path_count && index + 1 < ARG_MAX_COUNT; ++i)
-      args[index++] = paths[i];
+    index = append_release_paths(config, paths, path_count, args, index);
     args[index] = NULL;
-    if (!run_git_execfile(config, args, NULL, &status) || status != 0)
+    if (!run_git_execfile(config, args, NULL, &status)) {
+      errorf("git add failed");
+      return 0;
+    }
+    if (status != 0)
       return 0;
     index = 0;
   } else if (config->commit_all) {
@@ -3679,23 +3730,23 @@ static int commit_release(CsemverConfig *config, const char *version,
     index = 0;
   }
   args[index++] = "commit";
+  if (config->no_verify)
+    args[index++] = "--no-verify";
   if (config->sign)
     args[index++] = "-S";
   if (config->signoff)
-    args[index++] = "-s";
-  if (config->no_verify)
-    args[index++] = "--no-verify";
+    args[index++] = "--signoff";
+  if (!config->commit_all)
+    index = append_release_paths(config, paths, path_count, args, index);
   args[index++] = "-m";
   args[index++] = message;
-  if (!config->commit_all) {
-    for (size_t i = 0; i < path_count && index + 1 < ARG_MAX_COUNT; ++i)
-      args[index++] = paths[i];
-  }
   args[index] = NULL;
-  if (!run_git_execfile(config, args, NULL, &status) || status != 0) {
+  if (!run_git_execfile(config, args, NULL, &status)) {
     errorf("git commit failed");
     return 0;
   }
+  if (status != 0)
+    return 0;
   return run_lifecycle(config, "postcommit");
 }
 
@@ -3713,20 +3764,22 @@ static int tag_release(const CsemverConfig *config, const char *tag,
   if (!config->silent)
     printf("✔ tagging release %s\n", tag);
   args[index++] = "tag";
-  if (config->tag_force)
-    args[index++] = "--force";
   if (config->sign)
     args[index++] = "-s";
   else
     args[index++] = "-a";
+  if (config->tag_force)
+    args[index++] = "-f";
+  args[index++] = tag;
   args[index++] = "-m";
   args[index++] = message;
-  args[index++] = tag;
   args[index] = NULL;
-  if (!run_git_execfile(config, args, NULL, &status) || status != 0) {
+  if (!run_git_execfile(config, args, NULL, &status)) {
     errorf("git tag failed for %s", tag);
     return 0;
   }
+  if (status != 0)
+    return 0;
   if (!print_publish_hint(config, is_private, paths, path_count))
     return 0;
   return run_lifecycle(config, "posttag");
@@ -4302,12 +4355,15 @@ static int render_changelog(const CsemverConfig *config, const char *version,
     return 1;
   }
   if (previous_tag != NULL && strcmp(previous_tag, new_tag) == 0) {
-    if (*old_body != '\0' &&
+    if (!config->dry_run &&
         (!csemver_buffer_append(output, "\n", 1) ||
-         !csemver_buffer_append(output, old_body,
-                                old_length - (size_t)(old_body - old_content))))
+         (*old_body != '\0' &&
+          !csemver_buffer_append(output, old_body,
+                                 old_length -
+                                     (size_t)(old_body - old_content)))))
       goto fail;
-    if (!normalize_changelog_newlines(output))
+    if ((*old_body != '\0' || config->dry_run) &&
+        !normalize_changelog_newlines(output))
       goto fail;
     free(old_content);
     return 1;

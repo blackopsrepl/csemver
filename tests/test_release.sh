@@ -3394,4 +3394,93 @@ if [ -s "$safecrlf_manual.commit.stderr" ]; then
 fi
 cmp "$safecrlf_manual.expected.stderr" "$safecrlf_candidate.stderr"
 
+mkdir "$tmp/precommit-failure"
+cd "$tmp/precommit-failure"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{"name":"precommit-failure","version":"1.2.3","repository":{"type":"git","url":"https://github.com/example/precommit-failure.git"}}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize precommit probe'
+git tag -a v1.2.3 -m 'release 1.2.3'
+printf 'fix\n' > fix.txt
+git add fix.txt
+git commit -qm 'fix: reproduce precommit failure'
+printf '#!/bin/sh\necho hook-says-no >&2\nexit 1\n' > .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+if "$bin" > "$tmp/precommit-failure.stdout" \
+  2> "$tmp/precommit-failure.stderr"; then
+  printf '%s\n' 'release unexpectedly succeeded with a failing pre-commit hook' >&2
+  exit 1
+else
+  precommit_failure_status=$?
+fi
+test "$precommit_failure_status" -eq 1
+printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ created CHANGELOG.md\n✔ outputting changes to CHANGELOG.md\n✔ committing package.json and CHANGELOG.md\n' \
+  > "$tmp/precommit-failure.expected.stdout"
+printf 'hook-says-no\n\nCommand failed: git commit CHANGELOG.md package.json -m chore(release): 1.2.4\nhook-says-no\n\n' \
+  > "$tmp/precommit-failure.expected.stderr"
+cmp "$tmp/precommit-failure.expected.stdout" \
+  "$tmp/precommit-failure.stdout"
+cmp "$tmp/precommit-failure.expected.stderr" \
+  "$tmp/precommit-failure.stderr"
+test "$(git status --porcelain)" = \
+  "$(printf 'A  CHANGELOG.md\nM  package.json')"
+test "$(git tag --list)" = v1.2.3
+test "$(git log -1 --format=%s)" = 'fix: reproduce precommit failure'
+git reset --hard -q HEAD
+rm -f CHANGELOG.md
+if "$bin" --silent > "$tmp/precommit-failure.silent.stdout" \
+  2> "$tmp/precommit-failure.silent.stderr"; then
+  printf '%s\n' 'release unexpectedly succeeded with a failing pre-commit hook' >&2
+  exit 1
+else
+  precommit_failure_silent_status=$?
+fi
+test "$precommit_failure_silent_status" -eq 1
+test ! -s "$tmp/precommit-failure.silent.stdout"
+test ! -s "$tmp/precommit-failure.silent.stderr"
+test "$(git status --porcelain)" = \
+  "$(printf 'A  CHANGELOG.md\nM  package.json')"
+test "$(git tag --list)" = v1.2.3
+test "$(git log -1 --format=%s)" = 'fix: reproduce precommit failure'
+
+mkdir "$tmp/occupied-release-tag"
+cd "$tmp/occupied-release-tag"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{"name":"occupied-release-tag","version":"1.2.3","repository":{"type":"git","url":"https://github.com/example/occupied-release-tag.git"}}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize occupied tag fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+git tag -a v1.2.4 -m 'occupied release tag'
+printf 'fix\n' > fix.txt
+git add fix.txt
+git commit -qm 'fix: attempt occupied release tag'
+if "$bin" > "$tmp/occupied-release-tag.stdout" \
+  2> "$tmp/occupied-release-tag.stderr"; then
+  printf '%s\n' 'release unexpectedly succeeded with an occupied release tag' >&2
+  exit 1
+else
+  occupied_tag_status=$?
+fi
+test "$occupied_tag_status" -eq 1
+printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ created CHANGELOG.md\n✔ outputting changes to CHANGELOG.md\n✔ committing package.json and CHANGELOG.md\n✔ tagging release v1.2.4\n' \
+  > "$tmp/occupied-release-tag.expected.stdout"
+printf 'fatal: tag '\''v1.2.4'\'' already exists\n\nCommand failed: git tag -a v1.2.4 -m chore(release): 1.2.4\nfatal: tag '\''v1.2.4'\'' already exists\n\n' \
+  > "$tmp/occupied-release-tag.expected.stderr"
+printf '# Changelog\n\nAll notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.\n\n\n' \
+  > "$tmp/occupied-release-tag.expected.changelog"
+cmp "$tmp/occupied-release-tag.expected.stdout" \
+  "$tmp/occupied-release-tag.stdout"
+cmp "$tmp/occupied-release-tag.expected.stderr" \
+  "$tmp/occupied-release-tag.stderr"
+cmp "$tmp/occupied-release-tag.expected.changelog" CHANGELOG.md
+test "$(git tag --list)" = "$(printf 'v1.2.3\nv1.2.4')"
+test "$(git log -1 --format=%s)" = 'chore(release): 1.2.4'
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'
