@@ -3823,4 +3823,42 @@ SH
 run_pre_bump_lifecycle_failure prerelease
 run_pre_bump_lifecycle_failure prebump
 
+mkdir "$tmp/precommit-message-override"
+cd "$tmp/precommit-message-override"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+cat > package.json <<'JSON'
+{
+  "name": "precommit-message-override",
+  "version": "1.2.3",
+  "repository": {"type": "git", "url": "https://github.com/example/precommit-message-override.git"},
+  "commit-and-tag-version": {"scripts": {"precommit": "./commit-message.sh"}}
+}
+JSON
+cat > commit-message.sh <<'SH'
+#!/bin/sh
+printf 'chore(release): selected by precommit hook\n'
+SH
+chmod +x commit-message.sh
+git add package.json commit-message.sh
+git commit -qm 'chore: initialize precommit fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+printf 'fix\n' > fix.txt
+git add fix.txt
+git commit -qm 'fix: trigger precommit override'
+"$bin" > "$tmp/precommit-message-override.stdout" \
+  2> "$tmp/precommit-message-override.stderr"
+printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ created CHANGELOG.md\n✔ outputting changes to CHANGELOG.md\n✔ Running lifecycle script "precommit"\nℹ - execute command: "./commit-message.sh"\n✔ committing package.json and CHANGELOG.md\n✔ tagging release v1.2.4\nℹ Run `git push --follow-tags origin master && npm publish` to publish\n' \
+  > "$tmp/precommit-message-override.expected.stdout"
+cmp "$tmp/precommit-message-override.expected.stdout" \
+  "$tmp/precommit-message-override.stdout"
+test ! -s "$tmp/precommit-message-override.stderr"
+test "$(git log -1 --format=%s)" = 'chore(release): selected by precommit hook'
+grep -q '"version": "1.2.4"' package.json
+test "$(git tag --list)" = "$(printf 'v1.2.3\nv1.2.4')"
+test "$(git rev-parse 'v1.2.4^{}')" = "$(git rev-parse HEAD)"
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'
