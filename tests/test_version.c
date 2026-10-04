@@ -1092,6 +1092,183 @@ static void test_yaml_quoted_bare_cr_matches_upstream_escape(void) {
   free(updated);
 }
 
+static void test_yaml_plain_bare_cr_matches_upstream_escape(void) {
+  const char *input = "version: \"1.2.3\"\ntext: first\rsecond\n";
+  const char *expected = "version: \"1.3.0\"\ntext: \"first\\rsecond\"\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+}
+
+static void test_yaml_flow_bare_cr_many_values_match_upstream(void) {
+  const size_t value_count = 10000;
+  const size_t capacity = value_count * 16 + 32;
+  char *input = malloc(capacity);
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+  size_t input_size = 0;
+  size_t escaped_values = 0;
+  const char *cursor;
+
+  assert(input != NULL);
+  input_size = (size_t)snprintf(input, capacity, "version: 1.2.3\ntext: [");
+  assert(input_size < capacity);
+  for (size_t i = 0; i < value_count; ++i) {
+    const char *separator = i == 0 ? "" : ", ";
+    size_t separator_size = strlen(separator);
+    size_t value_size = strlen("alpha\rbeta");
+    assert(input_size + separator_size + value_size + 3 < capacity);
+    memcpy(input + input_size, separator, separator_size);
+    input_size += separator_size;
+    memcpy(input + input_size, "alpha\rbeta", value_size);
+    input_size += value_size;
+  }
+  memcpy(input + input_size, "]\n", 3);
+
+  assert(csemver_version_update_text("config.yaml", "yaml", input, "1.3.0",
+                                     &updated, &updated_size, version,
+                                     sizeof version, error, sizeof error));
+  assert(updated_size > 0);
+  assert(strncmp(updated, "version: 1.3.0\n", 14) == 0);
+  for (cursor = updated; (cursor = strstr(cursor, "\"alpha\\rbeta\"")) != NULL;
+       cursor += strlen("\"alpha\\rbeta\"")) {
+    ++escaped_values;
+  }
+  assert(escaped_values == value_count);
+
+  free(updated);
+  free(input);
+}
+
+static void test_yaml_plain_bare_cr_matrix_matches_upstream(void) {
+  const struct {
+    const char *filename;
+    const char *type;
+    const char *input;
+    const char *expected;
+    const char *expected_error;
+  } cases[] = {
+      {"config.yaml", "yaml", "version: \"1.2.3\"\ntext: alpha\rbeta\rgamma\n",
+       "version: \"1.3.0\"\ntext: \"alpha\\rbeta\\rgamma\"\n", NULL},
+      {"config.yaml", "yaml",
+       "version: \"1.2.3\"\ntext: first\rsecond # note: retained\n",
+       "version: \"1.3.0\"\ntext: \"first\\rsecond\" # note: retained\n", NULL},
+      {"config.yaml", "yaml", "version: \"1.2.3\"\ntext: [alpha\rbeta]\n",
+       "version: \"1.3.0\"\ntext: [ \"alpha\\rbeta\" ]\n", NULL},
+      {"config.yaml", "yaml",
+       "version: 1.2.3\ntext: [one, alpha\rbeta, three]\n",
+       "version: 1.3.0\ntext: [ one, \"alpha\\rbeta\", three ]\n", NULL},
+      {"config.yaml", "yaml", "version: 1.2.3\ntext: {name: first\rsecond}\n",
+       "version: 1.3.0\ntext: { name: \"first\\rsecond\" }\n", NULL},
+      {"config.yaml", "yaml", "version: 1.2.3\ntext: {name:\r foo}\n",
+       "version: 1.3.0\ntext: { name: \"\\r foo\" }\n", NULL},
+      {"config.yaml", "yaml",
+       "version: 1.2.3\ntext: [{a: alpha\rbeta},{b: delta\rgamma}]\n",
+       "version: 1.3.0\ntext: [ { a: \"alpha\\rbeta\" }, "
+       "{ b: \"delta\\rgamma\" } ]\n",
+       NULL},
+      {"config.yaml", "yaml",
+       "version: 1.2.3\ntext: alpha # first\rsecond\rthird\n",
+       "version: 1.3.0\ntext: alpha # first\r#second\r#third\n", NULL},
+      {"config.yaml", "yaml", "#\r#\nversion: 1.2.3\n", "##\nversion: 1.3.0\n",
+       NULL},
+      {"config.yaml", "yaml", "version: 1.2.3 #\rcontinued\n",
+       "version: 1.3.0 \r#continued\n", NULL},
+      {"openapi.yaml", "openapi",
+       "openapi: 3.1.0\ninfo:\n  # note\rcontinued\n  version: 1.2.3\n",
+       "openapi: 3.1.0\ninfo:\n  # note\r  #continued\n  version: 1.3.0\n",
+       NULL},
+      {"config.yaml", "yaml",
+       "version: \"1.2.3\"\ntext: first\rsecond\nother: third\rfourth\n",
+       "version: \"1.3.0\"\ntext: \"first\\rsecond\"\nother: "
+       "\"third\\rfourth\"\n",
+       NULL},
+      {"config.yaml", "yaml", "version: \"1.2.3\"\rtext: plain\n", NULL,
+       "Document with errors cannot be stringified"},
+      {"config.yaml", "yaml", "version: \"1.2.3\"\ntext: >\r  first\n", NULL,
+       "Document with errors cannot be stringified"},
+  };
+  char version[128];
+  char error[256];
+  size_t index;
+
+  for (index = 0; index < sizeof cases / sizeof cases[0]; ++index) {
+    char *updated = NULL;
+    size_t updated_size = 0;
+    int result = csemver_version_update_text(
+        cases[index].filename, cases[index].type, cases[index].input, "1.3.0",
+        &updated, &updated_size, version, sizeof version, error, sizeof error);
+    if (cases[index].expected_error != NULL) {
+      assert(!result);
+      assert(strcmp(error, cases[index].expected_error) == 0);
+    } else {
+      assert(result);
+      assert(updated_size == strlen(cases[index].expected));
+      assert(memcmp(updated, cases[index].expected, updated_size) == 0);
+    }
+    free(updated);
+  }
+}
+
+static void test_yaml_nested_flow_comment_matches_upstream(void) {
+  const struct {
+    const char *input;
+    const char *expected;
+  } cases[] = {
+      {"version: 1.2.3\ntext: {a: first, # note\n  b: second}\n",
+       "version: 1.3.0\ntext:\n  {\n    a: first, # note\n"
+       "    b: second\n  }\n"},
+      {"version: 1.2.3\ntext: {items: [first, # note\n  second]}\n",
+       "version: 1.3.0\ntext:\n  {\n    items:\n      [\n"
+       "        first, # note\n        second\n      ]\n  }\n"},
+      {"version: 1.2.3\ntext: {outer: {a: first, # note\n  b: second}, tail: "
+       "yes}\n",
+       "version: 1.3.0\ntext:\n  {\n    outer:\n      {\n"
+       "        a: first, # note\n        b: second\n      },\n"
+       "    tail: yes\n  }\n"},
+      {"version: 1.2.3\ntext: [{a: first, # note\n  b: second}, tail]\n",
+       "version: 1.3.0\ntext:\n  [\n    {\n"
+       "        a: first, # note\n        b: second\n      },\n"
+       "    tail\n  ]\n"},
+      {"version: 1.2.3\ntext: {items: [{a: first, # note\n  b: second}], "
+       "tail: yes}\n",
+       "version: 1.3.0\ntext:\n  {\n    items:\n      [\n"
+       "        {\n            a: first, # note\n"
+       "            b: second\n          }\n      ],\n"
+       "    tail: yes\n  }\n"},
+      {"version: 1.2.3\ntext: {items: [[first, # note\n  second]], "
+       "tail: yes}\n",
+       "version: 1.3.0\ntext:\n  {\n    items:\n      [\n"
+       "        [\n            first, # note\n"
+       "            second\n          ]\n      ],\n"
+       "    tail: yes\n  }\n"},
+  };
+  char version[128];
+  char error[256];
+  size_t index;
+
+  for (index = 0; index < sizeof cases / sizeof cases[0]; ++index) {
+    char *updated = NULL;
+    size_t updated_size = 0;
+    assert(csemver_version_update_text(
+        "config.yaml", "yaml", cases[index].input, "1.3.0", &updated,
+        &updated_size, version, sizeof version, error, sizeof error));
+    assert(updated_size == strlen(cases[index].expected));
+    assert(memcmp(updated, cases[index].expected, updated_size) == 0);
+    free(updated);
+  }
+}
+
 static void test_yaml_normalizes_explicit_version_mapping_key(void) {
   const struct {
     const char *input;
@@ -1667,6 +1844,10 @@ int main(void) {
   test_yaml_and_openapi_multiple_documents_match_upstream_error();
   test_yaml_bare_cr_rows_match_stringifier_error();
   test_yaml_quoted_bare_cr_matches_upstream_escape();
+  test_yaml_plain_bare_cr_matches_upstream_escape();
+  test_yaml_flow_bare_cr_many_values_match_upstream();
+  test_yaml_plain_bare_cr_matrix_matches_upstream();
+  test_yaml_nested_flow_comment_matches_upstream();
   test_yaml_normalizes_explicit_version_mapping_key();
   test_yaml_duplicate_version_key_reports_stringifier_error();
   test_yaml_block_mapping_leading_flow_sequence_comment_matches_error();
