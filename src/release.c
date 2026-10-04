@@ -1700,10 +1700,15 @@ static int get_version(const CsemverConfig *config, char *version,
     if (!csemver_read_file(config->package_files[index].filename, &content,
                            NULL))
       continue;
-    if (csemver_version_read_text(config->package_files[index].filename,
-                                  config->package_files[index].type, content,
-                                  version, SEMVER_TEXT_MAX, is_private, error,
-                                  sizeof error)) {
+    if ((config->package_files[index].has_version_pattern
+             ? csemver_version_read_pattern_text(
+                   content, config->package_files[index].version_pattern,
+                   config->package_files[index].version_group, version,
+                   SEMVER_TEXT_MAX, error, sizeof error)
+             : csemver_version_read_text(config->package_files[index].filename,
+                                         config->package_files[index].type,
+                                         content, version, SEMVER_TEXT_MAX,
+                                         is_private, error, sizeof error))) {
       free(content);
       return 1;
     }
@@ -3802,6 +3807,7 @@ static int update_files(const CsemverConfig *config, const char *version,
     char error[256] = {0};
     size_t updated_size = 0;
     BumpFileKind file_kind;
+    int update_ok;
     if (config->bump_files[i].compatibility_unsupported_type) {
       warn_unsupported_package_updater_type(
           config->bump_files[i].filename, config->bump_files[i].type,
@@ -3829,10 +3835,19 @@ static int update_files(const CsemverConfig *config, const char *version,
     }
     if (!csemver_read_file(config->bump_files[i].filename, &content, NULL))
       continue;
-    if (!csemver_version_update_text(
-            config->bump_files[i].filename, config->bump_files[i].type, content,
-            version_is_null ? NULL : version, &updated, &updated_size,
-            old_version, sizeof old_version, error, sizeof error)) {
+    update_ok =
+        config->bump_files[i].has_version_pattern
+            ? csemver_version_update_pattern_text(
+                  content, config->bump_files[i].version_pattern,
+                  config->bump_files[i].version_group,
+                  version_is_null ? NULL : version, &updated, &updated_size,
+                  old_version, sizeof old_version, error, sizeof error)
+            : csemver_version_update_text(
+                  config->bump_files[i].filename, config->bump_files[i].type,
+                  content, version_is_null ? NULL : version, &updated,
+                  &updated_size, old_version, sizeof old_version, error,
+                  sizeof error);
+    if (!update_ok) {
       fflush(stdout);
       fprintf(stderr, "%s\n", error);
       free(content);

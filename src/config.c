@@ -52,21 +52,6 @@ static int add_file(CsemverFile *files, size_t *count, const char *filename,
   return 1;
 }
 
-static int add_file_if_missing(CsemverFile *files, size_t *count,
-                               const char *filename, const char *type,
-                               char *error, size_t error_size) {
-  size_t index;
-  for (index = 0; index < *count; ++index) {
-    if (strcmp(files[index].filename, filename) == 0) {
-      if (type != NULL && type[0] != '\0')
-        return copy_text(files[index].type, sizeof files[index].type, type,
-                         error, error_size);
-      return 1;
-    }
-  }
-  return add_file(files, count, filename, type, error, error_size);
-}
-
 static void add_default_type(CsemverConfig *config, const char *type,
                              const char *section, bool hidden) {
   CsemverCommitType *entry = &config->commit_types[config->commit_type_count++];
@@ -210,12 +195,47 @@ static int read_file_array(CsemverConfig *config, const toml_table_t *root,
       toml_table_t *item = toml_table_at(array, index);
       toml_datum_t filename;
       toml_datum_t type;
+      toml_datum_t pattern;
+      toml_datum_t version_group;
+      bool has_pattern;
+      bool has_version_group;
       if (item == NULL || !toml_key_exists(item, "filename")) {
         set_error(error, error_size, "file entries need a filename string");
         return 0;
       }
       filename = toml_string_in(item, "filename");
       type = toml_string_in(item, "type");
+      pattern = toml_string_in(item, "pattern");
+      version_group = toml_int_in(item, "versionGroup");
+      has_pattern = toml_key_exists(item, "pattern");
+      has_version_group = toml_key_exists(item, "versionGroup");
+      if (has_pattern &&
+          (!pattern.ok || !type.ok || strcmp(type.u.s, "regex") != 0)) {
+        if (filename.ok)
+          free(filename.u.s);
+        if (type.ok)
+          free(type.u.s);
+        if (pattern.ok)
+          free(pattern.u.s);
+        set_error(
+            error, error_size,
+            "pattern file entries need type = regex and a pattern string");
+        return 0;
+      }
+      if ((has_version_group &&
+           (!version_group.ok || !has_pattern || version_group.u.i < 0 ||
+            version_group.u.i >= 64)) ||
+          (type.ok && strcmp(type.u.s, "regex") == 0 && !has_pattern)) {
+        if (filename.ok)
+          free(filename.u.s);
+        if (type.ok)
+          free(type.u.s);
+        if (pattern.ok)
+          free(pattern.u.s);
+        set_error(error, error_size,
+                  "regex file entries need a pattern and valid versionGroup");
+        return 0;
+      }
       if (!filename.ok ||
           !add_file(files, count, filename.u.s, type.ok ? type.u.s : NULL,
                     error, error_size)) {
@@ -223,14 +243,32 @@ static int read_file_array(CsemverConfig *config, const toml_table_t *root,
           free(filename.u.s);
         if (type.ok)
           free(type.u.s);
+        if (pattern.ok)
+          free(pattern.u.s);
         if (error != NULL && error[0] == '\0')
           set_error(error, error_size,
                     "file filename and type must be strings");
         return 0;
       }
+      if (has_pattern) {
+        CsemverFile *file = &files[*count - 1];
+        if (!copy_text(file->version_pattern, sizeof file->version_pattern,
+                       pattern.u.s, error, error_size)) {
+          free(filename.u.s);
+          if (type.ok)
+            free(type.u.s);
+          free(pattern.u.s);
+          return 0;
+        }
+        file->version_group =
+            has_version_group ? (unsigned)version_group.u.i : 1;
+        file->has_version_pattern = true;
+      }
       free(filename.u.s);
       if (type.ok)
         free(type.u.s);
+      if (pattern.ok)
+        free(pattern.u.s);
     }
   }
   return 1;
@@ -395,7 +433,6 @@ int csemver_config_parse(CsemverConfig *config, const char *toml, char *error,
   char parse_error[256] = {0};
   char *copy;
   toml_table_t *root;
-  size_t old_bump_count;
   size_t index;
   bool *flags[] = {
       &config->first_release,    &config->sign,
@@ -503,7 +540,6 @@ int csemver_config_parse(CsemverConfig *config, const char *toml, char *error,
                        error_size))
     goto fail;
 
-  old_bump_count = config->bump_file_count;
   if (!read_file_array(config, root, "packageFiles", true, error, error_size) ||
       !read_file_array(config, root, "bumpFiles", false, error, error_size) ||
       !read_string_array(root, "issuePrefixes", config->issue_prefixes,
@@ -512,18 +548,6 @@ int csemver_config_parse(CsemverConfig *config, const char *toml, char *error,
       !read_type_array(config, root, error, error_size) ||
       !read_scripts(config, root, error, error_size))
     goto fail;
-  if (config->package_files_explicit && !config->bump_files_explicit) {
-    config->bump_file_count = old_bump_count;
-    for (index = 0; index < config->package_file_count; ++index) {
-      if (!add_file_if_missing(config->bump_files, &config->bump_file_count,
-                               config->package_files[index].filename,
-                               config->package_files[index].type[0] == '\0'
-                                   ? NULL
-                                   : config->package_files[index].type,
-                               error, error_size))
-        goto fail;
-    }
-  }
   if (!read_skip(config, root, error, error_size))
     goto fail;
   toml_free(root);

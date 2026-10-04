@@ -14,6 +14,9 @@
 typedef struct {
   char filename[CSEMVER_PATH_MAX];
   char type[32];
+  char version_pattern[CSEMVER_VALUE_MAX];
+  unsigned version_group;
+  bool has_version_pattern;
   bool compatibility_unsupported_type;
   bool compatibility_unsupported_filename;
   bool compatibility_updater_argument_object;

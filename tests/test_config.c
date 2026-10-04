@@ -79,6 +79,44 @@ int main(void) {
         ++package_bump_entries;
     assert(package_bump_entries == 1);
   }
+  {
+    const char *pattern_files =
+        "packageFiles = [{ filename = \"lib/release.rb\", type = \"regex\", "
+        "pattern = '^(  VERSION = \")([^\"]+)(\")$', versionGroup = 2 }]\n"
+        "bumpFiles = [{ filename = \"README.md\", type = \"regex\", "
+        "pattern = '^(v)([^ ]+)$' }]\n";
+    csemver_config_defaults(&config);
+    assert(csemver_config_parse(&config, pattern_files, error, sizeof error));
+    assert(config.package_files[0].has_version_pattern);
+    assert(strcmp(config.package_files[0].type, "regex") == 0);
+    assert(strcmp(config.package_files[0].version_pattern,
+                  "^(  VERSION = \")([^\"]+)(\")$") == 0);
+    assert(config.package_files[0].version_group == 2);
+    assert(config.bump_files[0].has_version_pattern);
+    assert(config.bump_files[0].version_group == 1);
+    assert(
+        !csemver_config_parse(&config,
+                              "bumpFiles = [{ filename = \"README.md\", type = "
+                              "\"regex\" }]\n",
+                              error, sizeof error));
+  }
+  {
+    const char *pattern_package_only =
+        "packageFiles = [{ filename = \"src/custom.c\", type = \"regex\", "
+        "pattern = '^(VERSION = )([0-9.]+)$', versionGroup = 2 }]\n";
+    size_t index;
+    bool custom_bump_target_found = false;
+    csemver_config_defaults(&config);
+    assert(csemver_config_parse(&config, pattern_package_only, error,
+                                sizeof error));
+    for (index = 0; index < config.bump_file_count; ++index) {
+      if (strcmp(config.bump_files[index].filename, "src/custom.c") == 0) {
+        custom_bump_target_found = true;
+      }
+    }
+    assert(config.bump_file_count == 5);
+    assert(!custom_bump_target_found);
+  }
   assert(!csemver_config_parse(&config, "releaseAs = [", error, sizeof error));
   assert(strstr(error, "invalid TOML:") == error);
   puts("configuration tests passed");

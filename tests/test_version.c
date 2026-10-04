@@ -556,6 +556,34 @@ static void test_plain_text_preserves_upstream_write_semantics(void) {
   free(updated);
 }
 
+static void test_pattern_updater_replaces_only_selected_capture(void) {
+  const char *input = "# old release v9.9.9\n  VERSION = \"1.2.3\"\n";
+  const char *pattern = "^(  VERSION = \")([^\"]+)(\")$";
+  const char *expected = "# old release v9.9.9\n  VERSION = \"1.3.0\"\n";
+  char version[128];
+  char error[256];
+  char *updated = NULL;
+  size_t updated_size = 0;
+
+  assert(csemver_version_read_pattern_text(
+      input, pattern, 2, version, sizeof version, error, sizeof error));
+  assert(strcmp(version, "1.2.3") == 0);
+  assert(csemver_version_update_pattern_text(
+      input, pattern, 2, "1.3.0", &updated, &updated_size, version,
+      sizeof version, error, sizeof error));
+  assert(strcmp(version, "1.2.3") == 0);
+  assert(updated_size == strlen(expected));
+  assert(memcmp(updated, expected, updated_size) == 0);
+  free(updated);
+
+  assert(!csemver_version_read_pattern_text(
+      input, "([", 1, version, sizeof version, error, sizeof error));
+  assert(strstr(error, "invalid POSIX") != NULL);
+  assert(!csemver_version_read_pattern_text(
+      input, pattern, 4, version, sizeof version, error, sizeof error));
+  assert(strstr(error, "capture group does not exist") != NULL);
+}
+
 static void test_toml_and_yaml_surface(void) {
   const char *toml = "[project]\r\nversion = \"0.4.1\"\r\n";
   const char *yaml = "name: fixture\nversion: 0.4.1\n";
@@ -1828,6 +1856,7 @@ int main(void) {
   test_package_lock_adds_missing_root_package_version();
   test_package_lock_adds_missing_root_version_fields();
   test_plain_text_preserves_upstream_write_semantics();
+  test_pattern_updater_replaces_only_selected_capture();
   test_toml_and_yaml_surface();
   test_yaml_strips_leading_blank_lines_like_upstream();
   test_yaml_separates_trailing_root_comments();

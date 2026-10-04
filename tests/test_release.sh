@@ -4082,4 +4082,84 @@ grep -F -x -q '✔ tagging release release-1.2.4' \
 grep -F -x -q '✔ tagging release release-1.2.4' \
   "$tmp/versionrc-json-config-explicit.stdout"
 
+mkdir "$tmp/generic-pattern-updater"
+cd "$tmp/generic-pattern-updater"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+mkdir -p lib
+printf '  VERSION = "1.2.3"\n' > lib/release.rb
+printf '## Current release: `v1.2.3`\n' > README.md
+cat > csemver.toml <<'TOML'
+tagPrefix = "v"
+packageFiles = [{ filename = "lib/release.rb", type = "regex", pattern = '^(  VERSION = ")([^"]+)(")$', versionGroup = 2 }]
+bumpFiles = [
+  { filename = "lib/release.rb", type = "regex", pattern = '^(  VERSION = ")([^"]+)(")$', versionGroup = 2 },
+  { filename = "README.md", type = "regex", pattern = '^(## Current release: `v)([^`]+)(`)$', versionGroup = 2 },
+]
+TOML
+git add lib/release.rb README.md csemver.toml
+git commit -qm 'chore: initialize generic pattern updater fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+git commit --allow-empty -qm 'feat: exercise generic version surfaces'
+"$bin" > "$tmp/generic-pattern-updater.stdout"
+grep -F -x -q '  VERSION = "1.3.0"' lib/release.rb
+grep -F -x -q '## Current release: `v1.3.0`' README.md
+test "$(git tag --list)" = "$(printf 'v1.2.3\nv1.3.0')"
+test -z "$(git status --porcelain)"
+
+mkdir "$tmp/generic-pattern-package-file-source-only"
+cd "$tmp/generic-pattern-package-file-source-only"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+mkdir -p src
+printf 'const VERSION = "1.2.3";\n' > src/version.c
+cat > csemver.toml <<'TOML'
+packageFiles = [{ filename = "src/version.c", type = "regex", pattern = '^(const VERSION = ")([^"]+)(");$', versionGroup = 2 }]
+TOML
+git add src/version.c csemver.toml
+git commit -qm 'chore: initialize regex package file source fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+git commit --allow-empty -qm 'fix: exercise source-only package file'
+"$bin" > "$tmp/generic-pattern-package-file-source-only.stdout"
+grep -F -x -q 'const VERSION = "1.2.3";' src/version.c
+if grep -F -q 'bumping version in src/version.c' \
+  "$tmp/generic-pattern-package-file-source-only.stdout"; then
+  exit 1
+fi
+grep -F -x -q '✔ committing CHANGELOG.md' \
+  "$tmp/generic-pattern-package-file-source-only.stdout"
+test "$(git tag --list)" = "$(printf 'v1.2.3\nv1.2.4')"
+test -z "$(git status --porcelain)"
+
+mkdir "$tmp/generic-pattern-failure-upstream-compatible"
+cd "$tmp/generic-pattern-failure-upstream-compatible"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+mkdir -p src
+printf 'VERSION = "9.9.9"\n' > src/version.c
+cat > csemver.toml <<'TOML'
+packageFiles = [{ filename = "src/version.c", type = "regex", pattern = '^(MISSING = ")([^"]+)(")$', versionGroup = 2 }]
+bumpFiles = [{ filename = "src/version.c", type = "regex", pattern = '^(OTHER = ")([^"]+)(")$', versionGroup = 2 }]
+TOML
+git add src/version.c csemver.toml
+git commit -qm 'chore: initialize regex fallback fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+git commit --allow-empty -qm 'fix: exercise regex fallback behavior'
+"$bin" > "$tmp/generic-pattern-failure.stdout" \
+  2> "$tmp/generic-pattern-failure.stderr"
+grep -F -x -q 'VERSION = "9.9.9"' src/version.c
+grep -F -x -q 'version pattern did not match the file' \
+  "$tmp/generic-pattern-failure.stderr"
+grep -F -x -q '✔ tagging release v1.2.4' \
+  "$tmp/generic-pattern-failure.stdout"
+test "$(git tag --list)" = "$(printf 'v1.2.3\nv1.2.4')"
+test "$(git show -s --format=%s HEAD)" = 'chore(release): 1.2.4'
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'

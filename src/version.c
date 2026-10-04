@@ -6,6 +6,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>
+#include <regex.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -5720,6 +5721,107 @@ static int version_filename_ends_with(const char *filename,
   size_t suffix_length = strlen(suffix);
   return filename_length >= suffix_length &&
          strcmp(filename + filename_length - suffix_length, suffix) == 0;
+}
+
+#define CSEMVER_PATTERN_MAX_GROUPS 64
+
+static int pattern_version_range(const char *content, const char *pattern,
+                                 unsigned version_group, Range *range,
+                                 char *error, size_t error_size) {
+  regex_t expression;
+  regmatch_t matches[CSEMVER_PATTERN_MAX_GROUPS];
+  int result;
+
+  if (content == NULL || pattern == NULL || pattern[0] == '\0') {
+    set_error(error, error_size, "version pattern is empty");
+    return 0;
+  }
+  if (version_group >= CSEMVER_PATTERN_MAX_GROUPS) {
+    set_error(error, error_size, "version pattern capture group is too large");
+    return 0;
+  }
+  result = regcomp(&expression, pattern, REG_EXTENDED | REG_NEWLINE);
+  if (result != 0) {
+    set_error(error, error_size,
+              "invalid POSIX extended regular expression for version file");
+    return 0;
+  }
+  if (version_group > expression.re_nsub) {
+    regfree(&expression);
+    set_error(error, error_size,
+              "version pattern capture group does not exist");
+    return 0;
+  }
+  result = regexec(&expression, content, (size_t)version_group + 1, matches, 0);
+  regfree(&expression);
+  if (result != 0 || matches[version_group].rm_so < 0 ||
+      matches[version_group].rm_eo < matches[version_group].rm_so) {
+    set_error(error, error_size, "version pattern did not match the file");
+    return 0;
+  }
+  range->start = (size_t)matches[version_group].rm_so;
+  range->end = (size_t)matches[version_group].rm_eo;
+  if (range->start == range->end) {
+    set_error(error, error_size, "version pattern matched an empty version");
+    return 0;
+  }
+  return 1;
+}
+
+int csemver_version_read_pattern_text(const char *content, const char *pattern,
+                                      unsigned version_group, char *version,
+                                      size_t version_size, char *error,
+                                      size_t error_size) {
+  Range range;
+  size_t length;
+  if (!pattern_version_range(content, pattern, version_group, &range, error,
+                             error_size))
+    return 0;
+  length = range.end - range.start;
+  if (length >= version_size) {
+    set_error(error, error_size, "version output buffer too small");
+    return 0;
+  }
+  memcpy(version, content + range.start, length);
+  version[length] = '\0';
+  return 1;
+}
+
+int csemver_version_update_pattern_text(const char *content,
+                                        const char *pattern,
+                                        unsigned version_group,
+                                        const char *new_version, char **updated,
+                                        size_t *updated_size, char *old_version,
+                                        size_t old_version_size, char *error,
+                                        size_t error_size) {
+  Range range;
+  size_t old_length, content_length;
+  const char *replacement = new_version == NULL ? "null" : new_version;
+  CsemverBuffer output;
+
+  if (!pattern_version_range(content, pattern, version_group, &range, error,
+                             error_size))
+    return 0;
+  old_length = range.end - range.start;
+  if (old_length >= old_version_size) {
+    set_error(error, error_size, "version output buffer too small");
+    return 0;
+  }
+  memcpy(old_version, content + range.start, old_length);
+  old_version[old_length] = '\0';
+  content_length = strlen(content);
+  csemver_buffer_init(&output);
+  if (!csemver_buffer_append(&output, content, range.start) ||
+      !csemver_buffer_append(&output, replacement, strlen(replacement)) ||
+      !csemver_buffer_append(&output, content + range.end,
+                             content_length - range.end)) {
+    csemver_buffer_free(&output);
+    set_error(error, error_size, "out of memory updating version file");
+    return 0;
+  }
+  *updated = output.data;
+  *updated_size = output.length;
+  return 1;
 }
 
 int csemver_version_read_text(const char *filename, const char *type,
