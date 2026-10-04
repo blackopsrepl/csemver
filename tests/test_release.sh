@@ -3726,4 +3726,53 @@ test "$(git log -1 --format=%s)" = 'fix: trigger postchangelog script failure'
 test "$(git status --porcelain)" = \
   "$(printf ' M package.json\n?? CHANGELOG.md')"
 
+mkdir "$tmp/prechangelog-script-failure"
+cd "$tmp/prechangelog-script-failure"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+cat > package.json <<'JSON'
+{
+  "name": "prechangelog-script-failure",
+  "version": "1.2.3",
+  "repository": {"type": "git", "url": "https://github.com/example/prechangelog-script-failure.git"},
+  "commit-and-tag-version": {"scripts": {"prechangelog": "./fail-prechangelog.sh"}}
+}
+JSON
+cat > fail-prechangelog.sh <<'SH'
+#!/bin/sh
+printf 'stdout-marker\n'
+printf 'stderr-marker\n' >&2
+exit 7
+SH
+chmod +x fail-prechangelog.sh
+git add package.json fail-prechangelog.sh
+git commit -qm 'chore: initialize prechangelog script fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+printf 'fix\n' > fix.txt
+git add fix.txt
+git commit -qm 'fix: trigger prechangelog script failure'
+if "$bin" > "$tmp/prechangelog-script-failure.stdout" \
+  2> "$tmp/prechangelog-script-failure.stderr"; then
+  printf '%s\n' 'release unexpectedly succeeded with a failing prechangelog script' >&2
+  exit 1
+else
+  prechangelog_script_failure_status=$?
+fi
+test "$prechangelog_script_failure_status" -eq 1
+printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ Running lifecycle script "prechangelog"\nℹ - execute command: "./fail-prechangelog.sh"\n' \
+  > "$tmp/prechangelog-script-failure.expected.stdout"
+printf 'stderr-marker\n\nCommand failed: ./fail-prechangelog.sh\nstderr-marker\n\n' \
+  > "$tmp/prechangelog-script-failure.expected.stderr"
+cmp "$tmp/prechangelog-script-failure.expected.stdout" \
+  "$tmp/prechangelog-script-failure.stdout"
+cmp "$tmp/prechangelog-script-failure.expected.stderr" \
+  "$tmp/prechangelog-script-failure.stderr"
+grep -q '"version": "1.2.4"' package.json
+test ! -e CHANGELOG.md
+test "$(git tag --list)" = v1.2.3
+test "$(git log -1 --format=%s)" = 'fix: trigger prechangelog script failure'
+test "$(git status --porcelain)" = ' M package.json'
+
 printf '%s\n' 'release workflow tests passed'
