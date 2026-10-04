@@ -1312,6 +1312,33 @@ test "$(cat metadata.toml)" = 'version = "1.0.0"'
 test "$(cat custom.dat)" = 'version=1.0.0'
 test ! -e CHANGELOG.md
 
+for package_source_type in toml custom; do
+  mkdir "$tmp/pkg-packagefiles-typed-$package_source_type"
+  cd "$tmp/pkg-packagefiles-typed-$package_source_type"
+  git init -q -b master
+  git config user.name 'C Semver Test'
+  git config user.email 'test@example.invalid'
+  printf '{\n  "name": "pkg-packagefiles-typed-%s-fixture",\n  "version": "1.0.0",\n  "repository": {"type": "git", "url": "https://github.com/example/pkg-packagefiles-typed.git"},\n  "commit-and-tag-version": {"packageFiles": [{"filename": "metadata.toml", "type": "%s"}, "package.json"], "bumpFiles": ["package.json"]}\n}\n' \
+    "$package_source_type" "$package_source_type" > package.json
+  printf 'version = "3.0.0"\n' > metadata.toml
+  git add package.json metadata.toml
+  git commit -qm 'chore: seed typed packageFiles updater fixture'
+  git tag -a v1.0.0 -m 'release 1.0.0'
+  git commit --allow-empty -qm 'fix: trigger typed packageFiles updater fixture'
+  "$bin" --release-as 1.0.1 --skip.changelog --skip.commit --skip.tag \
+    > "$tmp/packagefiles-typed.stdout" 2> "$tmp/packagefiles-typed.stderr"
+  test ! -s "$tmp/packagefiles-typed.stdout"
+  printf 'Unable to obtain updater for: {"filename":"metadata.toml","type":"%s"}\n - Error: Unable to locate updater for provided type (%s).\n - Skipping...\n' \
+    "$package_source_type" "$package_source_type" \
+    > "$tmp/packagefiles-typed.expected.stderr"
+  cmp "$tmp/packagefiles-typed.expected.stderr" \
+    "$tmp/packagefiles-typed.stderr"
+  grep -Fq '"version": "1.0.0"' package.json
+  test "$(cat metadata.toml)" = 'version = "3.0.0"'
+  test ! -e CHANGELOG.md
+  test -z "$(git status --porcelain)"
+done
+
 mkdir "$tmp/pkg-custom-types"
 cd "$tmp/pkg-custom-types"
 git init -q -b master

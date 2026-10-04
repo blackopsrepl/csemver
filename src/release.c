@@ -259,20 +259,7 @@ static int load_config(CsemverConfig *config, const char *path) {
   return 1;
 }
 
-static int package_bump_file_type_supported(const char *type) {
-  static const char *const supported_types[] = {
-      "csproj",     "gradle", "json", "maven", "openapi",
-      "plain-text", "python", "toml", "yaml"};
-  size_t index;
-  for (index = 0; index < sizeof supported_types / sizeof supported_types[0];
-       ++index) {
-    if (strcmp(type, supported_types[index]) == 0)
-      return 1;
-  }
-  return 0;
-}
-
-static int package_upstream_bump_file_type_supported(const char *type) {
+static int package_upstream_updater_type_supported(const char *type) {
   static const char *const supported_types[] = {
       "csproj",  "gradle",     "json",   "maven",
       "openapi", "plain-text", "python", "yaml"};
@@ -371,8 +358,8 @@ static void warn_unsupported_package_bump_file(const char *filename) {
           filename);
 }
 
-static void warn_unsupported_package_bump_type(const char *filename,
-                                               const char *type) {
+static void warn_unsupported_package_updater_type(const char *filename,
+                                                  const char *type) {
   fputs("Unable to obtain updater for: {\"filename\":", stderr);
   print_json_quoted(stderr, filename);
   fputs(",\"type\":", stderr);
@@ -532,6 +519,7 @@ static int load_package_config(CsemverConfig *config) {
          ++option_index) {
       char values[CSEMVER_MAX_FILES][CSEMVER_PATH_MAX];
       char file_types[CSEMVER_MAX_FILES][32];
+      bool unsupported_types[CSEMVER_MAX_FILES] = {false};
       const char *value_pointers[CSEMVER_MAX_FILES];
       size_t value_count, value_index;
       int typed_package_files = 0;
@@ -555,12 +543,8 @@ static int load_package_config(CsemverConfig *config) {
       }
       for (value_index = 0; value_index < value_count; ++value_index) {
         if (typed_package_files && file_types[value_index][0] != '\0' &&
-            !package_bump_file_type_supported(file_types[value_index])) {
-          errorf("unsupported packageFiles updater type: %s",
-                 file_types[value_index]);
-          free(contents);
-          return 0;
-        }
+            !package_upstream_updater_type_supported(file_types[value_index]))
+          unsupported_types[value_index] = true;
         value_pointers[value_index] = values[value_index];
       }
       if (!csemver_config_set_array(
@@ -577,9 +561,12 @@ static int load_package_config(CsemverConfig *config) {
                ++file_index) {
             if (strcmp(config->package_files[file_index].filename,
                        values[value_index]) == 0 &&
-                file_types[value_index][0] != '\0')
+                file_types[value_index][0] != '\0') {
               memcpy(config->package_files[file_index].type,
                      file_types[value_index], sizeof file_types[value_index]);
+              config->package_files[file_index].compatibility_unsupported_type =
+                  unsupported_types[value_index];
+            }
           }
         }
       }
@@ -620,7 +607,7 @@ static int load_package_config(CsemverConfig *config) {
         }
         unsupported_types[value_index] =
             strcmp(types[value_index], PACKAGE_UNSUPPORTED_FILENAME) != 0 &&
-            !package_upstream_bump_file_type_supported(types[value_index]);
+            !package_upstream_updater_type_supported(types[value_index]);
         value_pointers[value_index] = filenames[value_index];
       }
       if (!csemver_config_set_array(config, "bumpFiles", value_pointers,
@@ -1138,6 +1125,12 @@ static int get_version(const CsemverConfig *config, char *version,
   for (index = 0; index < config->package_file_count; ++index) {
     char *content = NULL;
     char error[256];
+    if (config->package_files[index].compatibility_unsupported_type) {
+      warn_unsupported_package_updater_type(
+          config->package_files[index].filename,
+          config->package_files[index].type);
+      return -1;
+    }
     if (!csemver_read_file(config->package_files[index].filename, &content,
                            NULL))
       continue;
@@ -3224,8 +3217,8 @@ static int update_files(const CsemverConfig *config, const char *version,
     size_t updated_size = 0;
     BumpFileKind file_kind;
     if (config->bump_files[i].compatibility_unsupported_type) {
-      warn_unsupported_package_bump_type(config->bump_files[i].filename,
-                                         config->bump_files[i].type);
+      warn_unsupported_package_updater_type(config->bump_files[i].filename,
+                                            config->bump_files[i].type);
       continue;
     }
     if (strcmp(config->bump_files[i].type, PACKAGE_UNSUPPORTED_FILENAME) == 0) {
@@ -3552,7 +3545,7 @@ int csemver_main(int argc, char **argv) {
   Commit *commits = NULL;
   char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX];
   Semver current_semver;
-  int bump, parsed_args;
+  int bump, parsed_args, package_version_status;
   char *check_output = NULL;
   int status = 0;
   config_path =
@@ -3563,6 +3556,9 @@ int csemver_main(int argc, char **argv) {
   parsed_args = parse_args(argc, argv, &config, &config_path);
   if (parsed_args != 0)
     return parsed_args == 1 ? 0 : parsed_args;
+  package_version_status = get_version(&config, current, &is_private);
+  if (package_version_status < 0)
+    return 0;
   if (!config.skip_bump) {
     if (!release_as_is_valid(config.release_as)) {
       if (!config.silent)
@@ -3592,7 +3588,7 @@ int csemver_main(int argc, char **argv) {
     errorf("cannot inspect Git tags");
     return 1;
   }
-  if (!get_version(&config, current, &is_private)) {
+  if (package_version_status == 0) {
     if (!config.git_tag_fallback) {
       if (!config.silent)
         fputs("no package file found\n", stderr);
