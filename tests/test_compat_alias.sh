@@ -51,13 +51,14 @@ git commit -qm 'chore: initialize unmodified drop-in project'
 git tag -a v1.2.3 -m 'release 1.2.3'
 git commit --allow-empty -qm 'fix: exercise PATH command substitution'
 PATH="$tmp/command-bin:$PATH" commit-and-tag-version \
-  --skip.changelog --skip.commit --skip.tag > "$tmp/drop-in.stdout" \
-  2> "$tmp/drop-in.stderr"
-printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n' \
+  > "$tmp/drop-in.stdout" 2> "$tmp/drop-in.stderr"
+printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ created CHANGELOG.md\n✔ outputting changes to CHANGELOG.md\n✔ committing package.json and CHANGELOG.md\n✔ tagging release v1.2.4\nℹ Run `git push --follow-tags origin master && npm publish` to publish\n' \
   > "$tmp/drop-in.expected.stdout"
 cmp "$tmp/drop-in.expected.stdout" "$tmp/drop-in.stdout"
 test ! -s "$tmp/drop-in.stderr"
+test -f CHANGELOG.md
 grep -q '"version": "1.2.4"' package.json
-test -z "$(git tag --list v1.2.4)"
-test "$(git status --porcelain)" = ' M package.json'
+test "$(git tag --list v1.2.4)" = v1.2.4
+test "$(git log -1 --format=%s)" = 'chore(release): 1.2.4'
+test -z "$(git status --porcelain)"
 printf '%s\n' 'compatibility executable test passed'
