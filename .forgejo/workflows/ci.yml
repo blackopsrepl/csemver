@@ -17,5 +17,11 @@ jobs:
     runs-on: cpp-latest
     steps:
       - uses: actions/checkout@v4
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: init.defaultBranch
+          GIT_CONFIG_VALUE_0: master
+      - name: Install libxml2 and libyaml development files
+        run: zypper --non-interactive --gpg-auto-import-keys install --auto-agree-with-licenses libxml2-devel libyaml-devel
       - name: Build and test
         run: make clean test
