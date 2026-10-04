@@ -1404,6 +1404,48 @@ for package_source_case in untyped-string untyped-object inferred-string inferre
   esac
 done
 
+for updater_order_case in gradle-before-maven csproj-after-maven python-before-yaml; do
+  mkdir "$tmp/pkg-packagefiles-$updater_order_case"
+  cd "$tmp/pkg-packagefiles-$updater_order_case"
+  git init -q -b master
+  git config user.name 'C Semver Test'
+  git config user.email 'test@example.invalid'
+  case "$updater_order_case" in
+    gradle-before-maven)
+      package_source_filename=build.gradle.pom.xml
+      cat > "$package_source_filename" <<'XML'
+<project><modelVersion>4.0.0</modelVersion><groupId>x</groupId><artifactId>x</artifactId><version>3.0.0</version></project>
+XML
+      ;;
+    csproj-after-maven)
+      package_source_filename=pom.xml.csproj
+      cat > "$package_source_filename" <<'XML'
+<project><modelVersion>4.0.0</modelVersion><groupId>x</groupId><artifactId>x</artifactId><version>3.0.0</version><Version>9.9.9</Version></project>
+XML
+      ;;
+    python-before-yaml)
+      package_source_filename=pyproject.toml.yaml
+      printf 'version: 3.0.0\n' > "$package_source_filename"
+      ;;
+  esac
+  printf '{\n  "name": "pkg-packagefiles-%s-fixture",\n  "version": "1.0.0",\n  "repository": {"type": "git", "url": "https://github.com/example/pkg-packagefiles-order.git"},\n  "commit-and-tag-version": {"packageFiles": ["%s", "package.json"], "bumpFiles": ["package.json"]}\n}\n' \
+    "$updater_order_case" "$package_source_filename" > package.json
+  git add package.json "$package_source_filename"
+  git commit -qm 'chore: seed updater inference order fixture'
+  git tag -a v1.0.0 -m 'release 1.0.0'
+  git commit --allow-empty -qm 'fix: trigger updater inference order fixture'
+  "$bin" --skip.changelog --skip.commit --skip.tag \
+    > "$tmp/packagefiles-order.stdout" 2> "$tmp/packagefiles-order.stderr"
+  printf '%s\n' '✔ bumping version in package.json from 1.0.0 to 3.0.1' \
+    > "$tmp/packagefiles-order.expected.stdout"
+  cmp "$tmp/packagefiles-order.expected.stdout" \
+    "$tmp/packagefiles-order.stdout"
+  test ! -s "$tmp/packagefiles-order.stderr"
+  grep -Fq '"version": "3.0.1"' package.json
+  git diff --quiet -- "$package_source_filename"
+  test -z "$(git ls-files --others --exclude-standard)"
+done
+
 mkdir "$tmp/pkg-bumpfiles-inferred-object"
 cd "$tmp/pkg-bumpfiles-inferred-object"
 git init -q -b master

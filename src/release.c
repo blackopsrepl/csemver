@@ -294,19 +294,19 @@ static const char *package_bump_file_type_from_filename(const char *filename) {
   if (strcmp(filename, "VERSION.txt") == 0 ||
       strcmp(filename, "version.txt") == 0)
     return "plain-text";
+  if (strstr(filename, "pom.xml") != NULL)
+    return "maven";
   if (strstr(filename, "build.gradle") != NULL)
     return "gradle";
   if (package_path_ends_with(filename, ".csproj"))
     return "csproj";
-  if (strstr(filename, "pom.xml") != NULL)
-    return "maven";
   if (strstr(filename, "openapi.yaml") != NULL)
     return "openapi";
-  if (strstr(filename, "pyproject.toml") != NULL)
-    return "python";
   if (package_path_ends_with(filename, ".yaml") ||
       package_path_ends_with(filename, ".yml"))
     return "yaml";
+  if (strstr(filename, "pyproject.toml") != NULL)
+    return "python";
   return NULL;
 }
 
