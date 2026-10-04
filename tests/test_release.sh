@@ -3775,4 +3775,52 @@ test "$(git tag --list)" = v1.2.3
 test "$(git log -1 --format=%s)" = 'fix: trigger prechangelog script failure'
 test "$(git status --porcelain)" = ' M package.json'
 
+run_pre_bump_lifecycle_failure() (
+  hook=$1
+  script="fail-$hook.sh"
+  case_dir="$tmp/$hook-script-failure"
+  mkdir "$case_dir"
+  cd "$case_dir"
+  git init -q -b master
+  git config user.name 'C Semver Test'
+  git config user.email 'test@example.invalid'
+  git config commit.gpgSign false
+  printf '{\n  "name": "%s-script-failure",\n  "version": "1.2.3",\n  "repository": {"type": "git", "url": "https://github.com/example/%s-script-failure.git"},\n  "commit-and-tag-version": {"scripts": {"%s": "./%s"}}\n}\n' \
+    "$hook" "$hook" "$hook" "$script" > package.json
+  cp package.json "$tmp/$hook-package.expected.json"
+  cat > "$script" <<'SH'
+#!/bin/sh
+printf 'stdout-marker\n'
+printf 'stderr-marker\n' >&2
+exit 7
+SH
+  chmod +x "$script"
+  git add package.json "$script"
+  git commit -qm "chore: initialize $hook failure fixture"
+  git tag -a v1.2.3 -m 'release 1.2.3'
+  printf 'fix\n' > fix.txt
+  git add fix.txt
+  git commit -qm "fix: trigger $hook failure"
+  if "$bin" > "$case_dir.stdout" 2> "$case_dir.stderr"; then
+    printf 'release unexpectedly succeeded with a failing %s script\n' "$hook" >&2
+    exit 1
+  else
+    hook_status=$?
+  fi
+  test "$hook_status" -eq 1
+  printf '✔ Running lifecycle script "%s"\nℹ - execute command: "./%s"\n' \
+    "$hook" "$script" > "$case_dir.expected.stdout"
+  printf 'stderr-marker\n\nCommand failed: ./%s\nstderr-marker\n\n' \
+    "$script" > "$case_dir.expected.stderr"
+  cmp "$case_dir.expected.stdout" "$case_dir.stdout"
+  cmp "$case_dir.expected.stderr" "$case_dir.stderr"
+  cmp "$tmp/$hook-package.expected.json" package.json
+  test ! -e CHANGELOG.md
+  test "$(git tag --list)" = v1.2.3
+  test "$(git log -1 --format=%s)" = "fix: trigger $hook failure"
+  test -z "$(git status --porcelain)"
+)
+run_pre_bump_lifecycle_failure prerelease
+run_pre_bump_lifecycle_failure prebump
+
 printf '%s\n' 'release workflow tests passed'
