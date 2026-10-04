@@ -27,8 +27,9 @@ jobs:
       - name: Install libxml2 and libyaml development files on macOS
         if: runner.os == 'macOS'
         run: |
-          brew install libxml2 libyaml pkg-config
+          brew install libxml2 libyaml pkg-config coreutils
           echo "$(brew --prefix libxml2)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
           echo "PKG_CONFIG_PATH=$(brew --prefix libxml2)/lib/pkgconfig:$(brew --prefix libyaml)/lib/pkgconfig:$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
       - name: Build and test
         run: make clean test

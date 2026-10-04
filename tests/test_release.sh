@@ -2106,7 +2106,7 @@ cat > package.json <<'JSON'
   "version": "1.0.0",
   "commit-and-tag-version": {
     "scripts": {
-      "prerelease": "if test -S /proc/self/fd/1 && test -S /proc/self/fd/2; then yes x | head -c 262144; yes y | head -c 262144 >&2; else printf non-socket >&2; fi"
+      "prerelease": "yes x | head -c 262144; yes y | head -c 262144 >&2"
     }
   }
 }
