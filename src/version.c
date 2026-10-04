@@ -732,7 +732,7 @@ typedef struct {
   const Range *insert_version_objects;
   size_t version_count, insert_version_object_count;
   const char *replacement;
-  bool replacement_is_null;
+  bool replacement_is_null, compact;
   char indent_char;
   size_t indent_size;
   const char *newline;
@@ -749,8 +749,36 @@ typedef struct {
   bool is_index, is_replacement;
 } JsonProperty;
 
+typedef struct JsonDiagnosticAllocation {
+  char *value;
+  struct JsonDiagnosticAllocation *next;
+} JsonDiagnosticAllocation;
+
+static JsonDiagnosticAllocation *json_diagnostic_allocations;
+
+static int retain_json_diagnostic_allocation(char *value) {
+  JsonDiagnosticAllocation *allocation = malloc(sizeof *allocation);
+  if (allocation == NULL)
+    return 0;
+  allocation->value = value;
+  allocation->next = json_diagnostic_allocations;
+  json_diagnostic_allocations = allocation;
+  return 1;
+}
+
+void csemver_json_diagnostics_clear(void) {
+  while (json_diagnostic_allocations != NULL) {
+    JsonDiagnosticAllocation *allocation = json_diagnostic_allocations;
+    json_diagnostic_allocations = allocation->next;
+    free(allocation->value);
+    free(allocation);
+  }
+}
+
 static int append_json_indent(JsonPrinter *printer, size_t depth) {
   size_t level, column;
+  if (printer->compact)
+    return 1;
   if (depth > 512)
     return 0;
   for (level = 0; level < depth; ++level)
@@ -761,6 +789,8 @@ static int append_json_indent(JsonPrinter *printer, size_t depth) {
 }
 
 static int append_json_newline(JsonPrinter *printer) {
+  if (printer->compact)
+    return 1;
   return csemver_buffer_append(printer->output, printer->newline,
                                printer->newline_size);
 }
@@ -1170,7 +1200,8 @@ static int json_print_object(JsonPrinter *printer, size_t depth) {
     if (!append_json_indent(printer, depth + 1) ||
         !csemver_buffer_append(output, properties[i].key_text,
                                properties[i].key_size) ||
-        !csemver_buffer_append(output, ": ", 2))
+        !(printer->compact ? csemver_buffer_append(output, ":", 1)
+                           : csemver_buffer_append(output, ": ", 2)))
       goto fail;
     if (properties[i].is_replacement) {
       if (printer->replacement_is_null) {
@@ -1438,6 +1469,46 @@ fail:
   return 0;
 }
 
+static int json_stringify_range(const char *content, Range range,
+                                char **value) {
+  JsonPrinter printer;
+  CsemverBuffer output;
+  char *serialized = NULL;
+
+  if (value == NULL)
+    return 0;
+  *value = NULL;
+  if (content == NULL || range.start >= range.end)
+    return 0;
+  memset(&printer, 0, sizeof printer);
+  printer.scanner.text = content;
+  printer.scanner.position = range.start;
+  printer.scanner.length = range.end;
+  printer.compact = true;
+  csemver_buffer_init(&output);
+  printer.output = &output;
+  if (!json_print_value(&printer, 0))
+    goto done;
+  spaces(&printer.scanner);
+  if (printer.scanner.position != range.end || output.length == SIZE_MAX)
+    goto done;
+  serialized = malloc(output.length + 1);
+  if (serialized == NULL)
+    goto done;
+  memcpy(serialized, output.data, output.length);
+  serialized[output.length] = '\0';
+done:
+  csemver_buffer_free(&output);
+  if (serialized == NULL)
+    return 0;
+  if (!retain_json_diagnostic_allocation(serialized)) {
+    free(serialized);
+    return 0;
+  }
+  *value = serialized;
+  return 1;
+}
+
 int csemver_json_repository_url(const char *content, char *url,
                                 size_t url_size) {
   Scanner root;
@@ -1636,7 +1707,8 @@ static int json_object_file_array(const char *content, const char *object_key,
                                   size_t filename_stride, char *types,
                                   size_t type_stride, size_t max_values,
                                   bool *is_object, bool *type_precedes_filename,
-                                  size_t *file_count,
+                                  char **argument_json,
+                                  bool *argument_json_valid, size_t *file_count,
                                   int allow_string_entries) {
   Range field;
   Scanner array;
@@ -1648,6 +1720,7 @@ static int json_object_file_array(const char *content, const char *object_key,
       type_stride == 0 || file_count == NULL ||
       max_values > SIZE_MAX / filename_stride ||
       max_values > SIZE_MAX / type_stride ||
+      (argument_json_valid != NULL && argument_json == NULL) ||
       !json_config_field(content, object_key, field_key, &field, NULL, 0) ||
       field.start >= field.end || content[field.start] != '[')
     return 0;
@@ -1673,12 +1746,19 @@ static int json_object_file_array(const char *content, const char *object_key,
           !(allow_string_entries && array.text[array.position] == '"');
     if (type_precedes_filename != NULL)
       type_precedes_filename[count] = false;
+    if (argument_json_valid != NULL)
+      argument_json_valid[count] = false;
+    if (argument_json != NULL)
+      argument_json[count] = NULL;
     if (allow_string_entries && array.text[array.position] == '"') {
       if (!string_value(&array, filename, filename_stride, NULL, NULL))
         return 0;
     } else {
       if (array.text[array.position] != '{' || !skip_value(&array, &item))
         return 0;
+      if (argument_json != NULL && argument_json_valid != NULL)
+        argument_json_valid[count] =
+            json_stringify_range(array.text, item, &argument_json[count]);
       object.text = array.text;
       object.position = item.start;
       object.length = item.end;
@@ -1738,18 +1818,18 @@ int csemver_json_object_typed_file_array(const char *content,
                                          size_t *file_count) {
   return json_object_file_array(content, object_key, field_key, filenames,
                                 filename_stride, types, type_stride, max_values,
-                                NULL, NULL, file_count, 0);
+                                NULL, NULL, NULL, NULL, file_count, 0);
 }
 
 int csemver_json_object_mixed_file_array(
     const char *content, const char *object_key, const char *field_key,
     char *filenames, size_t filename_stride, char *types, size_t type_stride,
-    bool *is_object, bool *type_precedes_filename, size_t max_values,
-    size_t *file_count) {
-  return json_object_file_array(content, object_key, field_key, filenames,
-                                filename_stride, types, type_stride, max_values,
-                                is_object, type_precedes_filename, file_count,
-                                1);
+    bool *is_object, bool *type_precedes_filename, char **argument_json,
+    bool *argument_json_valid, size_t max_values, size_t *file_count) {
+  return json_object_file_array(
+      content, object_key, field_key, filenames, filename_stride, types,
+      type_stride, max_values, is_object, type_precedes_filename, argument_json,
+      argument_json_valid, file_count, 1);
 }
 
 int csemver_json_object_commit_type_array(

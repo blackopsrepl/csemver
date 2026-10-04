@@ -18,6 +18,8 @@ typedef struct {
   bool compatibility_unsupported_filename;
   bool compatibility_updater_argument_object;
   bool compatibility_updater_type_precedes_filename;
+  bool compatibility_updater_argument_json_valid;
+  char *compatibility_updater_argument_json;
 } CsemverFile;
 
 typedef struct {

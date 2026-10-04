@@ -1283,7 +1283,7 @@ cat > package.json <<'JSON'
     "bumpFiles": [
       {"filename": "package.json", "type": "json"},
       {"filename": "metadata.toml", "type": "toml"},
-      {"type": "custom", "filename": "custom.dat"}
+      {"type": "custom", "filename": "custom.dat", "label": "retained"}
     ]
   }
 }
@@ -1303,7 +1303,7 @@ printf '%s\n' \
   'Unable to obtain updater for: {"filename":"metadata.toml","type":"toml"}' \
   ' - Error: Unable to locate updater for provided type (toml).' \
   ' - Skipping...' \
-  'Unable to obtain updater for: {"type":"custom","filename":"custom.dat"}' \
+  'Unable to obtain updater for: {"type":"custom","filename":"custom.dat","label":"retained"}' \
   ' - Error: Unable to locate updater for provided type (custom).' \
   ' - Skipping...' > "$tmp/typed-unsupported.expected.stderr"
 cmp "$tmp/typed-unsupported.expected.stderr" "$tmp/typed-unsupported.stderr"
@@ -1351,7 +1351,7 @@ cat > package.json <<'JSON'
   "repository": {"type": "git", "url": "https://github.com/example/pkg-packagefiles-typed-order.git"},
   "commit-and-tag-version": {
     "packageFiles": [
-      {"type": "custom", "filename": "metadata.dat"},
+      {"type": "custom", "filename": "metadata.dat", "label": "retained", "extra": {"10": "ten", "2": "two", "list": [true, null]}},
       "package.json"
     ],
     "bumpFiles": ["package.json"]
@@ -1367,7 +1367,7 @@ git commit --allow-empty -qm 'fix: trigger typed packageFiles ordering fixture'
   > "$tmp/packagefiles-ordering.stdout" 2> "$tmp/packagefiles-ordering.stderr"
 test ! -s "$tmp/packagefiles-ordering.stdout"
 printf '%s\n' \
-  'Unable to obtain updater for: {"type":"custom","filename":"metadata.dat"}' \
+  'Unable to obtain updater for: {"type":"custom","filename":"metadata.dat","label":"retained","extra":{"2":"two","10":"ten","list":[true,null]}}' \
   ' - Error: Unable to locate updater for provided type (custom).' \
   ' - Skipping...' > "$tmp/packagefiles-ordering.expected.stderr"
 cmp "$tmp/packagefiles-ordering.expected.stderr" \
@@ -1389,9 +1389,9 @@ for package_source_case in untyped-string untyped-object inferred-string inferre
       package_source_expected_identifier='"metadata.toml"'
       ;;
     untyped-object)
-      package_source_entry='{"filename":"metadata.toml"}'
+      package_source_entry='{"filename":"metadata.toml","label":"retained"}'
       package_source_filename=metadata.toml
-      package_source_expected_identifier='{"filename":"metadata.toml"}'
+      package_source_expected_identifier='{"filename":"metadata.toml","label":"retained"}'
       ;;
     inferred-string)
       package_source_entry='"openapi.yaml"'
@@ -2741,6 +2741,29 @@ if printf '%s\n' "$private_preview" | grep -Fq 'npm publish'; then
   exit 1
 fi
 
+test -z "$(git status --porcelain)"
+
+mkdir "$tmp/large-typed-packagefile-diagnostic"
+cd "$tmp/large-typed-packagefile-diagnostic"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+long_label=$(printf '%*s' 3000 '' | tr ' ' x)
+printf '{\n  "name": "large-typed-packagefile-diagnostic-fixture",\n  "version": "1.0.0",\n  "repository": {"type": "git", "url": "https://github.com/example/large-typed-packagefile-diagnostic.git"},\n  "commit-and-tag-version": {"packageFiles": [{"type": "custom", "filename": "metadata.dat", "label": "%s"}, "package.json"], "bumpFiles": ["package.json"]}\n}\n' \
+  "$long_label" > package.json
+printf 'version=3.0.0\n' > metadata.dat
+git add package.json metadata.dat
+git commit -qm 'chore: seed large updater diagnostic fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: trigger large updater diagnostic fixture'
+"$bin" --skip.changelog --skip.commit --skip.tag \
+  > "$tmp/large-updater-diagnostic.stdout" \
+  2> "$tmp/large-updater-diagnostic.stderr"
+test ! -s "$tmp/large-updater-diagnostic.stdout"
+printf 'Unable to obtain updater for: {"type":"custom","filename":"metadata.dat","label":"%s"}\n - Error: Unable to locate updater for provided type (custom).\n - Skipping...\n' \
+  "$long_label" > "$tmp/large-updater-diagnostic.expected.stderr"
+cmp "$tmp/large-updater-diagnostic.expected.stderr" \
+  "$tmp/large-updater-diagnostic.stderr"
 test -z "$(git status --porcelain)"
 
 printf '%s\n' 'release workflow tests passed'
