@@ -577,6 +577,7 @@ static int load_package_config(CsemverConfig *config) {
       bool package_file_type_precedes_filename[CSEMVER_MAX_FILES] = {false};
       char *package_file_argument_json[CSEMVER_MAX_FILES] = {NULL};
       bool package_file_argument_json_valid[CSEMVER_MAX_FILES] = {false};
+      bool package_files_have_custom_updater = false;
       bool unsupported_types[CSEMVER_MAX_FILES] = {false};
       bool unsupported_filenames[CSEMVER_MAX_FILES] = {false};
       const char *value_pointers[CSEMVER_MAX_FILES];
@@ -601,8 +602,14 @@ static int load_package_config(CsemverConfig *config) {
                 sizeof values[0], &file_types[0][0], sizeof file_types[0],
                 package_file_objects, package_file_type_precedes_filename,
                 package_file_argument_json, package_file_argument_json_valid,
+                &package_files_have_custom_updater,
                 array_options[option_index].max_values, &value_count))
           continue;
+        if (package_files_have_custom_updater) {
+          errorf("custom JavaScript updaters require Node and are unsupported");
+          free(contents);
+          return 0;
+        }
         typed_package_files = 1;
       }
       for (value_index = 0; value_index < value_count; ++value_index) {
@@ -668,6 +675,7 @@ static int load_package_config(CsemverConfig *config) {
       bool type_precedes_filename[CSEMVER_MAX_FILES] = {false};
       char *argument_json[CSEMVER_MAX_FILES] = {NULL};
       bool argument_json_valid[CSEMVER_MAX_FILES] = {false};
+      bool has_custom_updater = false;
       bool unsupported_types[CSEMVER_MAX_FILES] = {false};
       const char *value_pointers[CSEMVER_MAX_FILES];
       size_t value_count, value_index;
@@ -675,7 +683,12 @@ static int load_package_config(CsemverConfig *config) {
           contents, sections[section_index], bump_file_options[option_index],
           &filenames[0][0], sizeof filenames[0], &types[0][0], sizeof types[0],
           NULL, type_precedes_filename, argument_json, argument_json_valid,
-          CSEMVER_MAX_FILES, &value_count);
+          &has_custom_updater, CSEMVER_MAX_FILES, &value_count);
+      if (typed_files && has_custom_updater) {
+        errorf("custom JavaScript updaters require Node and are unsupported");
+        free(contents);
+        return 0;
+      }
       if (!typed_files) {
         if (!csemver_json_object_string_array(
                 contents, sections[section_index],

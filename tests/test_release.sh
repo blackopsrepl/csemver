@@ -2766,4 +2766,39 @@ cmp "$tmp/large-updater-diagnostic.expected.stderr" \
   "$tmp/large-updater-diagnostic.stderr"
 test -z "$(git status --porcelain)"
 
+for custom_updater_location in packageFiles bumpFiles; do
+  mkdir "$tmp/custom-updater-$custom_updater_location"
+  cd "$tmp/custom-updater-$custom_updater_location"
+  git init -q -b master
+  git config user.name 'C Semver Test'
+  git config user.email 'test@example.invalid'
+  if [ "$custom_updater_location" = packageFiles ]; then
+    package_files='[{"filename":"metadata.dat","updater":"./custom-updater.js"},"package.json"]'
+    bump_files='["package.json"]'
+  else
+    package_files='["package.json"]'
+    bump_files='[{"filename":"metadata.dat","updater":"./custom-updater.js"},"package.json"]'
+  fi
+  printf '{"name":"custom-updater-%s-fixture","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/custom-updater-fixture.git"},"commit-and-tag-version":{"packageFiles":%s,"bumpFiles":%s}}\n' \
+    "$custom_updater_location" "$package_files" "$bump_files" > package.json
+  printf 'version=3.0.0\n' > metadata.dat
+  git add package.json metadata.dat
+  git commit -qm 'chore: seed custom updater fixture'
+  git tag -a v1.0.0 -m 'release 1.0.0'
+  git commit --allow-empty -qm 'fix: trigger custom updater fixture'
+  if "$bin" --skip.changelog --skip.commit --skip.tag \
+    > "$tmp/custom-updater.stdout" 2> "$tmp/custom-updater.stderr"; then
+    custom_updater_status=0
+  else
+    custom_updater_status=$?
+  fi
+  test "$custom_updater_status" -eq 2
+  test ! -s "$tmp/custom-updater.stdout"
+  printf '%s\n' \
+    'csemver: custom JavaScript updaters require Node and are unsupported' \
+    > "$tmp/custom-updater.expected.stderr"
+  cmp "$tmp/custom-updater.expected.stderr" "$tmp/custom-updater.stderr"
+  test -z "$(git status --porcelain)"
+done
+
 printf '%s\n' 'release workflow tests passed'
