@@ -4057,4 +4057,29 @@ test "$(git tag --list)" = "$(printf 'v1.2.3\nv1.2.4')"
 test "$(git log -1 --format=%s)" = 'chore(release): 1.2.4'
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/versionrc-json-config"
+cd "$tmp/versionrc-json-config"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{"name":"versionrc-json-config","version":"1.2.3","repository":{"type":"git","url":"https://github.com/example/versionrc-json-config.git"}}\n' > package.json
+printf '{"tagPrefix":"release-"}\n' > .versionrc.json
+git add package.json .versionrc.json
+git commit -qm 'chore: initialize versionrc JSON config fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+git tag -a release-1.2.3 -m 'release 1.2.3'
+git commit --allow-empty -qm 'fix: exercise versionrc JSON config'
+"$bin" --dry-run > "$tmp/versionrc-json-config.stdout"
+grep -F -x -q '✔ tagging release release-1.2.4' \
+  "$tmp/versionrc-json-config.stdout"
+mv .versionrc.json .versionrc
+"$bin" --dry-run > "$tmp/versionrc-json-config-extensionless.stdout"
+grep -F -x -q '✔ tagging release release-1.2.4' \
+  "$tmp/versionrc-json-config-extensionless.stdout"
+"$bin" --config=.versionrc --dry-run \
+  > "$tmp/versionrc-json-config-explicit.stdout"
+grep -F -x -q '✔ tagging release release-1.2.4' \
+  "$tmp/versionrc-json-config-explicit.stdout"
+
 printf '%s\n' 'release workflow tests passed'

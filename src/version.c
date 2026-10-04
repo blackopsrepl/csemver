@@ -323,6 +323,20 @@ static int skip_value(Scanner *s, Range *range) {
   return 1;
 }
 
+int csemver_json_validate(const char *content) {
+  Scanner scanner;
+  if (content == NULL)
+    return 0;
+  scanner.text = content;
+  scanner.position = 0;
+  scanner.length = strlen(content);
+  spaces(&scanner);
+  if (!skip_value(&scanner, NULL))
+    return 0;
+  spaces(&scanner);
+  return scanner.position == scanner.length;
+}
+
 static int object_field(Scanner *s, const char *wanted, Range *range,
                         char *decoded, size_t decoded_size) {
   int found = 0;

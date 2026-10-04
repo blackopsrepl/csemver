@@ -16,6 +16,7 @@ int csemver_version_update_text(const char *filename, const char *type,
                                 char *error, size_t error_size);
 int csemver_json_repository_url(const char *content, char *url,
                                 size_t url_size);
+int csemver_json_validate(const char *content);
 int csemver_json_object_nested_string(const char *content,
                                       const char *object_key,
                                       const char *nested_key,

@@ -66,6 +66,8 @@ typedef struct {
 
 static char *trim(char *text);
 static int uses_plain_text_updater(const CsemverFile *file);
+static int load_package_config_contents(CsemverConfig *config, char *contents);
+static int load_json_config_contents(CsemverConfig *config, char *contents);
 static int render_changelog(const CsemverConfig *config, const char *version,
                             const char *previous_tag, const char *new_tag,
                             const Commit *commits, size_t commit_count,
@@ -430,15 +432,103 @@ static int run_git_execfile(const CsemverConfig *config,
   return 1;
 }
 
+static const char *find_default_config_path(char *storage,
+                                            size_t storage_size) {
+  static const char *const filenames[] = {".versionrc", ".versionrc.cjs",
+                                          ".versionrc.mjs", ".versionrc.json",
+                                          ".versionrc.js"};
+  char directory[CSEMVER_PATH_MAX];
+  int current_directory = 1;
+  if (getcwd(directory, sizeof directory) == NULL)
+    return NULL;
+  for (;;) {
+    size_t index;
+    for (index = 0; index < sizeof filenames / sizeof filenames[0]; ++index) {
+      char candidate[CSEMVER_PATH_MAX];
+      int length =
+          snprintf(candidate, sizeof candidate, "%s%s%s", directory,
+                   strcmp(directory, "/") == 0 ? "" : "/", filenames[index]);
+      if (length < 0 || (size_t)length >= sizeof candidate)
+        continue;
+      if (access(candidate, F_OK) == 0) {
+        if (snprintf(storage, storage_size, "%s", candidate) >=
+            (int)storage_size)
+          return NULL;
+        return storage;
+      }
+    }
+    if (current_directory) {
+      char candidate[CSEMVER_PATH_MAX];
+      int length =
+          snprintf(candidate, sizeof candidate, "%s%s%s", directory,
+                   strcmp(directory, "/") == 0 ? "" : "/", "csemver.toml");
+      if (length >= 0 && (size_t)length < sizeof candidate &&
+          access(candidate, F_OK) == 0) {
+        if (snprintf(storage, storage_size, "%s", candidate) >=
+            (int)storage_size)
+          return NULL;
+        return storage;
+      }
+      current_directory = 0;
+    }
+    if (strcmp(directory, "/") == 0)
+      break;
+    {
+      char *slash = strrchr(directory, '/');
+      if (slash == NULL)
+        break;
+      if (slash == directory)
+        directory[1] = '\0';
+      else
+        *slash = '\0';
+    }
+  }
+  return NULL;
+}
+
+static int path_has_suffix(const char *path, const char *suffix) {
+  size_t path_length = strlen(path);
+  size_t suffix_length = strlen(suffix);
+  return path_length >= suffix_length &&
+         strcmp(path + path_length - suffix_length, suffix) == 0;
+}
+
 static int load_config(CsemverConfig *config, const char *path) {
   char *contents = NULL;
   char error[256] = {0};
-  if (path == NULL) {
-    if (!csemver_read_file("csemver.toml", &contents, NULL))
+  char discovered_path[CSEMVER_PATH_MAX];
+  const char *selected_path = path;
+  const char *first;
+  if (selected_path == NULL) {
+    selected_path =
+        find_default_config_path(discovered_path, sizeof discovered_path);
+    if (selected_path == NULL)
       return 1;
-  } else if (!csemver_read_file(path, &contents, NULL)) {
-    errorf("cannot read TOML config '%s'", path);
+  }
+  if (!csemver_read_file(selected_path, &contents, NULL)) {
+    if (path_has_suffix(selected_path, ".toml"))
+      errorf("cannot read TOML config '%s'", selected_path);
+    else
+      errorf("cannot read config '%s'", selected_path);
     return 0;
+  }
+  if (path_has_suffix(selected_path, ".js") ||
+      path_has_suffix(selected_path, ".cjs") ||
+      path_has_suffix(selected_path, ".mjs")) {
+    errorf("JavaScript configuration files require Node and are unsupported");
+    free(contents);
+    return 0;
+  }
+  first = contents;
+  while (isspace((unsigned char)*first))
+    ++first;
+  if (*first == '{') {
+    if (!csemver_json_validate(contents)) {
+      errorf("invalid JSON config '%s'", selected_path);
+      free(contents);
+      return 0;
+    }
+    return load_json_config_contents(config, contents);
   }
   if (!csemver_config_parse(config, contents, error, sizeof error)) {
     errorf("%s", error);
@@ -614,7 +704,7 @@ static void warn_unsupported_package_updater_type(const char *filename,
           type);
 }
 
-static int load_package_config(CsemverConfig *config) {
+static int load_package_config_contents(CsemverConfig *config, char *contents) {
   typedef struct {
     const char *json_key;
     const char *config_key;
@@ -689,12 +779,8 @@ static int load_package_config(CsemverConfig *config) {
       "prerelease", "prebump",    "postbump", "prechangelog", "postchangelog",
       "precommit",  "postcommit", "pretag",   "posttag"};
   static const char *const bump_file_options[] = {"bumpFiles", "bump-files"};
-  char *contents = NULL;
   char error[256] = {0};
   size_t section_index, option_index;
-
-  if (!csemver_read_file("package.json", &contents, NULL))
-    return 1;
   for (section_index = 0; section_index < sizeof sections / sizeof sections[0];
        ++section_index) {
     for (option_index = 0; option_index < sizeof options / sizeof options[0];
@@ -967,6 +1053,37 @@ static int load_package_config(CsemverConfig *config) {
   }
   free(contents);
   return 1;
+}
+
+static int load_package_config(CsemverConfig *config) {
+  char *contents = NULL;
+  if (!csemver_read_file("package.json", &contents, NULL))
+    return 1;
+  return load_package_config_contents(config, contents);
+}
+
+static int load_json_config_contents(CsemverConfig *config, char *contents) {
+  static const char prefix[] = "{\"commit-and-tag-version\":";
+  size_t prefix_length = sizeof prefix - 1;
+  size_t content_length = strlen(contents);
+  char *wrapped;
+  if (content_length > SIZE_MAX - prefix_length - 2) {
+    errorf("configuration file is too large");
+    free(contents);
+    return 0;
+  }
+  wrapped = malloc(prefix_length + content_length + 2);
+  if (wrapped == NULL) {
+    errorf("out of memory");
+    free(contents);
+    return 0;
+  }
+  memcpy(wrapped, prefix, prefix_length);
+  memcpy(wrapped + prefix_length, contents, content_length);
+  wrapped[prefix_length + content_length] = '}';
+  wrapped[prefix_length + content_length + 1] = '\0';
+  free(contents);
+  return load_package_config_contents(config, wrapped);
 }
 
 static int set_negated_boolean_option(CsemverConfig *config, const char *key) {
