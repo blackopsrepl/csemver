@@ -2890,4 +2890,57 @@ cmp "$tmp/tag-prefix-regex-prerelease.expected.stderr" \
   "$tmp/tag-prefix-regex-prerelease.stderr"
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/tag-decoration-parenthesis"
+cd "$tmp/tag-decoration-parenthesis"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+printf '{"name":"tag-decoration-parenthesis","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/tag-decoration-parenthesis.git"},"commit-and-tag-version":{"packageFiles":[],"tagPrefix":"v(foo)"}}\n' > package.json
+git add package.json
+git commit -qm 'chore: seed decorated tag fixture'
+git tag -a 'v(foo)1.0.0' -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise decorated tag parsing'
+if "$bin" --dry-run --skip.changelog --skip.commit --skip.tag \
+  > "$tmp/tag-decoration-parenthesis.stdout" \
+  2> "$tmp/tag-decoration-parenthesis.stderr"; then
+  tag_decoration_status=0
+else
+  tag_decoration_status=$?
+fi
+test "$tag_decoration_status" -eq 0
+printf '%s\n' '✔ bumping version in package.json from 1.0.0 to 1.0.1' \
+  > "$tmp/tag-decoration-parenthesis.expected.stdout"
+cmp "$tmp/tag-decoration-parenthesis.expected.stdout" \
+  "$tmp/tag-decoration-parenthesis.stdout"
+test ! -s "$tmp/tag-decoration-parenthesis.stderr"
+test -z "$(git status --porcelain)"
+
+mkdir "$tmp/tag-fallback-unreachable-tag"
+cd "$tmp/tag-fallback-unreachable-tag"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+printf '{"name":"tag-fallback-unreachable-tag","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/tag-fallback-unreachable-tag.git"},"commit-and-tag-version":{"packageFiles":[]}}\n' > package.json
+git add package.json
+git commit -qm 'chore: seed unreachable tag fixture'
+git checkout -qb side
+git commit --allow-empty -qm 'feat: add unreachable tagged release'
+git tag -a v2.0.0 -m 'release 2.0.0'
+git checkout -q master
+git commit --allow-empty -qm 'fix: retain default reachable release'
+if "$bin" --dry-run --skip.changelog --skip.commit --skip.tag \
+  > "$tmp/tag-fallback-unreachable-tag.stdout" \
+  2> "$tmp/tag-fallback-unreachable-tag.stderr"; then
+  unreachable_tag_status=0
+else
+  unreachable_tag_status=$?
+fi
+test "$unreachable_tag_status" -eq 0
+printf '%s\n' '✔ bumping version in package.json from 1.0.0 to 1.0.1' \
+  > "$tmp/tag-fallback-unreachable-tag.expected.stdout"
+cmp "$tmp/tag-fallback-unreachable-tag.expected.stdout" \
+  "$tmp/tag-fallback-unreachable-tag.stdout"
+test ! -s "$tmp/tag-fallback-unreachable-tag.stderr"
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'

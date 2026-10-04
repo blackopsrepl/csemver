@@ -1127,15 +1127,27 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
 
 /* RELEASE_ENGINE */
 
+static char *find_git_tag_marker(char *cursor) {
+  while (*cursor != '\0') {
+    if ((*cursor == 't' || *cursor == 'T') &&
+        (cursor[1] == 'a' || cursor[1] == 'A') &&
+        (cursor[2] == 'g' || cursor[2] == 'G') && cursor[3] == ':')
+      return cursor;
+    ++cursor;
+  }
+  return NULL;
+}
+
 static int collect_tags(const CsemverConfig *config,
                         char tags[][SEMVER_TEXT_MAX], size_t *tag_count,
                         char *latest_version, char *latest_tag) {
-  const char *args[] = {"tag", "--list", "--sort=-version:refname", NULL};
+  const char *args[] = {"log", "--decorate", "--no-color", "--date-order",
+                        NULL};
   char *output = NULL;
-  char *line;
-  char *save = NULL;
+  char *cursor;
   int status = 0;
   char latest_stable_version[SEMVER_TEXT_MAX] = "";
+  size_t prefix_length = strlen(config->tag_prefix);
   bool found_version = false;
   bool found_stable = false;
   *tag_count = 0;
@@ -1144,45 +1156,61 @@ static int collect_tags(const CsemverConfig *config,
     free(output);
     return 0;
   }
-  line = strtok_r(output, "\n", &save);
-  while (line != NULL) {
+  cursor = output;
+  while ((cursor = find_git_tag_marker(cursor)) != NULL) {
+    char *start = cursor + 4;
+    char *end;
+    size_t tag_length;
+    char tag[SEMVER_TEXT_MAX];
     char candidate[SEMVER_TEXT_MAX];
     Semver parsed;
-    if (strncmp(line, config->tag_prefix, strlen(config->tag_prefix)) == 0 &&
-        strlen(line) - strlen(config->tag_prefix) < sizeof candidate) {
-      snprintf(candidate, sizeof candidate, "%s",
-               line + strlen(config->tag_prefix));
-      if (semver_parse(candidate, &parsed)) {
-        bool relevant_version = true;
-        if (config->has_prerelease && config->prerelease_id[0] != '\0' &&
-            parsed.has_prerelease) {
-          const char *separator = strchr(parsed.prerelease, '.');
-          size_t identifier_length =
-              separator == NULL ? strlen(parsed.prerelease)
-                                : (size_t)(separator - parsed.prerelease);
-          relevant_version =
-              identifier_length == strlen(config->prerelease_id) &&
-              strncmp(parsed.prerelease, config->prerelease_id,
-                      identifier_length) == 0;
-        }
-        if (*tag_count < COMMIT_MAX)
-          snprintf(tags[(*tag_count)++], SEMVER_TEXT_MAX, "%s", line);
-        if (relevant_version &&
-            (!found_version || semver_compare(candidate, latest_version) > 0)) {
-          snprintf(latest_version, SEMVER_TEXT_MAX, "%s", candidate);
-          found_version = true;
-        }
-        if (!parsed.has_prerelease &&
-            (!found_stable ||
-             semver_compare(candidate, latest_stable_version) > 0)) {
-          snprintf(latest_stable_version, sizeof latest_stable_version, "%s",
-                   candidate);
-          snprintf(latest_tag, SEMVER_TEXT_MAX, "%s", line);
-          found_stable = true;
-        }
+
+    while (*start != '\0' && isspace((unsigned char)*start))
+      ++start;
+    end = start;
+    while (*end != '\0' && *end != ',' && *end != ')' && *end != '\n' &&
+           *end != '\r')
+      ++end;
+    cursor = *end == '\0' ? end : end + 1;
+    if ((*end != ',' && *end != ')') || end == start)
+      continue;
+    tag_length = (size_t)(end - start);
+    if (tag_length >= sizeof tag)
+      continue;
+    memcpy(tag, start, tag_length);
+    tag[tag_length] = '\0';
+    if (strncmp(tag, config->tag_prefix, prefix_length) != 0 ||
+        tag_length - prefix_length >= sizeof candidate)
+      continue;
+    snprintf(candidate, sizeof candidate, "%s", tag + prefix_length);
+    if (semver_parse(candidate, &parsed)) {
+      bool relevant_version = true;
+      if (config->has_prerelease && config->prerelease_id[0] != '\0' &&
+          parsed.has_prerelease) {
+        const char *separator = strchr(parsed.prerelease, '.');
+        size_t identifier_length =
+            separator == NULL ? strlen(parsed.prerelease)
+                              : (size_t)(separator - parsed.prerelease);
+        relevant_version = identifier_length == strlen(config->prerelease_id) &&
+                           strncmp(parsed.prerelease, config->prerelease_id,
+                                   identifier_length) == 0;
+      }
+      if (*tag_count < COMMIT_MAX)
+        snprintf(tags[(*tag_count)++], SEMVER_TEXT_MAX, "%s", tag);
+      if (relevant_version &&
+          (!found_version || semver_compare(candidate, latest_version) > 0)) {
+        snprintf(latest_version, SEMVER_TEXT_MAX, "%s", candidate);
+        found_version = true;
+      }
+      if (!parsed.has_prerelease &&
+          (!found_stable ||
+           semver_compare(candidate, latest_stable_version) > 0)) {
+        snprintf(latest_stable_version, sizeof latest_stable_version, "%s",
+                 candidate);
+        snprintf(latest_tag, SEMVER_TEXT_MAX, "%s", tag);
+        found_stable = true;
       }
     }
-    line = strtok_r(NULL, "\n", &save);
   }
   free(output);
   return 1;
