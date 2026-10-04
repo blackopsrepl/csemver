@@ -3263,4 +3263,38 @@ run_custom_infile_case() {
 run_custom_infile_case existing
 run_custom_infile_case missing
 
+mkdir "$tmp/commit-all-empty-paths"
+cd "$tmp/commit-all-empty-paths"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+printf '{"name":"commit-all-empty-paths","version":"1.2.3"}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize empty commit-all fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+printf 'staged\n' > staged.txt
+git add staged.txt
+if git add > "$tmp/commit-all-empty-paths.git-add.stdout" \
+  2> "$tmp/commit-all-empty-paths.git-add.stderr"; then
+  empty_git_add_status=0
+else
+  empty_git_add_status=$?
+fi
+test "$empty_git_add_status" -eq 0
+if [ -s "$tmp/commit-all-empty-paths.git-add.stderr" ]; then
+  printf '\n' >> "$tmp/commit-all-empty-paths.git-add.stderr"
+fi
+"$bin" --skip.bump --skip.changelog --skip.tag --commit-all \
+  > "$tmp/commit-all-empty-paths.stdout" \
+  2> "$tmp/commit-all-empty-paths.stderr"
+printf '✔ committing all staged files and %%s\n' \
+  > "$tmp/commit-all-empty-paths.expected.stdout"
+cmp "$tmp/commit-all-empty-paths.expected.stdout" \
+  "$tmp/commit-all-empty-paths.stdout"
+cmp "$tmp/commit-all-empty-paths.git-add.stderr" \
+  "$tmp/commit-all-empty-paths.stderr"
+test "$(git show --pretty=format: --name-only HEAD)" = staged.txt
+test "$(git tag --list)" = v1.2.3
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'

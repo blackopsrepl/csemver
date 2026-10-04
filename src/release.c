@@ -241,6 +241,34 @@ static int run_git(const char *const args[], char **output, int *status) {
   return run_command(argv, output, status);
 }
 
+static int run_git_capture_streams(const char *const args[],
+                                   char **stdout_output, char **stderr_output,
+                                   int *status) {
+  const char *argv[ARG_MAX_COUNT];
+  size_t count = 0;
+  int max_buffer_stream = 0;
+  while (args[count] != NULL && count + 2 < ARG_MAX_COUNT) {
+    argv[count + 1] = args[count];
+    ++count;
+  }
+  argv[0] = "git";
+  argv[count + 1] = NULL;
+  if (count + 2 >= ARG_MAX_COUNT)
+    return 0;
+  if (!csemver_run_process_capture_streams(argv, stdout_output, stderr_output,
+                                           LIFECYCLE_SCRIPT_MAX_BUFFER,
+                                           &max_buffer_stream, status))
+    return 0;
+  if (max_buffer_stream != 0) {
+    free(*stdout_output);
+    free(*stderr_output);
+    *stdout_output = NULL;
+    *stderr_output = NULL;
+    return 0;
+  }
+  return 1;
+}
+
 static int load_config(CsemverConfig *config, const char *path) {
   char *contents = NULL;
   char error[256] = {0};
@@ -3616,6 +3644,25 @@ static int commit_release(CsemverConfig *config, const char *version,
     if (!run_git(args, NULL, &status) || status != 0)
       return 0;
     index = 0;
+  } else if (config->commit_all) {
+    char *git_stdout = NULL;
+    char *git_stderr = NULL;
+    args[index++] = "add";
+    args[index] = NULL;
+    if (!run_git_capture_streams(args, &git_stdout, &git_stderr, &status)) {
+      free(git_stdout);
+      free(git_stderr);
+      return 0;
+    }
+    free(git_stdout);
+    if (git_stderr[0] != '\0' && !config->silent) {
+      fputs(git_stderr, stderr);
+      fputc('\n', stderr);
+    }
+    free(git_stderr);
+    if (status != 0)
+      return 0;
+    index = 0;
   }
   args[index++] = "commit";
   if (config->sign)
@@ -3693,8 +3740,9 @@ print_commit_summary(const CsemverConfig *config,
   }
   if (config->commit_all) {
     if (path_count > 0)
-      fputs(" and ", stdout);
-    fputs("all staged files", stdout);
+      fputs(" and all staged files", stdout);
+    else
+      fputs("all staged files and %s", stdout);
   }
   fputc('\n', stdout);
 }
