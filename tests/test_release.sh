@@ -2801,4 +2801,32 @@ for custom_updater_location in packageFiles bumpFiles; do
   test -z "$(git status --porcelain)"
 done
 
+mkdir "$tmp/plain-text-trailing-whitespace"
+cd "$tmp/plain-text-trailing-whitespace"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+printf '{"name":"plain-text-trailing-whitespace","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/plain-text-trailing-whitespace.git"},"commit-and-tag-version":{"packageFiles":["VERSION.txt"],"bumpFiles":["VERSION.txt"]}}\n' > package.json
+printf '1.0.0 \n' > VERSION.txt
+git add package.json VERSION.txt
+git commit -qm 'chore: seed plain-text whitespace fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise plain-text whitespace'
+if "$bin" --dry-run --skip.changelog --skip.commit --skip.tag \
+  --release-as patch > "$tmp/plain-text-whitespace.stdout" \
+  2> "$tmp/plain-text-whitespace.stderr"; then
+  plain_text_whitespace_status=0
+else
+  plain_text_whitespace_status=$?
+fi
+test "$plain_text_whitespace_status" -eq 0
+printf '✔ bumping version in VERSION.txt from 1.0.0 \n to 1.0.1\n' \
+  > "$tmp/plain-text-whitespace.expected.stdout"
+cmp "$tmp/plain-text-whitespace.expected.stdout" \
+  "$tmp/plain-text-whitespace.stdout"
+test ! -s "$tmp/plain-text-whitespace.stderr"
+printf '1.0.0 \n' > "$tmp/plain-text-whitespace.expected.version"
+cmp "$tmp/plain-text-whitespace.expected.version" VERSION.txt
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'

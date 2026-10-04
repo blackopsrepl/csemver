@@ -62,7 +62,42 @@ static int validate_identifiers(const char *start, size_t length,
   return 1;
 }
 
-int semver_parse(const char *text, Semver *version) {
+static size_t javascript_whitespace_length(const unsigned char *text,
+                                           size_t remaining) {
+  if (remaining == 0)
+    return 0;
+  if (text[0] == 0x20 || (text[0] >= 0x09 && text[0] <= 0x0d))
+    return 1;
+  if (remaining >= 2 && text[0] == 0xc2 && text[1] == 0xa0)
+    return 2;
+  if (remaining >= 3 && text[0] == 0xe1 && text[1] == 0x9a && text[2] == 0x80)
+    return 3;
+  if (remaining >= 3 && text[0] == 0xe2 && text[1] == 0x80 &&
+      ((text[2] >= 0x80 && text[2] <= 0x8a) || text[2] == 0xa8 ||
+       text[2] == 0xa9 || text[2] == 0xaf))
+    return 3;
+  if (remaining >= 3 && text[0] == 0xe2 && text[1] == 0x81 && text[2] == 0x9f)
+    return 3;
+  if (remaining >= 3 && text[0] == 0xe3 && text[1] == 0x80 && text[2] == 0x80)
+    return 3;
+  if (remaining >= 3 && text[0] == 0xef && text[1] == 0xbb && text[2] == 0xbf)
+    return 3;
+  return 0;
+}
+
+static size_t javascript_whitespace_suffix_length(const unsigned char *text,
+                                                  size_t length) {
+  size_t index = length > 3 ? length - 3 : 0;
+  for (; index < length; ++index) {
+    size_t whitespace =
+        javascript_whitespace_length(text + index, length - index);
+    if (whitespace != 0 && index + whitespace == length)
+      return whitespace;
+  }
+  return 0;
+}
+
+static int semver_parse_exact(const char *text, Semver *version) {
   const char *cursor;
   const char *part;
   const char *end;
@@ -103,6 +138,51 @@ int semver_parse(const char *text, Semver *version) {
     cursor = end;
   }
   return *cursor == '\0';
+}
+
+int semver_parse(const char *text, Semver *version) {
+  const unsigned char *bytes;
+  size_t total_length;
+  size_t start;
+  size_t end;
+  char *trimmed;
+  size_t length;
+  int parsed;
+
+  if (text == NULL || version == NULL)
+    return 0;
+  bytes = (const unsigned char *)text;
+  total_length = strlen(text);
+  start = 0;
+  end = total_length;
+  while (start < end) {
+    size_t whitespace =
+        javascript_whitespace_length(bytes + start, end - start);
+    if (whitespace == 0)
+      break;
+    start += whitespace;
+  }
+  while (end > start) {
+    size_t whitespace =
+        javascript_whitespace_suffix_length(bytes + start, end - start);
+    if (whitespace == 0)
+      break;
+    end -= whitespace;
+  }
+  if (start == 0 && end == total_length)
+    return semver_parse_exact(text, version);
+
+  length = end - start;
+  trimmed = malloc(length + 1);
+  if (trimmed == NULL) {
+    memset(version, 0, sizeof(*version));
+    return 0;
+  }
+  memcpy(trimmed, text + start, length);
+  trimmed[length] = '\0';
+  parsed = semver_parse_exact(trimmed, version);
+  free(trimmed);
+  return parsed;
 }
 
 int semver_format(const Semver *version, char *output, size_t output_size) {

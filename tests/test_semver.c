@@ -22,6 +22,15 @@ int main(void) {
   char output[SEMVER_TEXT_MAX];
 
   assert(semver_parse("1.2.3", &version));
+  assert(semver_parse(" \t1.2.3 \t\n", &version));
+  assert(semver_format(&version, output, sizeof output));
+  assert(strcmp(output, "1.2.3") == 0);
+  assert(semver_parse("\xC2\xA0\xEF\xBB\xBF"
+                      "1.2.3"
+                      "\xE2\x80\x83",
+                      &version));
+  assert(semver_format(&version, output, sizeof output));
+  assert(strcmp(output, "1.2.3") == 0);
   expect_bump("1.2.3", "major", NULL, "2.0.0");
   expect_bump("1.2.3", "minor", NULL, "1.3.0");
   expect_bump("1.2.3", "patch", NULL, "1.2.4");

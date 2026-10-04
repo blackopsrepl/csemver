@@ -544,7 +544,11 @@ static void test_plain_text_preserves_upstream_write_semantics(void) {
   assert(csemver_version_read_text("VERSION.txt", "plain-text", "1.0.0\n",
                                    version, sizeof version, NULL, error,
                                    sizeof error));
-  assert(strcmp(version, "1.0.0") == 0);
+  assert(strcmp(version, "1.0.0\n") == 0);
+  assert(csemver_version_read_text("VERSION.txt", "plain-text", "1.0.0 \n",
+                                   version, sizeof version, NULL, error,
+                                   sizeof error));
+  assert(strcmp(version, "1.0.0 \n") == 0);
   assert(csemver_version_update_text("VERSION.txt", "plain-text", "1.0.0\n",
                                      "1.0.1", &updated, &updated_size, version,
                                      sizeof version, error, sizeof error));

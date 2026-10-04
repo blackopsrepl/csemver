@@ -5787,23 +5787,13 @@ int csemver_version_read_text(const char *filename, const char *type,
                          NULL))
     return 1;
   if (strcmp(kind, "plain-text") == 0) {
-    size_t length = strcspn(content, "\r\n");
-    if (length != 0 && length < version_size && content[length] == '\0') {
-      memcpy(version, content, length + 1);
-      return 1;
+    size_t length = strlen(content);
+    if (length >= version_size) {
+      set_error(error, error_size, "version output buffer too small");
+      return 0;
     }
-    if (length != 0 && length < version_size && content[length] == '\n' &&
-        content[length + 1] == '\0') {
-      memcpy(version, content, length);
-      version[length] = '\0';
-      return 1;
-    }
-    if (length != 0 && length < version_size && content[length] == '\r' &&
-        content[length + 1] == '\n' && content[length + 2] == '\0') {
-      memcpy(version, content, length);
-      version[length] = '\0';
-      return 1;
-    }
+    memcpy(version, content, length + 1);
+    return 1;
   }
   set_error(error, error_size, "unsupported or unreadable version file format");
   return 0;
