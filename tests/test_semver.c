@@ -22,6 +22,15 @@ int main(void) {
   char output[SEMVER_TEXT_MAX];
 
   assert(semver_parse("1.2.3", &version));
+  assert(semver_parse("v1.2.3", &version));
+  assert(semver_format(&version, output, sizeof output));
+  assert(strcmp(output, "1.2.3") == 0);
+  assert(semver_clean(" \t=v1.2.3 \t\n", &version));
+  assert(semver_format(&version, output, sizeof output));
+  assert(strcmp(output, "1.2.3") == 0);
+  assert(semver_clean("=v1.2.3+build.5", &version));
+  assert(semver_format(&version, output, sizeof output));
+  assert(strcmp(output, "1.2.3") == 0);
   assert(semver_parse(" \t1.2.3 \t\n", &version));
   assert(semver_format(&version, output, sizeof output));
   assert(strcmp(output, "1.2.3") == 0);

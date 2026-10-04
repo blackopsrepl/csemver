@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <fnmatch.h>
 #include <limits.h>
+#include <regex.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -1185,6 +1186,102 @@ static int collect_tags(const CsemverConfig *config,
   }
   free(output);
   return 1;
+}
+
+typedef enum {
+  FALLBACK_TAG_NO_TAGS,
+  FALLBACK_TAG_SELECTED,
+  FALLBACK_TAG_NULL_VERSION,
+  FALLBACK_TAG_UNDEFINED_VERSION,
+  FALLBACK_TAG_INVALID_REGEX
+} FallbackTagStatus;
+
+static FallbackTagStatus
+select_fallback_tag_version(const CsemverConfig *config,
+                            char tags[][SEMVER_TEXT_MAX], size_t tag_count,
+                            char *version, size_t version_size) {
+  size_t prefix_length = strlen(config->tag_prefix);
+  char *pattern;
+  regex_t prefix_regex;
+  bool filter_prerelease =
+      config->has_prerelease && config->prerelease_id[0] != '\0';
+  bool found = false;
+  bool invalid_version = false;
+  size_t eligible_count = 0;
+  char best_version[SEMVER_TEXT_MAX] = "";
+
+  if (tag_count == 0) {
+    snprintf(version, version_size, "1.0.0");
+    return FALLBACK_TAG_NO_TAGS;
+  }
+  if (prefix_length > SIZE_MAX - 2)
+    return FALLBACK_TAG_INVALID_REGEX;
+  pattern = malloc(prefix_length + 2);
+  if (pattern == NULL)
+    return FALLBACK_TAG_INVALID_REGEX;
+  pattern[0] = '^';
+  memcpy(pattern + 1, config->tag_prefix, prefix_length + 1);
+  if (regcomp(&prefix_regex, pattern, REG_EXTENDED) != 0) {
+    free(pattern);
+    return FALLBACK_TAG_INVALID_REGEX;
+  }
+  free(pattern);
+
+  for (size_t i = 0; i < tag_count; ++i) {
+    const char *candidate = tags[i];
+    regmatch_t match;
+    int regex_status = regexec(&prefix_regex, tags[i], 1, &match, 0);
+    Semver parsed;
+
+    if (regex_status == 0) {
+      if (match.rm_so != 0 || match.rm_eo < match.rm_so) {
+        regfree(&prefix_regex);
+        return FALLBACK_TAG_INVALID_REGEX;
+      }
+      candidate += (size_t)match.rm_eo;
+    } else if (regex_status != REG_NOMATCH) {
+      regfree(&prefix_regex);
+      return FALLBACK_TAG_INVALID_REGEX;
+    }
+
+    if (filter_prerelease) {
+      if (!semver_parse(candidate, &parsed))
+        continue;
+      if (parsed.has_prerelease) {
+        const char *separator = strchr(parsed.prerelease, '.');
+        size_t identifier_length =
+            separator == NULL ? strlen(parsed.prerelease)
+                              : (size_t)(separator - parsed.prerelease);
+        if (identifier_length != strlen(config->prerelease_id) ||
+            strncmp(parsed.prerelease, config->prerelease_id,
+                    identifier_length) != 0)
+          continue;
+      }
+    }
+
+    ++eligible_count;
+    if (!semver_clean(candidate, &parsed)) {
+      invalid_version = true;
+      continue;
+    }
+    char cleaned[SEMVER_TEXT_MAX];
+    if (!semver_format(&parsed, cleaned, sizeof cleaned)) {
+      regfree(&prefix_regex);
+      return FALLBACK_TAG_NULL_VERSION;
+    }
+    if (!found || semver_compare(cleaned, best_version) > 0) {
+      snprintf(best_version, sizeof best_version, "%s", cleaned);
+      found = true;
+    }
+  }
+  regfree(&prefix_regex);
+
+  if (filter_prerelease && eligible_count == 0)
+    return FALLBACK_TAG_UNDEFINED_VERSION;
+  if (invalid_version || !found)
+    return FALLBACK_TAG_NULL_VERSION;
+  snprintf(version, version_size, "%s", best_version);
+  return FALLBACK_TAG_SELECTED;
 }
 
 static int collect_lerna_tag(const CsemverConfig *config, char *latest_tag,
@@ -3673,6 +3770,7 @@ static int csemver_main_impl(int argc, char **argv) {
   char latest_version[SEMVER_TEXT_MAX], latest_tag[SEMVER_TEXT_MAX];
   char lerna_tag[CSEMVER_VALUE_MAX];
   char current[SEMVER_TEXT_MAX], next[SEMVER_TEXT_MAX];
+  char fallback_version[SEMVER_TEXT_MAX];
   char stable_version[SEMVER_TEXT_MAX] = "";
   char new_tag[SEMVER_TEXT_MAX];
   char message[CSEMVER_VALUE_MAX];
@@ -3684,6 +3782,7 @@ static int csemver_main_impl(int argc, char **argv) {
   char paths[CSEMVER_MAX_FILES + 1][CSEMVER_PATH_MAX];
   Semver current_semver;
   int bump, parsed_args, package_version_status;
+  FallbackTagStatus fallback_tag_status;
   char *check_output = NULL;
   int status = 0;
   config_path =
@@ -3732,16 +3831,26 @@ static int csemver_main_impl(int argc, char **argv) {
         fputs("no package file found\n", stderr);
       return 1;
     }
-    if (latest_version[0] != '\0')
-      snprintf(current, sizeof current, "%s", latest_version);
-    else if (tag_count != 0 && config.has_prerelease &&
-             config.prerelease_id[0] != '\0') {
+    fallback_tag_status = select_fallback_tag_version(
+        &config, tags, tag_count, fallback_version, sizeof fallback_version);
+    if (fallback_tag_status == FALLBACK_TAG_NULL_VERSION) {
+      if (!config.silent)
+        fputs("Invalid version. Must be a string. Got type \"object\".\n",
+              stderr);
+      return 1;
+    }
+    if (fallback_tag_status == FALLBACK_TAG_UNDEFINED_VERSION) {
       if (!config.silent)
         fputs("Invalid version. Must be a string. Got type \"undefined\".\n",
               stderr);
       return 1;
-    } else
-      snprintf(current, sizeof current, "1.0.0");
+    }
+    if (fallback_tag_status == FALLBACK_TAG_INVALID_REGEX) {
+      if (!config.silent)
+        fputs("Invalid tagPrefix regular expression.\n", stderr);
+      return 1;
+    }
+    snprintf(current, sizeof current, "%s", fallback_version);
   }
   if (!prepare_bump(&config))
     return 1;

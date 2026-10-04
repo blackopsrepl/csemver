@@ -107,6 +107,8 @@ static int semver_parse_exact(const char *text, Semver *version) {
     return 0;
   memset(version, 0, sizeof(*version));
   cursor = text;
+  if (*cursor == 'v')
+    ++cursor;
   if (!parse_component(&cursor, &version->major) || *cursor++ != '.' ||
       !parse_component(&cursor, &version->minor) || *cursor++ != '.' ||
       !parse_component(&cursor, &version->patch))
@@ -182,6 +184,33 @@ int semver_parse(const char *text, Semver *version) {
   trimmed[length] = '\0';
   parsed = semver_parse_exact(trimmed, version);
   free(trimmed);
+  return parsed;
+}
+
+int semver_clean(const char *text, Semver *version) {
+  const unsigned char *bytes;
+  size_t length;
+  size_t start = 0;
+  int parsed;
+
+  if (text == NULL || version == NULL)
+    return 0;
+  bytes = (const unsigned char *)text;
+  length = strlen(text);
+  while (start < length) {
+    size_t whitespace =
+        javascript_whitespace_length(bytes + start, length - start);
+    if (whitespace == 0)
+      break;
+    start += whitespace;
+  }
+  while (start < length && (text[start] == '=' || text[start] == 'v'))
+    ++start;
+  parsed = semver_parse(text + start, version);
+  if (parsed) {
+    version->has_build = 0;
+    version->build[0] = '\0';
+  }
   return parsed;
 }
 

@@ -17,6 +17,7 @@ typedef struct {
 } Semver;
 
 int semver_parse(const char *text, Semver *version);
+int semver_clean(const char *text, Semver *version);
 int semver_format(const Semver *version, char *output, size_t output_size);
 int semver_bump(const Semver *version, const char *release_type,
                 const char *prerelease_id, char *output, size_t output_size);

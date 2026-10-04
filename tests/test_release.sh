@@ -2854,4 +2854,40 @@ cmp "$tmp/tag-fallback-prerelease-filter.expected.stderr" \
   "$tmp/tag-fallback-prerelease-filter.stderr"
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/tag-prefix-regex"
+cd "$tmp/tag-prefix-regex"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+printf '{"name":"tag-prefix-regex","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/tag-prefix-regex.git"},"commit-and-tag-version":{"packageFiles":[],"tagPrefix":"v+"}}\n' > package.json
+git add package.json
+git commit -qm 'chore: seed tag prefix fixture'
+git tag -a 'v+1.0.0' -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise tag prefix regex'
+if "$bin" --dry-run --skip.changelog --skip.commit --skip.tag \
+  > "$tmp/tag-prefix-regex.stdout" 2> "$tmp/tag-prefix-regex.stderr"; then
+  tag_prefix_status=0
+else
+  tag_prefix_status=$?
+fi
+test "$tag_prefix_status" -eq 1
+test ! -s "$tmp/tag-prefix-regex.stdout"
+printf '%s\n' 'Invalid version. Must be a string. Got type "object".' \
+  > "$tmp/tag-prefix-regex.expected.stderr"
+cmp "$tmp/tag-prefix-regex.expected.stderr" "$tmp/tag-prefix-regex.stderr"
+if "$bin" --dry-run --skip.changelog --skip.commit --skip.tag \
+  --prerelease rc > "$tmp/tag-prefix-regex-prerelease.stdout" \
+  2> "$tmp/tag-prefix-regex-prerelease.stderr"; then
+  tag_prefix_prerelease_status=0
+else
+  tag_prefix_prerelease_status=$?
+fi
+test "$tag_prefix_prerelease_status" -eq 1
+test ! -s "$tmp/tag-prefix-regex-prerelease.stdout"
+printf '%s\n' 'Invalid version. Must be a string. Got type "undefined".' \
+  > "$tmp/tag-prefix-regex-prerelease.expected.stderr"
+cmp "$tmp/tag-prefix-regex-prerelease.expected.stderr" \
+  "$tmp/tag-prefix-regex-prerelease.stderr"
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'
