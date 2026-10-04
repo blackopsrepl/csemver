@@ -124,9 +124,12 @@ git checkout -- CHANGELOG.md
 "$bin" --release-count 6 --skip bump --skip commit --skip tag > /dev/null
 test -f "$marker"
 rm -f "$marker"
+regenerated_header_line=$(grep -m 1 -n 'for commit guidelines\.' CHANGELOG.md | cut -d: -f1)
+regenerated_latest_line=$(grep -m 1 -n '^## \[2.0.1\]' CHANGELOG.md | cut -d: -f1)
+test "$((regenerated_latest_line - regenerated_header_line))" -eq 3
 initial_release_line=$(grep -n '^## 1\.0\.0 (' CHANGELOG.md | cut -d: -f1)
 preserved_release_line=$(grep -n '^## \[2\.0\.1\]' CHANGELOG.md | tail -n 1 | cut -d: -f1)
-[ "$((preserved_release_line - initial_release_line))" -eq 2 ]
+[ "$((preserved_release_line - initial_release_line))" -eq 3 ]
 git checkout -- CHANGELOG.md
 
 release_count_zero_preview=$("$bin" --dry-run --release-count 0)
@@ -255,12 +258,18 @@ git config commit.gpgSign false
 printf '{\n  "name": "prerelease-window",\n  "version": "1.0.0",\n  "repository": {"type": "git", "url": "https://github.com/example/prerelease.git"}\n}\n' > package.json
 git add package.json
 git commit -qm 'chore: initialize prerelease window fixture'
+printf 'first release feature\n' > first-release-feature.txt
+git add first-release-feature.txt
+git commit -qm 'feat: include first-release section'
 "$bin" --first-release > /dev/null
 first_release_heading=$(grep -m 1 '^## ' CHANGELOG.md)
 case "$first_release_heading" in
   '## 1.0.0 ('*) ;;
   *) printf 'first release heading is not in upstream format: %s\n' "$first_release_heading" >&2; exit 1 ;;
 esac
+first_release_heading_line=$(grep -m 1 -n '^## 1.0.0 (' CHANGELOG.md | cut -d: -f1)
+first_release_section_line=$(grep -m 1 -n '^### Features$' CHANGELOG.md | cut -d: -f1)
+test "$((first_release_section_line - first_release_heading_line))" -eq 2
 printf 'feature\n' > feature.txt
 git add feature.txt
 git commit -qm 'feat: add prerelease feature'

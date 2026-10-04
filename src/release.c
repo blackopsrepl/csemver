@@ -4144,8 +4144,7 @@ static int append_compare_heading(const CsemverConfig *config,
 static int append_release_heading(const CsemverConfig *config,
                                   CsemverBuffer *output, const char *base,
                                   const char *version, const char *previous_tag,
-                                  const char *tag, const char *date,
-                                  bool initial_release) {
+                                  const char *tag, const char *date) {
   if (previous_tag != NULL)
     return append_compare_heading(config, output, base, version, previous_tag,
                                   tag, date);
@@ -4153,8 +4152,6 @@ static int append_release_heading(const CsemverConfig *config,
     return csemver_buffer_appendf(output, "%s %s (%s)\n\n",
                                   release_heading_level(config, version),
                                   version, date);
-  if (initial_release)
-    return csemver_buffer_appendf(output, "## %s (%s)\n", version, date);
   return csemver_buffer_appendf(output, "## %s (%s)\n\n", version, date);
 }
 
@@ -4176,7 +4173,7 @@ static int regenerate_all_changelogs(
     return 0;
   if (previous_tag == NULL || strcmp(previous_tag, new_tag) != 0) {
     if (!append_release_heading(config, output, base, version, previous_tag,
-                                new_tag, date, false) ||
+                                new_tag, date) ||
         !changelog_section(config, commits, commit_count, output))
       goto fail;
     wrote_section = true;
@@ -4210,8 +4207,7 @@ static int regenerate_all_changelogs(
         !csemver_buffer_append(output, "\n", 1))
       goto fail;
     if (!append_release_heading(config, output, base, current_version,
-                                older_tag, tags[i], current_date,
-                                older_tag == NULL) ||
+                                older_tag, tags[i], current_date) ||
         !changelog_section(config, historical, historical_count, output))
       goto fail;
     wrote_section = true;
@@ -4288,6 +4284,9 @@ static int render_changelog(const CsemverConfig *config, const char *version,
   }
   if (config->release_count > 1) {
     size_t history_limit = (size_t)config->release_count - 1;
+    if (!config->dry_run && output->length > 0 &&
+        !csemver_buffer_append(output, "\n", 1))
+      goto fail;
     if (!regenerate_all_changelogs(config, version, previous_tag, new_tag,
                                    commits, commit_count, tags, tag_count,
                                    history_limit, date, base, output))
@@ -4319,10 +4318,10 @@ static int render_changelog(const CsemverConfig *config, const char *version,
       goto fail;
   } else if (config->first_release) {
     if (!append_release_heading(config, output, base, version, NULL, new_tag,
-                                date, true))
+                                date))
       goto fail;
   } else if (!append_release_heading(config, output, base, version, NULL,
-                                     new_tag, date, false))
+                                     new_tag, date))
     goto fail;
   if (!changelog_section(config, commits, commit_count, output))
     goto fail;
