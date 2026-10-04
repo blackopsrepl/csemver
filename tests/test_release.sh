@@ -2110,7 +2110,7 @@ cat > package.json <<'JSON'
   "version": "1.0.0",
   "commit-and-tag-version": {
     "scripts": {
-      "prerelease": "yes x 2>/dev/null | head -c 262144; yes y 2>/dev/null | head -c 262144 >&2"
+      "prerelease": "yes x 2>/dev/null | head -c 262144 2>/dev/null; yes y 2>/dev/null | head -c 262144 >&2 2>/dev/null"
     }
   }
 }
@@ -2132,7 +2132,7 @@ cat > package.json <<'JSON'
   "name": "lifecycle-max-buffer-fixture",
   "version": "1.0.0",
   "commit-and-tag-version": {
-    "scripts": {"prerelease": "yes x | head -c 1100000"}
+    "scripts": {"prerelease": "yes x 2>/dev/null | head -c 1100000 2>/dev/null"}
   }
 }
 JSON
@@ -2147,14 +2147,19 @@ set -e
 test "$lifecycle_max_buffer_status" -eq 1
 printf '%s\n' \
   '✔ Running lifecycle script "prerelease"' \
-  'ℹ - execute command: "yes x | head -c 1100000"' \
+  'ℹ - execute command: "yes x 2>/dev/null | head -c 1100000 2>/dev/null"' \
   > "$tmp/lifecycle-max-buffer.stdout.expected"
 cmp "$tmp/lifecycle-max-buffer.stdout.expected" "$tmp/lifecycle-max-buffer.stdout"
 printf '%s\n' \
   'stdout maxBuffer length exceeded' \
   'stdout maxBuffer length exceeded' \
   > "$tmp/lifecycle-max-buffer.stderr.expected"
-cmp "$tmp/lifecycle-max-buffer.stderr.expected" "$tmp/lifecycle-max-buffer.stderr"
+if ! cmp "$tmp/lifecycle-max-buffer.stderr.expected" "$tmp/lifecycle-max-buffer.stderr"; then
+  printf 'actual max-buffer stderr (%s bytes; first 256 shown):\n' \
+    "$(wc -c < "$tmp/lifecycle-max-buffer.stderr")" >&2
+  od -An -tx1c -N256 "$tmp/lifecycle-max-buffer.stderr" >&2
+  exit 1
+fi
 set +e
 timeout 30 "$bin" --silent --skip.changelog --skip.commit --skip.tag > "$tmp/lifecycle-max-buffer-silent.stdout" 2> "$tmp/lifecycle-max-buffer-silent.stderr"
 lifecycle_max_buffer_silent_status=$?
@@ -2175,7 +2180,7 @@ cat > package.json <<'JSON'
   "name": "lifecycle-max-buffer-stderr-fixture",
   "version": "1.0.0",
   "commit-and-tag-version": {
-    "scripts": {"prerelease": "yes x | head -c 1100000 >&2"}
+    "scripts": {"prerelease": "yes x 2>/dev/null | head -c 1100000 >&2 2>/dev/null"}
   }
 }
 JSON
@@ -2192,7 +2197,7 @@ lifecycle_stderr_max_buffer_status=$?
 set -e
 wait "$stderr_reader_pid"
 test "$lifecycle_stderr_max_buffer_status" -eq 1
-yes x | head -c 1100000 > "$tmp/lifecycle-max-buffer-stderr.raw"
+yes x 2>/dev/null | head -c 1100000 > "$tmp/lifecycle-max-buffer-stderr.raw" 2>/dev/null
 head -c 65536 "$tmp/lifecycle-max-buffer-stderr.raw" > "$tmp/lifecycle-max-buffer-stderr.expected"
 cmp "$tmp/lifecycle-max-buffer-stderr.expected" "$tmp/lifecycle-max-buffer-stderr.actual"
 test -z "$(git status --porcelain)"

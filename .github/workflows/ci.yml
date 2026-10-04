@@ -17,10 +17,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.3
       - name: Install libxml2 and libyaml development files on Linux
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxml2-dev libyaml-dev pkg-config

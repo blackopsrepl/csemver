@@ -141,7 +141,7 @@ The native CLI targets POSIX systems with `/bin/sh`, Git, a C17 compiler, libxml
 
 ## CI and published releases
 
-GitHub Actions builds and tests on Ubuntu and macOS. Forgejo CI runs on `master` and version tags with the repository's `cpp-latest` runner. Pushing a `v*` tag runs the GitHub release workflow: it checks that the tag, `VERSION`, and release commit agree, reruns the full test suite with the tag version embedded, then creates a GitHub Release using the top section of `CHANGELOG.md`. GitHub provides source archives for the tag; the workflow does not publish prebuilt binaries. Forgejo currently runs CI only.
+GitHub Actions builds and tests on Ubuntu 24.04 and macOS 15 Intel. Forgejo CI runs on `master` and version tags with the repository's `cpp-latest` runner. Pushing a `v*` tag runs the GitHub release workflow: it checks that the tag, `VERSION`, and release commit agree, reruns the full test suite with the tag version embedded, then creates a GitHub Release using the top section of `CHANGELOG.md`. GitHub provides source archives for the tag; the workflow does not publish prebuilt binaries. Forgejo currently runs CI only.
 
 ## License
 
