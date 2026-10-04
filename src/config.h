@@ -15,6 +15,8 @@ typedef struct {
   char filename[CSEMVER_PATH_MAX];
   char type[32];
   bool compatibility_unsupported_type;
+  bool compatibility_unsupported_filename;
+  bool compatibility_updater_argument_object;
 } CsemverFile;
 
 typedef struct {

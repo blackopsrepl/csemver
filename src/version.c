@@ -1635,7 +1635,7 @@ static int json_object_file_array(const char *content, const char *object_key,
                                   const char *field_key, char *filenames,
                                   size_t filename_stride, char *types,
                                   size_t type_stride, size_t max_values,
-                                  size_t *file_count,
+                                  bool *is_object, size_t *file_count,
                                   int allow_string_entries) {
   Range field;
   Scanner array;
@@ -1657,6 +1657,7 @@ static int json_object_file_array(const char *content, const char *object_key,
   while (array.position < array.length && array.text[array.position] != ']') {
     Range item;
     Range updater;
+    Range type_range;
     Scanner object;
     char *filename;
     char *type;
@@ -1665,6 +1666,9 @@ static int json_object_file_array(const char *content, const char *object_key,
     filename = filenames + count * filename_stride;
     type = types + count * type_stride;
     memset(type, 0, type_stride);
+    if (is_object != NULL)
+      is_object[count] =
+          !(allow_string_entries && array.text[array.position] == '"');
     if (allow_string_entries && array.text[array.position] == '"') {
       if (!string_value(&array, filename, filename_stride, NULL, NULL))
         return 0;
@@ -1677,7 +1681,13 @@ static int json_object_file_array(const char *content, const char *object_key,
       if (!object_field(&object, "filename", NULL, filename, filename_stride))
         return 0;
       object.position = item.start;
-      if (!object_field(&object, "type", NULL, type, type_stride))
+      if (allow_string_entries) {
+        if (object_field(&object, "type", &type_range, NULL, 0)) {
+          object.position = item.start;
+          if (!object_field(&object, "type", NULL, type, type_stride))
+            return 0;
+        }
+      } else if (!object_field(&object, "type", NULL, type, type_stride))
         return 0;
       object.position = item.start;
       if (object_field(&object, "updater", &updater, NULL, 0))
@@ -1712,18 +1722,16 @@ int csemver_json_object_typed_file_array(const char *content,
                                          size_t *file_count) {
   return json_object_file_array(content, object_key, field_key, filenames,
                                 filename_stride, types, type_stride, max_values,
-                                file_count, 0);
+                                NULL, file_count, 0);
 }
 
-int csemver_json_object_mixed_file_array(const char *content,
-                                         const char *object_key,
-                                         const char *field_key, char *filenames,
-                                         size_t filename_stride, char *types,
-                                         size_t type_stride, size_t max_values,
-                                         size_t *file_count) {
+int csemver_json_object_mixed_file_array(
+    const char *content, const char *object_key, const char *field_key,
+    char *filenames, size_t filename_stride, char *types, size_t type_stride,
+    bool *is_object, size_t max_values, size_t *file_count) {
   return json_object_file_array(content, object_key, field_key, filenames,
                                 filename_stride, types, type_stride, max_values,
-                                file_count, 1);
+                                is_object, file_count, 1);
 }
 
 int csemver_json_object_commit_type_array(

@@ -163,10 +163,10 @@ static void test_json_package_config_typed_file_array(void) {
       "\"updater\":\"custom.js\"}]}}";
   const char *mixed_package_files =
       "{\"commit-and-tag-version\":{\"packageFiles\":["
-      "\"VERSION.txt\",{\"filename\":\"metadata.json\","
-      "\"type\":\"json\"}]}}";
+      "\"VERSION.txt\",{\"filename\":\"metadata.json\"}]}}";
   char filenames[2][128];
   char types[2][32];
+  bool is_object[2];
   size_t count = 0;
 
   assert(csemver_json_object_typed_file_array(
@@ -188,13 +188,15 @@ static void test_json_package_config_typed_file_array(void) {
   assert(count == 0);
   assert(csemver_json_object_mixed_file_array(
       mixed_package_files, "commit-and-tag-version", "packageFiles",
-      &filenames[0][0], sizeof filenames[0], &types[0][0], sizeof types[0], 2,
-      &count));
+      &filenames[0][0], sizeof filenames[0], &types[0][0], sizeof types[0],
+      is_object, 2, &count));
   assert(count == 2);
   assert(strcmp(filenames[0], "VERSION.txt") == 0);
   assert(types[0][0] == '\0');
+  assert(!is_object[0]);
   assert(strcmp(filenames[1], "metadata.json") == 0);
-  assert(strcmp(types[1], "json") == 0);
+  assert(types[1][0] == '\0');
+  assert(is_object[1]);
 }
 
 static void test_json_round_trip(void) {

@@ -1339,6 +1339,101 @@ for package_source_type in toml custom; do
   test -z "$(git status --porcelain)"
 done
 
+for package_source_case in untyped-string untyped-object inferred-string inferred-object; do
+  mkdir "$tmp/pkg-packagefiles-$package_source_case"
+  cd "$tmp/pkg-packagefiles-$package_source_case"
+  git init -q -b master
+  git config user.name 'C Semver Test'
+  git config user.email 'test@example.invalid'
+  case "$package_source_case" in
+    untyped-string)
+      package_source_entry='"metadata.toml"'
+      package_source_filename=metadata.toml
+      package_source_expected_identifier='"metadata.toml"'
+      ;;
+    untyped-object)
+      package_source_entry='{"filename":"metadata.toml"}'
+      package_source_filename=metadata.toml
+      package_source_expected_identifier='{"filename":"metadata.toml"}'
+      ;;
+    inferred-string)
+      package_source_entry='"openapi.yaml"'
+      package_source_filename=openapi.yaml
+      ;;
+    inferred-object)
+      package_source_entry='{"filename":"openapi.yaml"}'
+      package_source_filename=openapi.yaml
+      ;;
+  esac
+  printf '{\n  "name": "pkg-packagefiles-%s-fixture",\n  "version": "1.0.0",\n  "repository": {"type": "git", "url": "https://github.com/example/pkg-packagefiles-inferred.git"},\n  "commit-and-tag-version": {"packageFiles": [%s, "package.json"], "bumpFiles": ["package.json"]}\n}\n' \
+    "$package_source_case" "$package_source_entry" > package.json
+  if [ "$package_source_filename" = metadata.toml ]; then
+    printf 'version = "3.0.0"\n' > "$package_source_filename"
+  else
+    printf 'openapi: 3.0.0\ninfo:\n  title: fixture\n  version: 3.0.0\npaths: {}\n' \
+      > "$package_source_filename"
+  fi
+  git add package.json "$package_source_filename"
+  git commit -qm 'chore: seed inferred packageFiles fixture'
+  git tag -a v1.0.0 -m 'release 1.0.0'
+  git commit --allow-empty -qm 'fix: trigger inferred packageFiles fixture'
+  "$bin" --skip.changelog --skip.commit --skip.tag \
+    > "$tmp/packagefiles-inferred.stdout" 2> "$tmp/packagefiles-inferred.stderr"
+  case "$package_source_case" in
+    untyped-string|untyped-object)
+      test ! -s "$tmp/packagefiles-inferred.stdout"
+      printf 'Unable to obtain updater for: %s\n - Error: Unsupported file (%s) provided for bumping.\n Please specify the updater `type` or use a custom `updater`.\n - Skipping...\n' \
+        "$package_source_expected_identifier" "$package_source_filename" \
+        > "$tmp/packagefiles-inferred.expected.stderr"
+      cmp "$tmp/packagefiles-inferred.expected.stderr" \
+        "$tmp/packagefiles-inferred.stderr"
+      grep -Fq '"version": "1.0.0"' package.json
+      test -z "$(git status --porcelain)"
+      ;;
+    inferred-string|inferred-object)
+      printf '%s\n' '✔ bumping version in package.json from 1.0.0 to 3.0.1' \
+        > "$tmp/packagefiles-inferred.expected.stdout"
+      cmp "$tmp/packagefiles-inferred.expected.stdout" \
+        "$tmp/packagefiles-inferred.stdout"
+      test ! -s "$tmp/packagefiles-inferred.stderr"
+      grep -Fq '"version": "3.0.1"' package.json
+      grep -Fq 'version: 3.0.0' openapi.yaml
+      git diff --quiet -- openapi.yaml
+      test -z "$(git ls-files --others --exclude-standard)"
+      ;;
+  esac
+done
+
+mkdir "$tmp/pkg-bumpfiles-inferred-object"
+cd "$tmp/pkg-bumpfiles-inferred-object"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-bumpfiles-inferred-object-fixture",
+  "version": "1.0.0",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-inferred-object.git"},
+  "commit-and-tag-version": {
+    "bumpFiles": [{"filename": "VERSION.txt"}]
+  }
+}
+JSON
+printf '1.0.0\n' > VERSION.txt
+git add package.json VERSION.txt
+git commit -qm 'chore: seed inferred bumpFiles fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: trigger inferred bumpFiles fixture'
+"$bin" --skip.changelog --skip.commit --skip.tag \
+  > "$tmp/bumpfiles-inferred.stdout" 2> "$tmp/bumpfiles-inferred.stderr"
+printf '%s\n' '✔ bumping version in VERSION.txt from 1.0.0' ' to 1.0.1' \
+  > "$tmp/bumpfiles-inferred.expected.stdout"
+cmp "$tmp/bumpfiles-inferred.expected.stdout" \
+  "$tmp/bumpfiles-inferred.stdout"
+test ! -s "$tmp/bumpfiles-inferred.stderr"
+grep -Fq '"version": "1.0.0"' package.json
+test "$(cat VERSION.txt)" = '1.0.1'
+
 mkdir "$tmp/pkg-custom-types"
 cd "$tmp/pkg-custom-types"
 git init -q -b master
