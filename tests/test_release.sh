@@ -3223,4 +3223,44 @@ test -f untracked.txt
 test "$(git tag --list v1.2.4)" = v1.2.4
 test "$(git status --porcelain)" = "$(printf ' M tracked.txt\n?? untracked.txt')"
 
+run_custom_infile_case() {
+  infile_case=$1
+  infile_dir="$tmp/custom-infile-$infile_case"
+  mkdir "$infile_dir"
+  cd "$infile_dir"
+  git init -q -b master
+  git config user.name 'C Semver Test'
+  git config user.email 'test@example.invalid'
+  git config commit.gpgSign false
+  printf '{"name":"custom-infile","version":"1.2.3","repository":{"type":"git","url":"https://github.com/example/custom-infile.git"}}\n' > package.json
+  mkdir docs
+  if [ "$infile_case" = existing ]; then
+    printf '# Changelog\n\nPreamble retained.\n\n## [1.2.3] - 2026-09-01\n\n### Fixes\n\n* old change\n' > docs/RELEASES.md
+  fi
+  git add .
+  git commit -qm 'chore: initialize custom infile fixture'
+  git tag -a v1.2.3 -m 'release 1.2.3'
+  git commit --allow-empty -qm 'fix: exercise custom infile'
+  "$bin" --infile docs/RELEASES.md > "$infile_dir.stdout" \
+    2> "$infile_dir.stderr"
+  if [ "$infile_case" = existing ]; then
+    printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ outputting changes to docs/RELEASES.md\n✔ committing package.json and docs/RELEASES.md\n✔ tagging release v1.2.4\nℹ Run `git push --follow-tags origin master && npm publish` to publish\n' > "$infile_dir.expected.stdout"
+  else
+    printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ created docs/RELEASES.md\n✔ outputting changes to docs/RELEASES.md\n✔ committing package.json and docs/RELEASES.md\n✔ tagging release v1.2.4\nℹ Run `git push --follow-tags origin master && npm publish` to publish\n' > "$infile_dir.expected.stdout"
+  fi
+  cmp "$infile_dir.expected.stdout" "$infile_dir.stdout"
+  test ! -s "$infile_dir.stderr"
+  grep -q '1.2.4' docs/RELEASES.md
+  test ! -e CHANGELOG.md
+  test "$(git show --pretty=format: --name-only HEAD | LC_ALL=C sort)" = \
+    "$(printf 'docs/RELEASES.md\npackage.json')"
+  test "$(git tag --list v1.2.4)" = v1.2.4
+  test -z "$(git status --porcelain)"
+  if [ "$infile_case" = existing ]; then
+    grep -q 'old change' docs/RELEASES.md
+  fi
+}
+run_custom_infile_case existing
+run_custom_infile_case missing
+
 printf '%s\n' 'release workflow tests passed'
