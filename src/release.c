@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -78,6 +79,106 @@ static void errorf(const char *format, ...) {
   vfprintf(stderr, format, args);
   fputc('\n', stderr);
   va_end(args);
+}
+
+static int color_environment_flag(const char *name) {
+  const char *value = getenv(name);
+  const unsigned char *cursor;
+  if (value == NULL)
+    return -1;
+  if (value[0] == '\0' || strcmp(value, "true") == 0)
+    return 1;
+  if (strcmp(value, "false") == 0)
+    return 0;
+  for (cursor = (const unsigned char *)value; *cursor != '\0'; ++cursor)
+    if (!isdigit(*cursor))
+      return -1;
+  return strtoul(value, NULL, 10) == 0 ? 0 : 1;
+}
+
+static int terminal_supports_color(FILE *stream) {
+  static const char *const ci_providers[] = {
+      "GITHUB_ACTIONS", "GITEA_ACTIONS", "CIRCLECI",  "TRAVIS",
+      "APPVEYOR",       "GITLAB_CI",     "BUILDKITE", "DRONE"};
+  static const char *const term_prefixes[] = {"screen", "xterm",  "vt100",
+                                              "vt220",  "rxvt",   "color",
+                                              "ansi",   "cygwin", "linux"};
+  const char *term = getenv("TERM");
+  const char *term_program = getenv("TERM_PROGRAM");
+  int forced = color_environment_flag("FORCE_COLOR");
+  size_t index;
+  if (forced >= 0)
+    return forced;
+  if (getenv("TF_BUILD") != NULL && getenv("AGENT_NAME") != NULL)
+    return 1;
+  if (!isatty(fileno(stream)))
+    return 0;
+  if (term != NULL && strcmp(term, "dumb") == 0)
+    return 0;
+  if (getenv("CI") != NULL) {
+    for (index = 0; index < sizeof ci_providers / sizeof ci_providers[0];
+         ++index)
+      if (getenv(ci_providers[index]) != NULL)
+        return 1;
+    return getenv("CI_NAME") != NULL &&
+           strcmp(getenv("CI_NAME"), "codeship") == 0;
+  }
+  if (getenv("TEAMCITY_VERSION") != NULL) {
+    const char *version = getenv("TEAMCITY_VERSION");
+    int major = 0;
+    int minor = 0;
+    if (sscanf(version, "%d.%d", &major, &minor) != 2)
+      return 0;
+    return major >= 10 || (major == 9 && minor >= 1);
+  }
+  if (term != NULL &&
+      (strcmp(term, "xterm-kitty") == 0 || strcmp(term, "xterm-ghostty") == 0 ||
+       strcmp(term, "wezterm") == 0))
+    return 1;
+  if (term_program != NULL && (strcmp(term_program, "iTerm.app") == 0 ||
+                               strcmp(term_program, "Apple_Terminal") == 0))
+    return 1;
+  if (getenv("COLORTERM") != NULL)
+    return 1;
+  if (term == NULL)
+    return 0;
+  {
+    size_t length = strlen(term);
+    if ((length >= 4 && strcasecmp(term + length - 4, "-256") == 0) ||
+        (length >= 9 && strcasecmp(term + length - 9, "-256color") == 0))
+      return 1;
+  }
+  for (index = 0; index < sizeof term_prefixes / sizeof term_prefixes[0];
+       ++index) {
+    size_t prefix_length = strlen(term_prefixes[index]);
+    if (strncasecmp(term, term_prefixes[index], prefix_length) == 0)
+      return 1;
+  }
+  return 0;
+}
+
+static void print_styled(FILE *stream, const char *text, const char *start,
+                         const char *end) {
+  if (terminal_supports_color(stream))
+    fprintf(stream, "\033[%sm%s\033[%sm", start, text, end);
+  else
+    fputs(text, stream);
+}
+
+static void print_checkpoint_tick(const CsemverConfig *config) {
+  print_styled(stdout, "✔", config->dry_run ? "33" : "32", "39");
+}
+
+static void print_checkpoint_cross(void) {
+  print_styled(stdout, "✖", "31", "39");
+}
+
+static void print_checkpoint_info(void) {
+  print_styled(stdout, "ℹ", "34", "39");
+}
+
+static void print_bold(const char *text) {
+  print_styled(stdout, text, "1", "22");
 }
 
 static int path_has_extension(const char *path) {
@@ -2637,8 +2738,14 @@ static int run_lifecycle_capture(const CsemverConfig *config, const char *name,
     if (strcmp(config->scripts[i].name, name) != 0)
       continue;
     if (!config->silent) {
-      printf("✔ Running lifecycle script \"%s\"\n", name);
-      printf("ℹ - execute command: \"%s\"\n", config->scripts[i].command);
+      print_checkpoint_tick(config);
+      printf(" Running lifecycle script \"");
+      print_bold(name);
+      printf("\"\n");
+      print_checkpoint_info();
+      printf(" - execute command: \"");
+      print_bold(config->scripts[i].command);
+      printf("\"\n");
     }
     if (config->dry_run)
       continue;
@@ -3591,8 +3698,14 @@ static int update_files(const CsemverConfig *config, const char *version,
       const char *display_old = uses_plain_text_updater(&config->bump_files[i])
                                     ? content
                                     : old_version;
-      printf("✔ bumping version in %s from %s to %s\n",
-             config->bump_files[i].filename, display_old, version);
+      print_checkpoint_tick(config);
+      printf(" bumping version in ");
+      printf("%s", config->bump_files[i].filename);
+      printf(" from ");
+      print_bold(display_old);
+      printf(" to ");
+      print_bold(version);
+      putchar('\n');
     }
     if (!dry_run && !csemver_write_file(config->bump_files[i].filename, updated,
                                         updated_size)) {
@@ -3622,8 +3735,12 @@ static int write_changelog(const CsemverConfig *config, const char *version,
     return 1;
   if (!run_lifecycle(config, "prechangelog"))
     return 0;
-  if (!config->silent && access(config->infile, F_OK) != 0)
-    printf("✔ created %s\n", config->infile);
+  if (!config->silent && access(config->infile, F_OK) != 0) {
+    print_checkpoint_tick(config);
+    printf(" created ");
+    print_bold(config->infile);
+    putchar('\n');
+  }
   csemver_buffer_init(&content);
   if (!render_changelog(config, version, previous_tag, new_tag, commits,
                         commit_count, tags, tag_count, &content)) {
@@ -3631,8 +3748,12 @@ static int write_changelog(const CsemverConfig *config, const char *version,
     errorf("failed to generate changelog");
     return 0;
   }
-  if (!config->silent)
-    printf("✔ outputting changes to %s\n", config->infile);
+  if (!config->silent) {
+    print_checkpoint_tick(config);
+    printf(" outputting changes to ");
+    print_bold(config->infile);
+    putchar('\n');
+  }
   if (config->dry_run) {
     char *preview = content.data == NULL ? NULL : trim(content.data);
     printf("\n---\n%s\n---\n\n", preview == NULL ? "" : preview);
@@ -3761,8 +3882,13 @@ static int tag_release(const CsemverConfig *config, const char *tag,
     return 1;
   if (!run_lifecycle(config, "pretag"))
     return 0;
-  if (!config->silent)
-    printf("✔ tagging release %s\n", tag);
+  if (!config->silent) {
+    print_checkpoint_tick(config);
+    printf(" tagging release ");
+    print_bold(config->tag_prefix);
+    print_bold(tag + strlen(config->tag_prefix));
+    putchar('\n');
+  }
   args[index++] = "tag";
   if (config->sign)
     args[index++] = "-s";
@@ -3791,25 +3917,29 @@ print_commit_summary(const CsemverConfig *config,
                      size_t path_count) {
   if (config->silent || config->skip_commit)
     return;
-  fputs("✔ committing ", stdout);
+  print_checkpoint_tick(config);
+  fputs(" committing ", stdout);
   bool has_changelog = !config->skip_changelog && path_count > 0 &&
                        strcmp(paths[path_count - 1], config->infile) == 0;
   size_t version_path_count = path_count - (has_changelog ? 1 : 0);
   for (size_t i = version_path_count; i > 0; --i) {
     if (i != version_path_count)
       fputs(" and ", stdout);
-    fputs(paths[i - 1], stdout);
+    print_bold(paths[i - 1]);
   }
   if (has_changelog) {
     if (version_path_count != 0)
       fputs(" and ", stdout);
-    fputs(paths[path_count - 1], stdout);
+    print_bold(paths[path_count - 1]);
   }
   if (config->commit_all) {
-    if (path_count > 0)
-      fputs(" and all staged files", stdout);
-    else
-      fputs("all staged files and %s", stdout);
+    if (path_count > 0) {
+      fputs(" and ", stdout);
+      print_bold("all staged files");
+    } else {
+      print_bold("all staged files");
+      fputs(" and %s", stdout);
+    }
   }
   fputc('\n', stdout);
 }
@@ -3844,7 +3974,11 @@ print_publish_hint(const CsemverConfig *config, bool is_private,
     else
       publish_command = "npm publish";
   }
-  printf("ℹ Run `git push --follow-tags origin %s", trim(branch_output));
+  print_checkpoint_info();
+  printf(" Run `");
+  if (terminal_supports_color(stdout))
+    fputs("\033[1m", stdout);
+  printf("git push --follow-tags origin %s", trim(branch_output));
   free(branch_output);
   if (publish_package) {
     printf(" && %s", publish_command);
@@ -3853,6 +3987,8 @@ print_publish_hint(const CsemverConfig *config, bool is_private,
                               ? "prerelease"
                               : config->prerelease_id);
   }
+  if (terminal_supports_color(stdout))
+    fputs("\033[22m", stdout);
   puts("` to publish");
   return 1;
 }
@@ -4010,8 +4146,10 @@ static int csemver_main_impl(int argc, char **argv) {
     snprintf(next, sizeof next, "%s", current);
   } else if (config.release_as[0] == '\0' && bump == 0 &&
              config.no_bump_when_empty_changes) {
-    if (!config.silent)
-      puts("✔ no commits found, so not bumping version");
+    if (!config.silent) {
+      print_checkpoint_cross();
+      puts(" no commits found, so not bumping version");
+    }
     free(commits);
     return 0;
   } else {
@@ -4040,8 +4178,10 @@ static int csemver_main_impl(int argc, char **argv) {
     errorf("release version or message is too long");
     return 1;
   }
-  if (!config.silent && config.first_release && !config.skip_bump)
-    puts("✖ skip version bump on first release");
+  if (!config.silent && config.first_release && !config.skip_bump) {
+    print_checkpoint_cross();
+    puts(" skip version bump on first release");
+  }
   if (!config.dry_run && !update_files(&config, next, release_as_null, paths,
                                        &path_count, false)) {
     free(commits);
@@ -4107,8 +4247,13 @@ static int csemver_main_impl(int argc, char **argv) {
         free(commits);
         return 1;
       }
-      if (!config.silent)
-        printf("✔ tagging release %s\n", new_tag);
+      if (!config.silent) {
+        print_checkpoint_tick(&config);
+        printf(" tagging release ");
+        print_bold(config.tag_prefix);
+        print_bold(new_tag + strlen(config.tag_prefix));
+        putchar('\n');
+      }
       if (!print_publish_hint(&config, is_private, paths, path_count) ||
           !run_lifecycle(&config, "posttag")) {
         free(commits);

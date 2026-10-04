@@ -3957,4 +3957,21 @@ test "$(git log -1 --format=%s)" = 'fix: trigger precommit script failure'
 test "$(git status --porcelain)" = \
   "$(printf ' M package.json\n?? CHANGELOG.md')"
 
+mkdir "$tmp/forced-color-dry-run"
+cd "$tmp/forced-color-dry-run"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{"name":"forced-color-dry-run","version":"1.2.3","repository":{"type":"git","url":"https://github.com/example/forced-color-dry-run.git"}}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize forced color fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+git commit --allow-empty -qm 'fix: exercise forced dry run color'
+FORCE_COLOR=1 "$bin" --dry-run > "$tmp/forced-color-dry-run.stdout"
+printf '\033[33m✔\033[39m bumping version in package.json from \033[1m1.2.3\033[22m to \033[1m1.2.4\033[22m' \
+  > "$tmp/forced-color-dry-run.expected-line"
+grep -F -x -f "$tmp/forced-color-dry-run.expected-line" \
+  "$tmp/forced-color-dry-run.stdout"
+
 printf '%s\n' 'release workflow tests passed'
