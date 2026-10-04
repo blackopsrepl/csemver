@@ -3297,4 +3297,26 @@ test "$(git show --pretty=format: --name-only HEAD)" = staged.txt
 test "$(git tag --list)" = v1.2.3
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/signoff-release"
+cd "$tmp/signoff-release"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{"name":"signoff-release","version":"1.2.3","repository":{"type":"git","url":"https://github.com/example/signoff-release.git"}}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize signoff release fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+git commit --allow-empty -qm 'fix: exercise signoff release'
+"$bin" --signoff > "$tmp/signoff-release.stdout" \
+  2> "$tmp/signoff-release.stderr"
+printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ created CHANGELOG.md\n✔ outputting changes to CHANGELOG.md\n✔ committing package.json and CHANGELOG.md\n✔ tagging release v1.2.4\nℹ Run `git push --follow-tags origin master && npm publish` to publish\n' \
+  > "$tmp/signoff-release.expected.stdout"
+cmp "$tmp/signoff-release.expected.stdout" "$tmp/signoff-release.stdout"
+test ! -s "$tmp/signoff-release.stderr"
+test "$(git show -s --format=%B HEAD)" = \
+  "$(printf 'chore(release): 1.2.4\n\nSigned-off-by: C Semver Test <test@example.invalid>')"
+test "$(git tag --list v1.2.4)" = v1.2.4
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'
