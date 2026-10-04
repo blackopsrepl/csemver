@@ -4019,4 +4019,42 @@ test "$(git tag --list)" = v1.2.3
 test "$(git log -1 --format=%s)" = 'fix: exercise colored lifecycle failure'
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/forced-color-lifecycle-warning"
+cd "$tmp/forced-color-lifecycle-warning"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+cat > package.json <<'JSON'
+{
+  "name": "forced-color-lifecycle-warning",
+  "version": "1.2.3",
+  "repository": {"type": "git", "url": "https://github.com/example/forced-color-lifecycle-warning.git"},
+  "commit-and-tag-version": {"scripts": {"prerelease": "./warn.sh"}}
+}
+JSON
+cat > warn.sh <<'SH'
+#!/bin/sh
+printf 'warning-marker\n' >&2
+SH
+chmod +x warn.sh
+git add package.json warn.sh
+git commit -qm 'chore: initialize colored lifecycle warning fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+git commit --allow-empty -qm 'fix: exercise colored lifecycle warning'
+FORCE_COLOR=1 "$bin" > "$tmp/forced-color-lifecycle-warning.stdout" \
+  2> "$tmp/forced-color-lifecycle-warning.stderr"
+printf '\033[33mwarning-marker\033[39m\n\033[33m\033[39m\n' \
+  > "$tmp/forced-color-lifecycle-warning.expected.stderr"
+cmp "$tmp/forced-color-lifecycle-warning.expected.stderr" \
+  "$tmp/forced-color-lifecycle-warning.stderr"
+printf '\033[32m✔\033[39m Running lifecycle script "\033[1mprerelease\033[22m"\n\033[34mℹ\033[39m - execute command: "\033[1m./warn.sh\033[22m"' \
+  > "$tmp/forced-color-lifecycle-warning.expected-lines"
+grep -F -x -f "$tmp/forced-color-lifecycle-warning.expected-lines" \
+  "$tmp/forced-color-lifecycle-warning.stdout"
+grep -q '"version": "1.2.4"' package.json
+test "$(git tag --list)" = "$(printf 'v1.2.3\nv1.2.4')"
+test "$(git log -1 --format=%s)" = 'chore(release): 1.2.4'
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'
