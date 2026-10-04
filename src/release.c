@@ -272,6 +272,19 @@ static int package_bump_file_type_supported(const char *type) {
   return 0;
 }
 
+static int package_upstream_bump_file_type_supported(const char *type) {
+  static const char *const supported_types[] = {
+      "csproj",  "gradle",     "json",   "maven",
+      "openapi", "plain-text", "python", "yaml"};
+  size_t index;
+  for (index = 0; index < sizeof supported_types / sizeof supported_types[0];
+       ++index) {
+    if (strcmp(type, supported_types[index]) == 0)
+      return 1;
+  }
+  return 0;
+}
+
 static int package_path_ends_with(const char *path, const char *suffix) {
   size_t path_length = strlen(path);
   size_t suffix_length = strlen(suffix);
@@ -356,6 +369,18 @@ static void warn_unsupported_package_bump_file(const char *filename) {
           " Please specify the updater `type` or use a custom `updater`.\n"
           " - Skipping...\n",
           filename);
+}
+
+static void warn_unsupported_package_bump_type(const char *filename,
+                                               const char *type) {
+  fputs("Unable to obtain updater for: {\"filename\":", stderr);
+  print_json_quoted(stderr, filename);
+  fputs(",\"type\":", stderr);
+  print_json_quoted(stderr, type);
+  fprintf(stderr,
+          "}\n - Error: Unable to locate updater for provided type (%s).\n"
+          " - Skipping...\n",
+          type);
 }
 
 static int load_package_config(CsemverConfig *config) {
@@ -564,6 +589,7 @@ static int load_package_config(CsemverConfig *config) {
          ++option_index) {
       char filenames[CSEMVER_MAX_FILES][CSEMVER_PATH_MAX];
       char types[CSEMVER_MAX_FILES][32];
+      bool unsupported_types[CSEMVER_MAX_FILES] = {false};
       const char *value_pointers[CSEMVER_MAX_FILES];
       size_t value_count, value_index;
       int typed_files = csemver_json_object_mixed_file_array(
@@ -592,13 +618,9 @@ static int load_package_config(CsemverConfig *config) {
             type = PACKAGE_UNSUPPORTED_FILENAME;
           snprintf(types[value_index], sizeof types[value_index], "%s", type);
         }
-        if (strcmp(types[value_index], PACKAGE_UNSUPPORTED_FILENAME) != 0 &&
-            !package_bump_file_type_supported(types[value_index])) {
-          errorf("unsupported package bumpFiles updater type: %s",
-                 types[value_index]);
-          free(contents);
-          return 0;
-        }
+        unsupported_types[value_index] =
+            strcmp(types[value_index], PACKAGE_UNSUPPORTED_FILENAME) != 0 &&
+            !package_upstream_bump_file_type_supported(types[value_index]);
         value_pointers[value_index] = filenames[value_index];
       }
       if (!csemver_config_set_array(config, "bumpFiles", value_pointers,
@@ -611,6 +633,9 @@ static int load_package_config(CsemverConfig *config) {
         snprintf(config->bump_files[value_index].type,
                  sizeof config->bump_files[value_index].type, "%s",
                  types[value_index]);
+      for (value_index = 0; value_index < value_count; ++value_index)
+        config->bump_files[value_index].compatibility_unsupported_type =
+            unsupported_types[value_index];
     }
     for (option_index = 0;
          option_index < sizeof numeric_options / sizeof numeric_options[0];
@@ -3198,6 +3223,11 @@ static int update_files(const CsemverConfig *config, const char *version,
     char error[256] = {0};
     size_t updated_size = 0;
     BumpFileKind file_kind;
+    if (config->bump_files[i].compatibility_unsupported_type) {
+      warn_unsupported_package_bump_type(config->bump_files[i].filename,
+                                         config->bump_files[i].type);
+      continue;
+    }
     if (strcmp(config->bump_files[i].type, PACKAGE_UNSUPPORTED_FILENAME) == 0) {
       warn_unsupported_package_bump_file(config->bump_files[i].filename);
       continue;

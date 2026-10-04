@@ -1268,6 +1268,50 @@ grep -Fq '"version": "1.0.0"' package.json
 grep -Fq '"version": "2.0.0"' metadata.json
 test -f CHANGELOG.md
 
+mkdir "$tmp/pkg-bumpfiles-typed-unsupported"
+cd "$tmp/pkg-bumpfiles-typed-unsupported"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-bumpfiles-typed-unsupported-fixture",
+  "version": "1.0.0",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-typed-unsupported.git"},
+  "commit-and-tag-version": {
+    "packageFiles": ["package.json"],
+    "bumpFiles": [
+      {"filename": "package.json", "type": "json"},
+      {"filename": "metadata.toml", "type": "toml"},
+      {"filename": "custom.dat", "type": "custom"}
+    ]
+  }
+}
+JSON
+printf 'version = "1.0.0"\n' > metadata.toml
+printf 'version=1.0.0\n' > custom.dat
+git add package.json metadata.toml custom.dat
+git commit -qm 'chore: seed typed unsupported updater fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: trigger typed unsupported updater fixture'
+"$bin" --release-as 1.0.1 --skip.changelog --skip.commit --skip.tag \
+  > "$tmp/typed-unsupported.stdout" 2> "$tmp/typed-unsupported.stderr"
+printf '%s\n' '✔ bumping version in package.json from 1.0.0 to 1.0.1' \
+  > "$tmp/typed-unsupported.expected.stdout"
+cmp "$tmp/typed-unsupported.expected.stdout" "$tmp/typed-unsupported.stdout"
+printf '%s\n' \
+  'Unable to obtain updater for: {"filename":"metadata.toml","type":"toml"}' \
+  ' - Error: Unable to locate updater for provided type (toml).' \
+  ' - Skipping...' \
+  'Unable to obtain updater for: {"filename":"custom.dat","type":"custom"}' \
+  ' - Error: Unable to locate updater for provided type (custom).' \
+  ' - Skipping...' > "$tmp/typed-unsupported.expected.stderr"
+cmp "$tmp/typed-unsupported.expected.stderr" "$tmp/typed-unsupported.stderr"
+grep -Fq '"version": "1.0.1"' package.json
+test "$(cat metadata.toml)" = 'version = "1.0.0"'
+test "$(cat custom.dat)" = 'version=1.0.0'
+test ! -e CHANGELOG.md
+
 mkdir "$tmp/pkg-custom-types"
 cd "$tmp/pkg-custom-types"
 git init -q -b master
