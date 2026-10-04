@@ -2925,6 +2925,18 @@ static int generate_version(const CsemverConfig *config, const char *current,
   }
   if (config->has_prerelease) {
     if (parsed.has_prerelease) {
+      if (config->prerelease_id[0] == '\0') {
+        /* Upstream ranks continuation from nonzero patch, minor, then major
+         * components, independently of the prerelease tag's channel name. */
+        int active_priority = parsed.patch != 0 ? 0 : parsed.minor != 0 ? 1 : 2;
+        int expected_priority = bump == 3 ? 2 : bump == 2 ? 1 : 0;
+        if (active_priority >= expected_priority)
+          return semver_bump(&parsed, "prerelease", "", next, next_size);
+        if (snprintf(type, sizeof type, "pre%s", bump_name(bump)) >=
+            (int)sizeof type)
+          return 0;
+        return semver_bump(&parsed, type, "", next, next_size);
+      }
       Semver stable, target;
       char target_text[SEMVER_TEXT_MAX];
       if (bump > 0 && stable_version != NULL && stable_version[0] != '\0' &&

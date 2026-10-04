@@ -283,6 +283,31 @@ feature_count=$(grep -Fc '* add prerelease feature' CHANGELOG.md)
   exit 1
 }
 
+mkdir "$tmp/prerelease-empty-id-tag-fallback"
+cd "$tmp/prerelease-empty-id-tag-fallback"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+printf '{"name":"prerelease-empty-id-tag-fallback","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/prerelease-empty-id-tag-fallback.git"},"commit-and-tag-version":{"packageFiles":[]}}\n' > package.json
+git add package.json
+git commit -qm 'chore: seed unnamed prerelease fallback'
+git tag -a v1.2.3-beta.0 -m 'release 1.2.3-beta.0'
+git commit --allow-empty -qm 'feat: promote prerelease by feature bump'
+if "$bin" --dry-run --skip.changelog --skip.commit --skip.tag \
+  --prerelease > "$tmp/prerelease-empty-id-tag-fallback.stdout" \
+  2> "$tmp/prerelease-empty-id-tag-fallback.stderr"; then
+  empty_prerelease_status=0
+else
+  empty_prerelease_status=$?
+fi
+test "$empty_prerelease_status" -eq 0
+printf '%s\n' '✔ bumping version in package.json from 1.0.0 to 1.3.0-0' \
+  > "$tmp/prerelease-empty-id-tag-fallback.expected.stdout"
+cmp "$tmp/prerelease-empty-id-tag-fallback.expected.stdout" \
+  "$tmp/prerelease-empty-id-tag-fallback.stdout"
+test ! -s "$tmp/prerelease-empty-id-tag-fallback.stderr"
+test -z "$(git status --porcelain)"
+
 test -z "$(git status --porcelain)"
 
 mkdir "$tmp/prerelease-escalation"
