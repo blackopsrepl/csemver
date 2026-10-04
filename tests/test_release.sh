@@ -3319,4 +3319,28 @@ test "$(git show -s --format=%B HEAD)" = \
 test "$(git tag --list v1.2.4)" = v1.2.4
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/release-message-format"
+cd "$tmp/release-message-format"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{"name":"release-message-format","version":"1.2.3","repository":{"type":"git","url":"https://github.com/example/release-message-format.git"}}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize release message fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+git commit --allow-empty -qm 'fix: exercise release message format'
+"$bin" --releaseCommitMessageFormat \
+  'release {{currentTag}} / {{currentTag}}' \
+  > "$tmp/release-message-format.stdout" \
+  2> "$tmp/release-message-format.stderr"
+printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ created CHANGELOG.md\n✔ outputting changes to CHANGELOG.md\n✔ committing package.json and CHANGELOG.md\n✔ tagging release v1.2.4\nℹ Run `git push --follow-tags origin master && npm publish` to publish\n' \
+  > "$tmp/release-message-format.expected.stdout"
+cmp "$tmp/release-message-format.expected.stdout" \
+  "$tmp/release-message-format.stdout"
+test ! -s "$tmp/release-message-format.stderr"
+test "$(git show -s --format=%s HEAD)" = 'release 1.2.4 / 1.2.4'
+test "$(git tag --list v1.2.4)" = v1.2.4
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'
