@@ -2674,8 +2674,36 @@ static int run_lifecycle_command(const char *command, char **stdout_output,
                                              max_buffer_stream, exit_code);
 }
 
-static void print_lifecycle_message(const char *message) {
-  fprintf(stderr, "%s\n", message);
+static void print_lifecycle_message(const char *message, const char *color) {
+  const char *cursor;
+  if (message[0] == '\0') {
+    fputc('\n', stderr);
+    return;
+  }
+  if (!terminal_supports_color(stdout)) {
+    fprintf(stderr, "%s\n", message);
+    return;
+  }
+  fprintf(stderr, "\033[%sm", color);
+  cursor = message;
+  while (*cursor != '\0') {
+    if (strncmp(cursor, "\033[39m", 5) == 0) {
+      fprintf(stderr, "\033[%sm", color);
+      cursor += 5;
+    } else if (cursor[0] == '\r' && cursor[1] == '\n') {
+      fputs("\033[39m\r\n", stderr);
+      fprintf(stderr, "\033[%sm", color);
+      cursor += 2;
+    } else if (*cursor == '\n') {
+      fputs("\033[39m\n", stderr);
+      fprintf(stderr, "\033[%sm", color);
+      ++cursor;
+    } else {
+      fputc(*cursor, stderr);
+      ++cursor;
+    }
+  }
+  fputs("\033[39m\n", stderr);
 }
 
 static int lifecycle_stderr_is_pipe(void) {
@@ -2700,9 +2728,9 @@ static void print_lifecycle_max_buffer_error(const CsemverConfig *config,
     (void)fflush(stderr);
     return;
   }
-  print_lifecycle_message(captured_error[0] != '\0' ? captured_error
-                                                    : error_message);
-  print_lifecycle_message(error_message);
+  print_lifecycle_message(
+      captured_error[0] != '\0' ? captured_error : error_message, "31");
+  print_lifecycle_message(error_message, "31");
 }
 
 static char *lifecycle_error_message(const char *command,
@@ -2772,9 +2800,9 @@ static int run_lifecycle_capture(const CsemverConfig *config, const char *name,
       error_message =
           lifecycle_error_message(config->scripts[i].command, captured_error);
       if (!config->silent && error_message != NULL) {
-        print_lifecycle_message(captured_error[0] != '\0' ? captured_error
-                                                          : error_message);
-        print_lifecycle_message(error_message);
+        print_lifecycle_message(
+            captured_error[0] != '\0' ? captured_error : error_message, "31");
+        print_lifecycle_message(error_message, "31");
       }
       free(error_message);
       free(captured_output);
@@ -2782,7 +2810,7 @@ static int run_lifecycle_capture(const CsemverConfig *config, const char *name,
       return 0;
     }
     if (!config->silent && captured_error[0] != '\0')
-      print_lifecycle_message(captured_error);
+      print_lifecycle_message(captured_error, "33");
     if (keep_output)
       *output = captured_output;
     else

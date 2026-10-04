@@ -3974,4 +3974,49 @@ printf '\033[33m✔\033[39m bumping version in package.json from \033[1m1.2.3\03
 grep -F -x -f "$tmp/forced-color-dry-run.expected-line" \
   "$tmp/forced-color-dry-run.stdout"
 
+mkdir "$tmp/forced-color-lifecycle-failure"
+cd "$tmp/forced-color-lifecycle-failure"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+cat > package.json <<'JSON'
+{
+  "name": "forced-color-lifecycle-failure",
+  "version": "1.2.3",
+  "repository": {"type": "git", "url": "https://github.com/example/forced-color-lifecycle-failure.git"},
+  "commit-and-tag-version": {"scripts": {"prerelease": "./fail.sh"}}
+}
+JSON
+cat > fail.sh <<'SH'
+#!/bin/sh
+printf 'stdout-marker\n'
+printf 'stderr-marker\n' >&2
+exit 7
+SH
+chmod +x fail.sh
+git add package.json fail.sh
+git commit -qm 'chore: initialize colored lifecycle failure fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+git commit --allow-empty -qm 'fix: exercise colored lifecycle failure'
+if FORCE_COLOR=1 "$bin" > "$tmp/forced-color-lifecycle-failure.stdout" \
+  2> "$tmp/forced-color-lifecycle-failure.stderr"; then
+  printf '%s\n' 'release unexpectedly succeeded with a failing lifecycle script' >&2
+  exit 1
+else
+  forced_color_lifecycle_failure_status=$?
+fi
+test "$forced_color_lifecycle_failure_status" -eq 1
+printf '\033[32m✔\033[39m Running lifecycle script "\033[1mprerelease\033[22m"\n\033[34mℹ\033[39m - execute command: "\033[1m./fail.sh\033[22m"\n' \
+  > "$tmp/forced-color-lifecycle-failure.expected.stdout"
+printf '\033[31mstderr-marker\033[39m\n\033[31m\033[39m\n\033[31mCommand failed: ./fail.sh\033[39m\n\033[31mstderr-marker\033[39m\n\033[31m\033[39m\n' \
+  > "$tmp/forced-color-lifecycle-failure.expected.stderr"
+cmp "$tmp/forced-color-lifecycle-failure.expected.stdout" \
+  "$tmp/forced-color-lifecycle-failure.stdout"
+cmp "$tmp/forced-color-lifecycle-failure.expected.stderr" \
+  "$tmp/forced-color-lifecycle-failure.stderr"
+test "$(git tag --list)" = v1.2.3
+test "$(git log -1 --format=%s)" = 'fix: exercise colored lifecycle failure'
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'
