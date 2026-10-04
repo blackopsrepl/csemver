@@ -3150,4 +3150,44 @@ test "$(git tag --list v1.2.4)" = v1.2.4
 test "$(git log -1 --format=%s)" = 'chore(release): 1.2.4'
 test -z "$(git status --porcelain)"
 
+run_publish_hint_case() {
+  publish_case_name=$1
+  publish_manager=$2
+  shift 2
+  publish_case_dir="$tmp/publish-hint-$publish_case_name"
+  mkdir "$publish_case_dir"
+  cd "$publish_case_dir"
+  git init -q -b master
+  git config user.name 'C Semver Test'
+  git config user.email 'test@example.invalid'
+  printf '{"name":"publish-hint-probe","version":"1.2.3","repository":{"type":"git","url":"https://github.com/example/publish-hint-probe.git"}}\n' > package.json
+  for publish_lock in "$@"; do
+    if [ "$publish_lock" = package-lock.json ]; then
+      printf '{"name":"publish-hint-probe","version":"1.2.3","lockfileVersion":3,"packages":{"":{"name":"publish-hint-probe","version":"1.2.3"}}}\n' > "$publish_lock"
+    else
+      : > "$publish_lock"
+    fi
+  done
+  git add .
+  git commit -qm 'chore: initialize publish hint fixture'
+  git tag -a v1.2.3 -m 'release 1.2.3'
+  git commit --allow-empty -qm 'fix: exercise publish hint selection'
+  "$bin" --dry-run --skip.changelog --skip.commit \
+    > "$publish_case_dir.stdout" 2> "$publish_case_dir.stderr"
+  expected_publish_hint=$(printf \
+    'ℹ Run `git push --follow-tags origin master && %s` to publish' \
+    "$publish_manager")
+  grep -Fxq "$expected_publish_hint" "$publish_case_dir.stdout"
+  test ! -s "$publish_case_dir.stderr"
+  grep -q '"version":"1.2.3"' package.json
+  test -z "$(git tag --list v1.2.4)"
+  test -z "$(git status --porcelain)"
+}
+run_publish_hint_case no-lock 'npm publish'
+run_publish_hint_case npm-lock 'npm publish' package-lock.json
+run_publish_hint_case pnpm 'pnpm publish' pnpm-lock.yaml
+run_publish_hint_case yarn 'yarn publish' yarn.lock
+run_publish_hint_case pnpm-over-npm 'pnpm publish' package-lock.json pnpm-lock.yaml
+run_publish_hint_case yarn-over-pnpm 'yarn publish' pnpm-lock.yaml yarn.lock
+
 printf '%s\n' 'release workflow tests passed'
