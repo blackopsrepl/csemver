@@ -1446,6 +1446,52 @@ XML
   test -z "$(git ls-files --others --exclude-standard)"
 done
 
+for regex_case in pom-dot-wildcard gradle-dot-wildcard openapi-dot-wildcard python-dot-wildcard; do
+  mkdir "$tmp/pkg-packagefiles-$regex_case"
+  cd "$tmp/pkg-packagefiles-$regex_case"
+  git init -q -b master
+  git config user.name 'C Semver Test'
+  git config user.email 'test@example.invalid'
+  case "$regex_case" in
+    pom-dot-wildcard)
+      package_source_filename=pom-xml
+      cat > "$package_source_filename" <<'XML'
+<project><modelVersion>4.0.0</modelVersion><groupId>x</groupId><artifactId>x</artifactId><version>3.0.0</version></project>
+XML
+      ;;
+    gradle-dot-wildcard)
+      package_source_filename=build-gradle
+      printf 'plugins {}\nversion = "3.0.0"\n' > "$package_source_filename"
+      ;;
+    openapi-dot-wildcard)
+      package_source_filename=openapi-yaml
+      printf 'openapi: 3.0.0\ninfo:\n  title: fixture\n  version: 3.0.0\npaths: {}\n' \
+        > "$package_source_filename"
+      ;;
+    python-dot-wildcard)
+      package_source_filename=pyproject-toml
+      printf '[project]\nname = "fixture"\nversion = "3.0.0"\n' \
+        > "$package_source_filename"
+      ;;
+  esac
+  printf '{\n  "name": "pkg-packagefiles-%s-fixture",\n  "version": "1.0.0",\n  "repository": {"type": "git", "url": "https://github.com/example/pkg-packagefiles-dot-wildcard.git"},\n  "commit-and-tag-version": {"packageFiles": ["%s", "package.json"], "bumpFiles": ["package.json"]}\n}\n' \
+    "$regex_case" "$package_source_filename" > package.json
+  git add package.json "$package_source_filename"
+  git commit -qm 'chore: seed updater regex inference fixture'
+  git tag -a v1.0.0 -m 'release 1.0.0'
+  git commit --allow-empty -qm 'fix: trigger updater regex inference fixture'
+  "$bin" --skip.changelog --skip.commit --skip.tag \
+    > "$tmp/packagefiles-regex.stdout" 2> "$tmp/packagefiles-regex.stderr"
+  printf '%s\n' '✔ bumping version in package.json from 1.0.0 to 3.0.1' \
+    > "$tmp/packagefiles-regex.expected.stdout"
+  cmp "$tmp/packagefiles-regex.expected.stdout" \
+    "$tmp/packagefiles-regex.stdout"
+  test ! -s "$tmp/packagefiles-regex.stderr"
+  grep -Fq '"version": "3.0.1"' package.json
+  git diff --quiet -- "$package_source_filename"
+  test -z "$(git ls-files --others --exclude-standard)"
+done
+
 mkdir "$tmp/pkg-bumpfiles-inferred-object"
 cd "$tmp/pkg-bumpfiles-inferred-object"
 git init -q -b master

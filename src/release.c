@@ -279,6 +279,26 @@ static int package_path_ends_with(const char *path, const char *suffix) {
          strcmp(path + path_length - suffix_length, suffix) == 0;
 }
 
+static int package_path_matches_upstream_pattern(const char *path,
+                                                 const char *pattern) {
+  size_t path_length = strlen(path);
+  size_t pattern_length = strlen(pattern);
+  size_t offset;
+  for (offset = 0; offset + pattern_length <= path_length; ++offset) {
+    size_t index;
+    for (index = 0; index < pattern_length; ++index) {
+      unsigned char actual = (unsigned char)path[offset + index];
+      unsigned char expected = (unsigned char)pattern[index];
+      if ((expected != '.' && actual != expected) ||
+          (expected == '.' && (actual == '\r' || actual == '\n')))
+        break;
+    }
+    if (index == pattern_length)
+      return 1;
+  }
+  return 0;
+}
+
 static const char *package_bump_file_type_from_filename(const char *filename) {
   static const char *const json_filenames[] = {
       "package.json", "bower.json", "manifest.json", "package-lock.json",
@@ -294,18 +314,18 @@ static const char *package_bump_file_type_from_filename(const char *filename) {
   if (strcmp(filename, "VERSION.txt") == 0 ||
       strcmp(filename, "version.txt") == 0)
     return "plain-text";
-  if (strstr(filename, "pom.xml") != NULL)
+  if (package_path_matches_upstream_pattern(filename, "pom.xml"))
     return "maven";
-  if (strstr(filename, "build.gradle") != NULL)
+  if (package_path_matches_upstream_pattern(filename, "build.gradle"))
     return "gradle";
   if (package_path_ends_with(filename, ".csproj"))
     return "csproj";
-  if (strstr(filename, "openapi.yaml") != NULL)
+  if (package_path_matches_upstream_pattern(filename, "openapi.yaml"))
     return "openapi";
   if (package_path_ends_with(filename, ".yaml") ||
       package_path_ends_with(filename, ".yml"))
     return "yaml";
-  if (strstr(filename, "pyproject.toml") != NULL)
+  if (package_path_matches_upstream_pattern(filename, "pyproject.toml"))
     return "python";
   return NULL;
 }
