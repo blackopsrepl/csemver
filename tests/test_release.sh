@@ -3907,4 +3907,54 @@ test "$(git log -1 --format=%s)" = 'fix: trigger blank precommit output'
 test "$(git status --porcelain)" = \
   "$(printf 'A  CHANGELOG.md\nM  package.json')"
 
+mkdir "$tmp/precommit-script-failure"
+cd "$tmp/precommit-script-failure"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+cat > package.json <<'JSON'
+{
+  "name": "precommit-script-failure",
+  "version": "1.2.3",
+  "repository": {"type": "git", "url": "https://github.com/example/precommit-script-failure.git"},
+  "commit-and-tag-version": {"scripts": {"precommit": "./fail-precommit.sh"}}
+}
+JSON
+cat > fail-precommit.sh <<'SH'
+#!/bin/sh
+printf 'stdout-marker\n'
+printf 'stderr-marker\n' >&2
+exit 7
+SH
+chmod +x fail-precommit.sh
+git add package.json fail-precommit.sh
+git commit -qm 'chore: initialize precommit script fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+printf 'fix\n' > fix.txt
+git add fix.txt
+git commit -qm 'fix: trigger precommit script failure'
+if "$bin" > "$tmp/precommit-script-failure.stdout" \
+  2> "$tmp/precommit-script-failure.stderr"; then
+  printf '%s\n' 'release unexpectedly succeeded with a failing precommit script' >&2
+  exit 1
+else
+  precommit_script_status=$?
+fi
+test "$precommit_script_status" -eq 1
+printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ created CHANGELOG.md\n✔ outputting changes to CHANGELOG.md\n✔ Running lifecycle script "precommit"\nℹ - execute command: "./fail-precommit.sh"\n' \
+  > "$tmp/precommit-script-failure.expected.stdout"
+printf 'stderr-marker\n\nCommand failed: ./fail-precommit.sh\nstderr-marker\n\n' \
+  > "$tmp/precommit-script-failure.expected.stderr"
+cmp "$tmp/precommit-script-failure.expected.stdout" \
+  "$tmp/precommit-script-failure.stdout"
+cmp "$tmp/precommit-script-failure.expected.stderr" \
+  "$tmp/precommit-script-failure.stderr"
+grep -q '"version": "1.2.4"' package.json
+test -e CHANGELOG.md
+test "$(git tag --list)" = v1.2.3
+test "$(git log -1 --format=%s)" = 'fix: trigger precommit script failure'
+test "$(git status --porcelain)" = \
+  "$(printf ' M package.json\n?? CHANGELOG.md')"
+
 printf '%s\n' 'release workflow tests passed'
