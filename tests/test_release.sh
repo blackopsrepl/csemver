@@ -3627,4 +3627,53 @@ test "$(git tag --list)" = "$(printf 'v1.2.3\nv1.2.4')"
 test "$(git log -1 --format=%s)" = 'chore(release): 1.2.4'
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/postbump-script-failure"
+cd "$tmp/postbump-script-failure"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+cat > package.json <<'JSON'
+{
+  "name": "postbump-script-failure",
+  "version": "1.2.3",
+  "repository": {"type": "git", "url": "https://github.com/example/postbump-script-failure.git"},
+  "commit-and-tag-version": {"scripts": {"postbump": "./fail-postbump.sh"}}
+}
+JSON
+cat > fail-postbump.sh <<'SH'
+#!/bin/sh
+printf 'stdout-marker\n'
+printf 'stderr-marker\n' >&2
+exit 7
+SH
+chmod +x fail-postbump.sh
+git add package.json fail-postbump.sh
+git commit -qm 'chore: initialize postbump script fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+printf 'fix\n' > fix.txt
+git add fix.txt
+git commit -qm 'fix: trigger postbump script failure'
+if "$bin" > "$tmp/postbump-script-failure.stdout" \
+  2> "$tmp/postbump-script-failure.stderr"; then
+  printf '%s\n' 'release unexpectedly succeeded with a failing postbump script' >&2
+  exit 1
+else
+  postbump_script_failure_status=$?
+fi
+test "$postbump_script_failure_status" -eq 1
+printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ Running lifecycle script "postbump"\nℹ - execute command: "./fail-postbump.sh"\n' \
+  > "$tmp/postbump-script-failure.expected.stdout"
+printf 'stderr-marker\n\nCommand failed: ./fail-postbump.sh\nstderr-marker\n\n' \
+  > "$tmp/postbump-script-failure.expected.stderr"
+cmp "$tmp/postbump-script-failure.expected.stdout" \
+  "$tmp/postbump-script-failure.stdout"
+cmp "$tmp/postbump-script-failure.expected.stderr" \
+  "$tmp/postbump-script-failure.stderr"
+grep -q '"version": "1.2.4"' package.json
+test ! -e CHANGELOG.md
+test "$(git tag --list)" = v1.2.3
+test "$(git log -1 --format=%s)" = 'fix: trigger postbump script failure'
+test "$(git status --porcelain)" = ' M package.json'
+
 printf '%s\n' 'release workflow tests passed'
