@@ -1895,6 +1895,34 @@ package_script_output=$("$bin" --silent --skip.commit --skip.tag)
 test -f "$package_script_marker"
 test -z "$package_script_output"
 
+mkdir "$tmp/pkg-prebump"
+cd "$tmp/pkg-prebump"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+cat > package.json <<'JSON'
+{
+  "name": "pkg-prebump-fixture",
+  "version": "1.2.3",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-prebump.git"},
+  "commit-and-tag-version": {"scripts": {"prebump": "printf 1.3.0"}}
+}
+JSON
+git add package.json
+git commit -qm 'chore: seed package prebump fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+git commit --allow-empty -qm 'fix: exercise package prebump override'
+"$bin" > "$tmp/pkg-prebump.stdout" 2> "$tmp/pkg-prebump.stderr"
+printf '✔ Running lifecycle script "prebump"\nℹ - execute command: "printf 1.3.0"\n✔ bumping version in package.json from 1.2.3 to 1.3.0\n✔ created CHANGELOG.md\n✔ outputting changes to CHANGELOG.md\n✔ committing package.json and CHANGELOG.md\n✔ tagging release v1.3.0\nℹ Run `git push --follow-tags origin master && npm publish` to publish\n' \
+  > "$tmp/pkg-prebump.expected.stdout"
+cmp "$tmp/pkg-prebump.expected.stdout" "$tmp/pkg-prebump.stdout"
+test ! -s "$tmp/pkg-prebump.stderr"
+grep -q '"version": "1.3.0"' package.json
+test "$(git tag --list v1.3.0)" = v1.3.0
+test "$(git log -1 --format=%s)" = 'chore(release): 1.3.0'
+test -z "$(git status --porcelain)"
+
 mkdir "$tmp/dry-run-lifecycle-scripts"
 cd "$tmp/dry-run-lifecycle-scripts"
 git init -q -b master
