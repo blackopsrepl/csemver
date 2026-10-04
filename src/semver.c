@@ -234,86 +234,100 @@ static int increment(unsigned long *value) {
   return 1;
 }
 
+static int increment_prerelease_sequence(Semver *version) {
+  const char *source = version->prerelease;
+  const char *token_end = source + strlen(source);
+  char next[SEMVER_IDENTIFIER_MAX];
+
+  while (token_end > source) {
+    const char *token_start = token_end;
+    const char *cursor;
+    char token[SEMVER_IDENTIFIER_MAX];
+    char *parsed_end;
+    unsigned long number;
+    int numeric = 1;
+
+    while (token_start > source && token_start[-1] != '.')
+      --token_start;
+    for (cursor = token_start; cursor < token_end; ++cursor)
+      if (!isdigit((unsigned char)*cursor)) {
+        numeric = 0;
+        break;
+      }
+    if (numeric) {
+      size_t token_length = (size_t)(token_end - token_start);
+      memcpy(token, token_start, token_length);
+      token[token_length] = '\0';
+      errno = 0;
+      number = strtoul(token, &parsed_end, 10);
+      if (errno == ERANGE || parsed_end == token || *parsed_end != '\0' ||
+          number == ULONG_MAX)
+        return 0;
+      ++number;
+      if (snprintf(next, sizeof next, "%.*s%lu%s", (int)(token_start - source),
+                   source, number, token_end) >= (int)sizeof next)
+        return 0;
+      strcpy(version->prerelease, next);
+      return 1;
+    }
+    if (token_start == source)
+      break;
+    token_end = token_start - 1;
+  }
+  if (snprintf(next, sizeof next, "%s.0", source) >= (int)sizeof next)
+    return 0;
+  strcpy(version->prerelease, next);
+  return 1;
+}
+
+static int prerelease_has_numeric_identifier(const char *prerelease,
+                                             const char *identifier) {
+  size_t identifier_length = strlen(identifier);
+  const char *start;
+  const char *end;
+
+  if (strncmp(prerelease, identifier, identifier_length) != 0 ||
+      (prerelease[identifier_length] != '.' &&
+       prerelease[identifier_length] != '\0'))
+    return 0;
+  start = prerelease + identifier_length;
+  if (*start == '.')
+    ++start;
+  end = start;
+  while (*end != '\0' && *end != '.') {
+    if (!isdigit((unsigned char)*end))
+      return 0;
+    ++end;
+  }
+  return end > start;
+}
+
 static int set_prerelease(Semver *version, const char *identifier,
                           int increment_existing) {
   char next[SEMVER_IDENTIFIER_MAX];
-  size_t prefix_length = 0;
-  const char *last_dot;
-  const char *last;
-  char *end;
-  unsigned long number;
-  int numeric = 1;
 
   if (identifier != NULL && identifier[0] != '\0') {
     if (!validate_identifiers(identifier, strlen(identifier), 0))
       return 0;
-    if (increment_existing && version->has_prerelease &&
-        strncmp(version->prerelease, identifier, strlen(identifier)) == 0 &&
-        (version->prerelease[strlen(identifier)] == '.' ||
-         version->prerelease[strlen(identifier)] == '\0')) {
-      last_dot = strrchr(version->prerelease, '.');
-      last = last_dot == NULL ? version->prerelease : last_dot + 1;
-      if (*last == '\0')
+    if (increment_existing && version->has_prerelease) {
+      if (!increment_prerelease_sequence(version))
         return 0;
-      for (end = (char *)last; *end != '\0'; ++end) {
-        if (!isdigit((unsigned char)*end)) {
-          numeric = 0;
-          break;
-        }
-      }
-      if (numeric) {
-        errno = 0;
-        number = strtoul(last, &end, 10);
-        if (errno == ERANGE || number == ULONG_MAX)
-          return 0;
-        ++number;
-        prefix_length = (size_t)(last - version->prerelease);
-        if (snprintf(next, sizeof next, "%.*s%lu", (int)prefix_length,
-                     version->prerelease, number) >= (int)sizeof next)
-          return 0;
-        strcpy(version->prerelease, next);
-        version->has_prerelease = 1;
+      if (prerelease_has_numeric_identifier(version->prerelease, identifier)) {
         version->has_build = 0;
         version->build[0] = '\0';
         return 1;
       }
-      if (snprintf(next, sizeof next, "%s.0", version->prerelease) >=
-          (int)sizeof next)
-        return 0;
-    } else if (snprintf(next, sizeof next, "%s.0", identifier) >=
-               (int)sizeof next) {
-      return 0;
     }
+    if (snprintf(next, sizeof next, "%s.0", identifier) >= (int)sizeof next)
+      return 0;
   } else if (increment_existing && version->has_prerelease) {
-    last_dot = strrchr(version->prerelease, '.');
-    last = last_dot == NULL ? version->prerelease : last_dot + 1;
-    for (end = (char *)last; *end != '\0'; ++end) {
-      if (!isdigit((unsigned char)*end)) {
-        numeric = 0;
-        break;
-      }
-    }
-    if (numeric) {
-      errno = 0;
-      number = strtoul(last, &end, 10);
-      if (errno == ERANGE || number == ULONG_MAX)
-        return 0;
-      ++number;
-      prefix_length = (size_t)(last - version->prerelease);
-      if (snprintf(next, sizeof next, "%.*s%lu", (int)prefix_length,
-                   version->prerelease, number) >= (int)sizeof next)
-        return 0;
-    } else if (snprintf(next, sizeof next, "%s.0", version->prerelease) >=
-               (int)sizeof next) {
+    if (!increment_prerelease_sequence(version))
       return 0;
-    }
+    version->has_build = 0;
+    version->build[0] = '\0';
+    return 1;
   } else {
-    if (identifier == NULL || identifier[0] == 0) {
-      strcpy(next, "0");
-    } else if (snprintf(next, sizeof next, "%s.0", identifier) >=
-               (int)sizeof next) {
-      return 0;
-    }
+    strcpy(next, "0");
   }
   strcpy(version->prerelease, next);
   version->has_prerelease = 1;

@@ -341,6 +341,8 @@ run_named_prerelease_case() {
 run_named_prerelease_case patch 'fix: continue patch prerelease' 1.2.3-beta.1
 run_named_prerelease_case minor 'feat: promote to minor prerelease' 1.3.0-beta.0
 run_named_prerelease_case major 'feat!: promote to major prerelease' 2.0.0-beta.0
+run_named_prerelease_case suffix 'fix: continue suffix prerelease' \
+  1.2.3-beta.1.foo 1.2.3-beta.0.foo
 run_named_prerelease_case zero 'fix: start a patch prerelease from zero' \
   0.0.1-beta.0 0.0.0-beta.0
 
@@ -392,6 +394,7 @@ run_release_as_semver_case() {
   case_name=$1
   release_version=$2
   expected_version=$3
+  base_tag_version=${4:-2.0.0-beta.0}
   case_dir="$tmp/release-as-semver-prerelease-$case_name"
   mkdir "$case_dir"
   cd "$case_dir"
@@ -402,7 +405,7 @@ run_release_as_semver_case() {
     "$case_name" "$case_name" > package.json
   git add package.json
   git commit -qm 'chore: seed exact releaseAs prerelease case'
-  git tag -a v2.0.0-beta.0 -m 'release 2.0.0-beta.0'
+  git tag -a "v$base_tag_version" -m "release $base_tag_version"
   if "$bin" --dry-run --skip.changelog --skip.commit --skip.tag \
     --prerelease beta --release-as "$release_version" > "$case_dir.stdout" \
     2> "$case_dir.stderr"; then
@@ -423,6 +426,10 @@ run_release_as_semver_case lower-stable 1.9.0 1.9.0-beta.0
 run_release_as_semver_case same-prerelease 2.0.0-beta.0 2.0.0-beta.1
 run_release_as_semver_case build-metadata 2.0.0-beta.1+build.7 \
   2.0.0-beta.1+build.7
+run_release_as_semver_case suffix-prerelease 1.2.3-beta.0 \
+  1.2.3-beta.1.foo 1.2.3-beta.0.foo
+run_release_as_semver_case suffix-stable 1.2.3 1.2.3-beta.1.foo \
+  1.2.3-beta.0.foo
 
 test -z "$(git status --porcelain)"
 

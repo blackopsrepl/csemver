@@ -2896,6 +2896,25 @@ static int generate_version(const CsemverConfig *config, const char *current,
           return 0;
         release_version.has_prerelease = 1;
       }
+      if (config->has_prerelease && parsed.has_prerelease &&
+          parsed.major == release_version.major &&
+          parsed.minor == release_version.minor &&
+          parsed.patch == release_version.patch) {
+        char release_text[SEMVER_TEXT_MAX];
+        if (!semver_format(&release_version, release_text, sizeof release_text))
+          return 0;
+        if (semver_compare(release_text, current) <= 0) {
+          char incremented_text[SEMVER_TEXT_MAX];
+          Semver incremented;
+          if (!semver_bump(&parsed, "prerelease", config->prerelease_id,
+                           incremented_text, sizeof incremented_text) ||
+              !semver_parse(incremented_text, &incremented))
+            return 0;
+          incremented.has_build = release_version.has_build;
+          strcpy(incremented.build, release_version.build);
+          return semver_format(&incremented, next, next_size);
+        }
+      }
       return semver_format(&release_version, next, next_size);
     }
     if (config->has_prerelease) {
