@@ -1283,7 +1283,7 @@ cat > package.json <<'JSON'
     "bumpFiles": [
       {"filename": "package.json", "type": "json"},
       {"filename": "metadata.toml", "type": "toml"},
-      {"filename": "custom.dat", "type": "custom"}
+      {"type": "custom", "filename": "custom.dat"}
     ]
   }
 }
@@ -1303,7 +1303,7 @@ printf '%s\n' \
   'Unable to obtain updater for: {"filename":"metadata.toml","type":"toml"}' \
   ' - Error: Unable to locate updater for provided type (toml).' \
   ' - Skipping...' \
-  'Unable to obtain updater for: {"filename":"custom.dat","type":"custom"}' \
+  'Unable to obtain updater for: {"type":"custom","filename":"custom.dat"}' \
   ' - Error: Unable to locate updater for provided type (custom).' \
   ' - Skipping...' > "$tmp/typed-unsupported.expected.stderr"
 cmp "$tmp/typed-unsupported.expected.stderr" "$tmp/typed-unsupported.stderr"
@@ -1338,6 +1338,43 @@ for package_source_type in toml custom; do
   test ! -e CHANGELOG.md
   test -z "$(git status --porcelain)"
 done
+
+mkdir "$tmp/pkg-packagefiles-typed-order"
+cd "$tmp/pkg-packagefiles-typed-order"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+cat > package.json <<'JSON'
+{
+  "name": "pkg-packagefiles-typed-order-fixture",
+  "version": "1.0.0",
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-packagefiles-typed-order.git"},
+  "commit-and-tag-version": {
+    "packageFiles": [
+      {"type": "custom", "filename": "metadata.dat"},
+      "package.json"
+    ],
+    "bumpFiles": ["package.json"]
+  }
+}
+JSON
+printf 'version=3.0.0\n' > metadata.dat
+git add package.json metadata.dat
+git commit -qm 'chore: seed typed packageFiles ordering fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: trigger typed packageFiles ordering fixture'
+"$bin" --skip.changelog --skip.commit --skip.tag \
+  > "$tmp/packagefiles-ordering.stdout" 2> "$tmp/packagefiles-ordering.stderr"
+test ! -s "$tmp/packagefiles-ordering.stdout"
+printf '%s\n' \
+  'Unable to obtain updater for: {"type":"custom","filename":"metadata.dat"}' \
+  ' - Error: Unable to locate updater for provided type (custom).' \
+  ' - Skipping...' > "$tmp/packagefiles-ordering.expected.stderr"
+cmp "$tmp/packagefiles-ordering.expected.stderr" \
+  "$tmp/packagefiles-ordering.stderr"
+grep -Fq '"version": "1.0.0"' package.json
+test "$(cat metadata.dat)" = 'version=3.0.0'
+test -z "$(git status --porcelain)"
 
 for package_source_case in untyped-string untyped-object inferred-string inferred-object; do
   mkdir "$tmp/pkg-packagefiles-$package_source_case"

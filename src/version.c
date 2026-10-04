@@ -1635,7 +1635,8 @@ static int json_object_file_array(const char *content, const char *object_key,
                                   const char *field_key, char *filenames,
                                   size_t filename_stride, char *types,
                                   size_t type_stride, size_t max_values,
-                                  bool *is_object, size_t *file_count,
+                                  bool *is_object, bool *type_precedes_filename,
+                                  size_t *file_count,
                                   int allow_string_entries) {
   Range field;
   Scanner array;
@@ -1657,6 +1658,7 @@ static int json_object_file_array(const char *content, const char *object_key,
   while (array.position < array.length && array.text[array.position] != ']') {
     Range item;
     Range updater;
+    Range filename_range;
     Range type_range;
     Scanner object;
     char *filename;
@@ -1669,6 +1671,8 @@ static int json_object_file_array(const char *content, const char *object_key,
     if (is_object != NULL)
       is_object[count] =
           !(allow_string_entries && array.text[array.position] == '"');
+    if (type_precedes_filename != NULL)
+      type_precedes_filename[count] = false;
     if (allow_string_entries && array.text[array.position] == '"') {
       if (!string_value(&array, filename, filename_stride, NULL, NULL))
         return 0;
@@ -1678,17 +1682,29 @@ static int json_object_file_array(const char *content, const char *object_key,
       object.text = array.text;
       object.position = item.start;
       object.length = item.end;
-      if (!object_field(&object, "filename", NULL, filename, filename_stride))
+      if (!object_field(&object, "filename", &filename_range, filename,
+                        filename_stride))
         return 0;
       object.position = item.start;
       if (allow_string_entries) {
         if (object_field(&object, "type", &type_range, NULL, 0)) {
+          if (type_precedes_filename != NULL)
+            type_precedes_filename[count] =
+                type_range.start < filename_range.start;
           object.position = item.start;
           if (!object_field(&object, "type", NULL, type, type_stride))
             return 0;
         }
-      } else if (!object_field(&object, "type", NULL, type, type_stride))
-        return 0;
+      } else {
+        if (!object_field(&object, "type", &type_range, NULL, 0))
+          return 0;
+        if (type_precedes_filename != NULL)
+          type_precedes_filename[count] =
+              type_range.start < filename_range.start;
+        object.position = item.start;
+        if (!object_field(&object, "type", NULL, type, type_stride))
+          return 0;
+      }
       object.position = item.start;
       if (object_field(&object, "updater", &updater, NULL, 0))
         return 0;
@@ -1722,16 +1738,18 @@ int csemver_json_object_typed_file_array(const char *content,
                                          size_t *file_count) {
   return json_object_file_array(content, object_key, field_key, filenames,
                                 filename_stride, types, type_stride, max_values,
-                                NULL, file_count, 0);
+                                NULL, NULL, file_count, 0);
 }
 
 int csemver_json_object_mixed_file_array(
     const char *content, const char *object_key, const char *field_key,
     char *filenames, size_t filename_stride, char *types, size_t type_stride,
-    bool *is_object, size_t max_values, size_t *file_count) {
+    bool *is_object, bool *type_precedes_filename, size_t max_values,
+    size_t *file_count) {
   return json_object_file_array(content, object_key, field_key, filenames,
                                 filename_stride, types, type_stride, max_values,
-                                is_object, file_count, 1);
+                                is_object, type_precedes_filename, file_count,
+                                1);
 }
 
 int csemver_json_object_commit_type_array(

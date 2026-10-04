@@ -17,6 +17,7 @@ typedef struct {
   bool compatibility_unsupported_type;
   bool compatibility_unsupported_filename;
   bool compatibility_updater_argument_object;
+  bool compatibility_updater_type_precedes_filename;
 } CsemverFile;
 
 typedef struct {

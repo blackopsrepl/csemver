@@ -389,11 +389,20 @@ static void warn_unsupported_package_bump_file_object(const char *filename) {
 }
 
 static void warn_unsupported_package_updater_type(const char *filename,
-                                                  const char *type) {
-  fputs("Unable to obtain updater for: {\"filename\":", stderr);
-  print_json_quoted(stderr, filename);
-  fputs(",\"type\":", stderr);
-  print_json_quoted(stderr, type);
+                                                  const char *type,
+                                                  bool type_precedes_filename) {
+  fputs("Unable to obtain updater for: {", stderr);
+  if (type_precedes_filename) {
+    fputs("\"type\":", stderr);
+    print_json_quoted(stderr, type);
+    fputs(",\"filename\":", stderr);
+    print_json_quoted(stderr, filename);
+  } else {
+    fputs("\"filename\":", stderr);
+    print_json_quoted(stderr, filename);
+    fputs(",\"type\":", stderr);
+    print_json_quoted(stderr, type);
+  }
   fprintf(stderr,
           "}\n - Error: Unable to locate updater for provided type (%s).\n"
           " - Skipping...\n",
@@ -550,6 +559,7 @@ static int load_package_config(CsemverConfig *config) {
       char values[CSEMVER_MAX_FILES][CSEMVER_PATH_MAX];
       char file_types[CSEMVER_MAX_FILES][32] = {{0}};
       bool package_file_objects[CSEMVER_MAX_FILES] = {false};
+      bool package_file_type_precedes_filename[CSEMVER_MAX_FILES] = {false};
       bool unsupported_types[CSEMVER_MAX_FILES] = {false};
       bool unsupported_filenames[CSEMVER_MAX_FILES] = {false};
       const char *value_pointers[CSEMVER_MAX_FILES];
@@ -572,8 +582,8 @@ static int load_package_config(CsemverConfig *config) {
                 contents, sections[section_index],
                 array_options[option_index].json_key, &values[0][0],
                 sizeof values[0], &file_types[0][0], sizeof file_types[0],
-                package_file_objects, array_options[option_index].max_values,
-                &value_count))
+                package_file_objects, package_file_type_precedes_filename,
+                array_options[option_index].max_values, &value_count))
           continue;
         typed_package_files = 1;
       }
@@ -617,6 +627,9 @@ static int load_package_config(CsemverConfig *config) {
               config->package_files[file_index]
                   .compatibility_updater_argument_object =
                   package_file_objects[value_index];
+              config->package_files[file_index]
+                  .compatibility_updater_type_precedes_filename =
+                  package_file_type_precedes_filename[value_index];
             }
           }
         }
@@ -627,13 +640,14 @@ static int load_package_config(CsemverConfig *config) {
          ++option_index) {
       char filenames[CSEMVER_MAX_FILES][CSEMVER_PATH_MAX];
       char types[CSEMVER_MAX_FILES][32];
+      bool type_precedes_filename[CSEMVER_MAX_FILES] = {false};
       bool unsupported_types[CSEMVER_MAX_FILES] = {false};
       const char *value_pointers[CSEMVER_MAX_FILES];
       size_t value_count, value_index;
       int typed_files = csemver_json_object_mixed_file_array(
           contents, sections[section_index], bump_file_options[option_index],
           &filenames[0][0], sizeof filenames[0], &types[0][0], sizeof types[0],
-          NULL, CSEMVER_MAX_FILES, &value_count);
+          NULL, type_precedes_filename, CSEMVER_MAX_FILES, &value_count);
       if (!typed_files) {
         if (!csemver_json_object_string_array(
                 contents, sections[section_index],
@@ -674,6 +688,10 @@ static int load_package_config(CsemverConfig *config) {
       for (value_index = 0; value_index < value_count; ++value_index)
         config->bump_files[value_index].compatibility_unsupported_type =
             unsupported_types[value_index];
+      for (value_index = 0; value_index < value_count; ++value_index)
+        config->bump_files[value_index]
+            .compatibility_updater_type_precedes_filename =
+            type_precedes_filename[value_index];
     }
     for (option_index = 0;
          option_index < sizeof numeric_options / sizeof numeric_options[0];
@@ -1179,7 +1197,9 @@ static int get_version(const CsemverConfig *config, char *version,
     if (config->package_files[index].compatibility_unsupported_type) {
       warn_unsupported_package_updater_type(
           config->package_files[index].filename,
-          config->package_files[index].type);
+          config->package_files[index].type,
+          config->package_files[index]
+              .compatibility_updater_type_precedes_filename);
       return -1;
     }
     if (config->package_files[index].compatibility_unsupported_filename) {
@@ -3277,8 +3297,9 @@ static int update_files(const CsemverConfig *config, const char *version,
     size_t updated_size = 0;
     BumpFileKind file_kind;
     if (config->bump_files[i].compatibility_unsupported_type) {
-      warn_unsupported_package_updater_type(config->bump_files[i].filename,
-                                            config->bump_files[i].type);
+      warn_unsupported_package_updater_type(
+          config->bump_files[i].filename, config->bump_files[i].type,
+          config->bump_files[i].compatibility_updater_type_precedes_filename);
       continue;
     }
     if (strcmp(config->bump_files[i].type, PACKAGE_UNSUPPORTED_FILENAME) == 0) {
