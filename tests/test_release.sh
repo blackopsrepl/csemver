@@ -3343,4 +3343,46 @@ test "$(git show -s --format=%s HEAD)" = 'release 1.2.4 / 1.2.4'
 test "$(git tag --list v1.2.4)" = v1.2.4
 test -z "$(git status --porcelain)"
 
+setup_safecrlf_release_fixture() {
+  safecrlf_dir=$1
+  mkdir "$safecrlf_dir"
+  cd "$safecrlf_dir"
+  git init -q -b master
+  git config user.name 'C Semver Test'
+  git config user.email 'test@example.invalid'
+  git config commit.gpgSign false
+  git config core.autocrlf input
+  git config core.safecrlf warn
+  printf '{\r\n  "name": "safecrlf-release",\r\n  "version": "1.2.3",\r\n  "repository": {"type": "git", "url": "https://github.com/example/safecrlf-release.git"}\r\n}\r\n' > package.json
+  git add package.json > /dev/null 2>&1
+  git commit -qm 'chore: initialize safecrlf fixture'
+  git tag -a v1.2.3 -m 'release 1.2.3'
+  git commit --allow-empty -qm 'fix: exercise safecrlf warnings'
+}
+safecrlf_candidate="$tmp/safecrlf-candidate"
+setup_safecrlf_release_fixture "$safecrlf_candidate"
+"$bin" > "$safecrlf_candidate.stdout" 2> "$safecrlf_candidate.stderr"
+safecrlf_silent="$tmp/safecrlf-silent"
+setup_safecrlf_release_fixture "$safecrlf_silent"
+"$bin" --silent > "$safecrlf_silent.stdout" 2> "$safecrlf_silent.stderr"
+test ! -s "$safecrlf_silent.stdout"
+test ! -s "$safecrlf_silent.stderr"
+safecrlf_manual="$tmp/safecrlf-manual"
+setup_safecrlf_release_fixture "$safecrlf_manual"
+printf '{\r\n  "name": "safecrlf-release",\r\n  "version": "1.2.4",\r\n  "repository": {"type": "git", "url": "https://github.com/example/safecrlf-release.git"}\r\n}\r\n' > package.json
+printf '# Changelog\n' > CHANGELOG.md
+git add -- package.json CHANGELOG.md > "$safecrlf_manual.add.stdout" \
+  2> "$safecrlf_manual.add.stderr"
+git commit -m 'chore(release): 1.2.4' package.json CHANGELOG.md \
+  > "$safecrlf_manual.commit.stdout" 2> "$safecrlf_manual.commit.stderr"
+cat "$safecrlf_manual.add.stderr" > "$safecrlf_manual.expected.stderr"
+if [ -s "$safecrlf_manual.add.stderr" ]; then
+  printf '\n' >> "$safecrlf_manual.expected.stderr"
+fi
+cat "$safecrlf_manual.commit.stderr" >> "$safecrlf_manual.expected.stderr"
+if [ -s "$safecrlf_manual.commit.stderr" ]; then
+  printf '\n' >> "$safecrlf_manual.expected.stderr"
+fi
+cmp "$safecrlf_manual.expected.stderr" "$safecrlf_candidate.stderr"
+
 printf '%s\n' 'release workflow tests passed'

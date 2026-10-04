@@ -269,6 +269,33 @@ static int run_git_capture_streams(const char *const args[],
   return 1;
 }
 
+static int run_git_execfile(const CsemverConfig *config,
+                            const char *const args[], char **output,
+                            int *status) {
+  char *git_stdout = NULL;
+  char *git_stderr = NULL;
+  if (!run_git_capture_streams(args, &git_stdout, &git_stderr, status)) {
+    free(git_stdout);
+    free(git_stderr);
+    return 0;
+  }
+  if (*status == 0) {
+    /* Match upstream's console.warn newline for execFile stderr. */
+    if (git_stderr[0] != '\0' && !config->silent) {
+      fputs(git_stderr, stderr);
+      fputc('\n', stderr);
+    }
+  } else if (git_stderr[0] != '\0') {
+    fputs(git_stderr, stderr);
+  }
+  free(git_stderr);
+  if (output != NULL)
+    *output = git_stdout;
+  else
+    free(git_stdout);
+  return 1;
+}
+
 static int load_config(CsemverConfig *config, const char *path) {
   char *contents = NULL;
   char error[256] = {0};
@@ -3641,26 +3668,13 @@ static int commit_release(CsemverConfig *config, const char *version,
     for (size_t i = 0; i < path_count && index + 1 < ARG_MAX_COUNT; ++i)
       args[index++] = paths[i];
     args[index] = NULL;
-    if (!run_git(args, NULL, &status) || status != 0)
+    if (!run_git_execfile(config, args, NULL, &status) || status != 0)
       return 0;
     index = 0;
   } else if (config->commit_all) {
-    char *git_stdout = NULL;
-    char *git_stderr = NULL;
     args[index++] = "add";
     args[index] = NULL;
-    if (!run_git_capture_streams(args, &git_stdout, &git_stderr, &status)) {
-      free(git_stdout);
-      free(git_stderr);
-      return 0;
-    }
-    free(git_stdout);
-    if (git_stderr[0] != '\0' && !config->silent) {
-      fputs(git_stderr, stderr);
-      fputc('\n', stderr);
-    }
-    free(git_stderr);
-    if (status != 0)
+    if (!run_git_execfile(config, args, NULL, &status) || status != 0)
       return 0;
     index = 0;
   }
@@ -3678,7 +3692,7 @@ static int commit_release(CsemverConfig *config, const char *version,
       args[index++] = paths[i];
   }
   args[index] = NULL;
-  if (!run_git(args, NULL, &status) || status != 0) {
+  if (!run_git_execfile(config, args, NULL, &status) || status != 0) {
     errorf("git commit failed");
     return 0;
   }
@@ -3709,7 +3723,7 @@ static int tag_release(const CsemverConfig *config, const char *tag,
   args[index++] = message;
   args[index++] = tag;
   args[index] = NULL;
-  if (!run_git(args, NULL, &status) || status != 0) {
+  if (!run_git_execfile(config, args, NULL, &status) || status != 0) {
     errorf("git tag failed for %s", tag);
     return 0;
   }
