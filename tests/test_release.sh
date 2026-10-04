@@ -991,10 +991,6 @@ if printf '%s\n' "$types_override_preview" | grep -Fq '### Features'; then
     exit 1
 fi
 git commit --allow-empty -m 'feat!: change the contract' -m 'BREAKING CHANGE: incompatible API.'
-if [ "${CSEMVER_TEST_TRACE:-0}" = 1 ]; then
-  PS4='+ '
-  set -x
-fi
 breaking_preview=$("$bin" --dry-run)
 printf '%s\n' "$breaking_preview" | \
   grep -q 'bumping version in package.json from 0.1.0 to 0.2.0' || {
@@ -2114,7 +2110,7 @@ cat > package.json <<'JSON'
   "version": "1.0.0",
   "commit-and-tag-version": {
     "scripts": {
-      "prerelease": "yes x | head -c 262144; yes y | head -c 262144 >&2"
+      "prerelease": "yes x 2>/dev/null | head -c 262144; yes y 2>/dev/null | head -c 262144 >&2"
     }
   }
 }
@@ -2640,7 +2636,10 @@ extglob_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
 expected_extglob_output=$(printf '%s\n' \
   "Not updating file 'package.json', as it is ignored in Git" \
   "Not updating file 'package-lock.json', as it is ignored in Git")
-test "$extglob_output" = "$expected_extglob_output"
+if [ "$extglob_output" != "$expected_extglob_output" ]; then
+  printf 'unexpected extglob ignore output:\n%s\n' "$extglob_output" >&2
+  exit 1
+fi
 cmp "$tmp/extglob-package.expected" package.json
 cmp "$tmp/extglob-lock.expected" package-lock.json
 test -z "$(git status --porcelain)"

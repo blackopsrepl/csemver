@@ -3354,6 +3354,107 @@ static int ignore_path_pattern_matches(const char *pattern,
 static int ignore_pattern_matches_core(const char *pattern,
                                        const char *filename, int rooted);
 
+/* Lower minimatch @(a|b) alternatives to the brace syntax handled below. */
+static int ignore_expand_extglob_alternation(const char *pattern,
+                                             char **expanded_pattern) {
+  const char *cursor;
+  if (expanded_pattern == NULL)
+    return -1;
+  *expanded_pattern = NULL;
+  for (cursor = pattern; *cursor != '\0'; ++cursor) {
+    const char *group_start;
+    const char *body;
+    const char *close = NULL;
+    const char *scan;
+    size_t depth = 1;
+    int in_bracket = 0;
+    int has_alternatives = 0;
+    if (*cursor == '\\' && cursor[1] != '\0') {
+      ++cursor;
+      continue;
+    }
+    if (*cursor == '[') {
+      for (++cursor; *cursor != '\0'; ++cursor) {
+        if (*cursor == '\\' && cursor[1] != '\0')
+          ++cursor;
+        else if (*cursor == ']')
+          break;
+      }
+      if (*cursor == '\0')
+        return 0;
+      continue;
+    }
+    if (cursor[0] != '@' || cursor[1] != '(')
+      continue;
+    group_start = cursor;
+    body = cursor + 2;
+    for (scan = body; *scan != '\0'; ++scan) {
+      if (*scan == '\\' && scan[1] != '\0') {
+        ++scan;
+      } else if (in_bracket) {
+        if (*scan == ']')
+          in_bracket = 0;
+      } else if (*scan == '[') {
+        in_bracket = 1;
+      } else if (*scan == '(') {
+        ++depth;
+      } else if (*scan == ')') {
+        if (--depth == 0) {
+          close = scan;
+          break;
+        }
+      } else if (*scan == '|' && depth == 1) {
+        has_alternatives = 1;
+      }
+    }
+    if (close == NULL || !has_alternatives)
+      continue;
+    size_t prefix_length = (size_t)(group_start - pattern);
+    size_t body_length = (size_t)(close - body);
+    size_t suffix_length = strlen(close + 1);
+    size_t expanded_length;
+    size_t position = 0;
+    char *expanded;
+    if (prefix_length > SIZE_MAX - body_length ||
+        prefix_length + body_length > SIZE_MAX - 2 ||
+        suffix_length >= SIZE_MAX - prefix_length - body_length - 2)
+      return -1;
+    expanded_length = prefix_length + body_length + 2 + suffix_length;
+    expanded = malloc(expanded_length + 1);
+    if (expanded == NULL)
+      return -1;
+    memcpy(expanded, pattern, prefix_length);
+    position = prefix_length;
+    expanded[position++] = '{';
+    depth = 1;
+    in_bracket = 0;
+    for (scan = body; scan < close; ++scan) {
+      if (*scan == '\\' && scan + 1 < close) {
+        expanded[position++] = *scan++;
+      } else if (in_bracket) {
+        if (*scan == ']')
+          in_bracket = 0;
+      } else if (*scan == '[') {
+        in_bracket = 1;
+      } else if (*scan == '(') {
+        ++depth;
+      } else if (*scan == ')') {
+        --depth;
+      } else if (*scan == '|' && depth == 1) {
+        expanded[position++] = ',';
+        continue;
+      }
+      expanded[position++] = *scan;
+    }
+    expanded[position++] = '}';
+    memcpy(expanded + position, close + 1, suffix_length);
+    expanded[expanded_length] = '\0';
+    *expanded_pattern = expanded;
+    return 1;
+  }
+  return 0;
+}
+
 static char *ignore_pattern_replace_brace(const char *pattern, const char *open,
                                           const char *close,
                                           const char *replacement,
@@ -3526,6 +3627,17 @@ static int ignore_brace_sequence_matches(const char *pattern, const char *open,
 
 static int ignore_pattern_matches_core(const char *pattern,
                                        const char *filename, int rooted) {
+  char *expanded_extglob = NULL;
+  int extglob_status =
+      ignore_expand_extglob_alternation(pattern, &expanded_extglob);
+  if (extglob_status < 0)
+    return 0;
+  if (extglob_status > 0) {
+    int matches =
+        ignore_pattern_matches_core(expanded_extglob, filename, rooted);
+    free(expanded_extglob);
+    return matches;
+  }
   const char *open = NULL;
   for (const char *cursor = pattern; *cursor != '\0'; ++cursor) {
     if (*cursor == '\\' && cursor[1] != '\0') {
