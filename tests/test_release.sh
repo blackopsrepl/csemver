@@ -991,6 +991,10 @@ if printf '%s\n' "$types_override_preview" | grep -Fq '### Features'; then
     exit 1
 fi
 git commit --allow-empty -m 'feat!: change the contract' -m 'BREAKING CHANGE: incompatible API.'
+if [ "${CSEMVER_TEST_TRACE:-0}" = 1 ]; then
+  PS4='+${LINENO}: '
+  set -x
+fi
 breaking_preview=$("$bin" --dry-run)
 printf '%s\n' "$breaking_preview" | \
   grep -q 'bumping version in package.json from 0.1.0 to 0.2.0' || {
