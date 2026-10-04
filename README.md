@@ -35,7 +35,7 @@ git push --follow-tags origin master
 
 The release command updates configured version files and the changelog, creates a release commit, then creates an annotated tag. It does **not** push; review the preview and push the branch and tag yourself. The first release can use `--first-release` to tag the version already in the package file without bumping it.
 
-By default, `feat` selects a minor bump, `fix` selects a patch bump, and a Conventional Commit breaking change selects a major bump. With no qualifying commits, the legacy default is a patch bump; set `noBumpWhenEmptyChanges = true` to leave the repository unchanged instead. `preMajor = true` changes feature/breaking bumps while the current version is `0.x`.
+By default, `feat` selects a minor bump, `fix` selects a patch bump, and a Conventional Commit breaking change selects a major bump. Under the default Conventional Commits preset, versions below `1.0.0` automatically use upstream's pre-major rules: `feat` selects a patch bump and a breaking change selects a minor bump. `preMajor = true` also applies those rules explicitly, including with the Angular preset. With no qualifying commits, the legacy default is a patch bump; set `noBumpWhenEmptyChanges = true` to leave the repository unchanged instead.
 
 ## TOML configuration
 
