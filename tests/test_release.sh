@@ -344,6 +344,50 @@ run_named_prerelease_case major 'feat!: promote to major prerelease' 2.0.0-beta.
 run_named_prerelease_case zero 'fix: start a patch prerelease from zero' \
   0.0.1-beta.0 0.0.0-beta.0
 
+run_release_as_prerelease_case() {
+  case_name=$1
+  release_type=$2
+  prerelease_id=$3
+  case_dir="$tmp/release-as-prerelease-$case_name"
+  mkdir "$case_dir"
+  cd "$case_dir"
+  git init -q -b master
+  git config user.name 'C Semver Test'
+  git config user.email 'test@example.invalid'
+  printf '{"name":"release-as-prerelease-%s","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/release-as-prerelease-%s.git"},"commit-and-tag-version":{"packageFiles":[]}}\n' \
+    "$case_name" "$case_name" > package.json
+  git add package.json
+  git commit -qm 'chore: seed releaseAs prerelease progression'
+  git tag -a v2.0.0-beta.0 -m 'release 2.0.0-beta.0'
+  if [ -n "$prerelease_id" ]; then
+    if "$bin" --dry-run --skip.changelog --skip.commit --skip.tag \
+      --prerelease "$prerelease_id" --release-as "$release_type" \
+      > "$case_dir.stdout" 2> "$case_dir.stderr"; then
+      case_status=0
+    else
+      case_status=$?
+    fi
+  else
+    if "$bin" --dry-run --skip.changelog --skip.commit --skip.tag \
+      --prerelease --release-as "$release_type" > "$case_dir.stdout" \
+      2> "$case_dir.stderr"; then
+      case_status=0
+    else
+      case_status=$?
+    fi
+  fi
+  test "$case_status" -eq 0
+  printf '%s\n' '✔ bumping version in package.json from 1.0.0 to 2.0.0-beta.1' \
+    > "$case_dir.expected.stdout"
+  cmp "$case_dir.expected.stdout" "$case_dir.stdout"
+  test ! -s "$case_dir.stderr"
+  test -z "$(git status --porcelain)"
+}
+run_release_as_prerelease_case patch patch beta
+run_release_as_prerelease_case minor minor beta
+run_release_as_prerelease_case major major beta
+run_release_as_prerelease_case empty patch ''
+
 test -z "$(git status --porcelain)"
 
 mkdir "$tmp/prerelease-escalation"

@@ -2859,10 +2859,28 @@ static int validate_release_as_prerelease(const CsemverConfig *config) {
   return 1;
 }
 
+static int generate_prerelease_version(const CsemverConfig *config,
+                                       const Semver *version, int bump,
+                                       char *next, size_t next_size) {
+  char type[32];
+  if (version->has_prerelease) {
+    int active_priority = version->patch != 0   ? 0
+                          : version->minor != 0 ? 1
+                          : version->major != 0 ? 2
+                                                : -1;
+    int expected_priority = bump == 3 ? 2 : bump == 2 ? 1 : 0;
+    if (active_priority >= expected_priority)
+      return semver_bump(version, "prerelease", config->prerelease_id, next,
+                         next_size);
+  }
+  if (snprintf(type, sizeof type, "pre%s", bump_name(bump)) >= (int)sizeof type)
+    return 0;
+  return semver_bump(version, type, config->prerelease_id, next, next_size);
+}
+
 static int generate_version(const CsemverConfig *config, const char *current,
                             int bump, char *next, size_t next_size) {
   Semver parsed;
-  char type[32];
   if (!semver_parse(current, &parsed))
     return 0;
   if (config->first_release && config->release_as[0] == '\0')
@@ -2881,10 +2899,14 @@ static int generate_version(const CsemverConfig *config, const char *current,
       return semver_format(&release_version, next, next_size);
     }
     if (config->has_prerelease) {
-      if (snprintf(type, sizeof type, "pre%s", config->release_as) >=
-          (int)sizeof type)
+      int release_bump = strcmp(config->release_as, "major") == 0   ? 3
+                         : strcmp(config->release_as, "minor") == 0 ? 2
+                         : strcmp(config->release_as, "patch") == 0 ? 1
+                                                                    : 0;
+      if (release_bump == 0)
         return 0;
-      return semver_bump(&parsed, type, config->prerelease_id, next, next_size);
+      return generate_prerelease_version(config, &parsed, release_bump, next,
+                                         next_size);
     }
     return semver_bump(&parsed, config->release_as, NULL, next, next_size);
   }
@@ -2893,28 +2915,8 @@ static int generate_version(const CsemverConfig *config, const char *current,
       return semver_format(&parsed, next, next_size);
     return 0;
   }
-  if (config->has_prerelease) {
-    if (parsed.has_prerelease) {
-      /* Match upstream getReleaseType: continue an equal or higher active
-       * prerelease level; otherwise start the recommended pre-release level. */
-      int active_priority = parsed.patch != 0   ? 0
-                            : parsed.minor != 0 ? 1
-                            : parsed.major != 0 ? 2
-                                                : -1;
-      int expected_priority = bump == 3 ? 2 : bump == 2 ? 1 : 0;
-      if (active_priority >= expected_priority)
-        return semver_bump(&parsed, "prerelease", config->prerelease_id, next,
-                           next_size);
-      if (snprintf(type, sizeof type, "pre%s", bump_name(bump)) >=
-          (int)sizeof type)
-        return 0;
-      return semver_bump(&parsed, type, config->prerelease_id, next, next_size);
-    }
-    if (snprintf(type, sizeof type, "pre%s", bump_name(bump)) >=
-        (int)sizeof type)
-      return 0;
-    return semver_bump(&parsed, type, config->prerelease_id, next, next_size);
-  }
+  if (config->has_prerelease)
+    return generate_prerelease_version(config, &parsed, bump, next, next_size);
   return semver_bump(&parsed, bump_name(bump), NULL, next, next_size);
 }
 
