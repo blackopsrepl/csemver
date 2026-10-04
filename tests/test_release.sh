@@ -3091,4 +3091,35 @@ cmp "$tmp/tag-fallback-unreachable-tag.expected.stdout" \
 test ! -s "$tmp/tag-fallback-unreachable-tag.stderr"
 test -z "$(git status --porcelain)"
 
+mkdir "$tmp/path-filter-release"
+cd "$tmp/path-filter-release"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{"name":"path-filter-release","version":"1.2.3","repository":{"type":"git","url":"https://github.com/example/path-filter-release.git"}}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize path filter fixture'
+git tag -a v1.2.3 -m 'release 1.2.3'
+mkdir docs packages
+printf 'unrelated\n' > docs/other.txt
+git add docs/other.txt
+git commit -qm 'feat: unrelated documentation feature'
+printf 'target\n' > packages/widget.txt
+git add packages/widget.txt
+git commit -qm 'fix: update widget'
+"$bin" --path packages/widget.txt > "$tmp/path-filter-release.stdout" \
+  2> "$tmp/path-filter-release.stderr"
+printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ created CHANGELOG.md\n✔ outputting changes to CHANGELOG.md\n✔ committing package.json and CHANGELOG.md\n✔ tagging release v1.2.4\nℹ Run `git push --follow-tags origin master && npm publish` to publish\n' \
+  > "$tmp/path-filter-release.expected.stdout"
+cmp "$tmp/path-filter-release.expected.stdout" \
+  "$tmp/path-filter-release.stdout"
+test ! -s "$tmp/path-filter-release.stderr"
+grep -q '"version": "1.2.4"' package.json
+grep -q 'update widget' CHANGELOG.md
+! grep -q 'unrelated documentation feature' CHANGELOG.md
+test "$(git tag --list v1.2.4)" = v1.2.4
+test "$(git log -1 --format=%s)" = 'chore(release): 1.2.4'
+test -z "$(git status --porcelain)"
+
 printf '%s\n' 'release workflow tests passed'
