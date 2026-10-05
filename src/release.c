@@ -38,7 +38,7 @@
 #define ISSUE_REFERENCE_MAX 64
 #define ISSUE_REFERENCE_TEXT_MAX 128
 #define LIFECYCLE_SCRIPT_MAX_BUFFER (1024U * 1024U)
-/* Match Node's truncated pipe flush on maxBuffer failure. */
+/* Truncated pipe flush applied when a lifecycle script exceeds its buffer. */
 #define LIFECYCLE_PIPE_ERROR_FLUSH_LIMIT (64U * 1024U)
 #define PACKAGE_UNSUPPORTED_FILENAME "__unsupported_filename"
 
@@ -357,8 +357,7 @@ static void print_help(const char *program_path) {
       "                          This option will be removed in the next major version, please use\n"
       "                          --header.                                                      [string]\n"
       "      --preset            Commit message guideline preset\n"
-      "  [string] [default: \"/usr/local/lib/node_modules/commit-and-tag-version/node_modules/conventiona\n"
-      "                                                       l-changelog-conventionalcommits/index.js\"]\n"
+      "                       [string] [default: \"conventional-changelog-conventionalcommits\"]\n"
       "      --lerna-package     Name of the package from which the tags will be extracted      [string]\n"
       ,
       stdout);
@@ -480,6 +479,8 @@ static int run_git_execfile(const CsemverConfig *config,
   return 1;
 }
 
+/* Conventional config filenames, in discovery priority order. Only the JSON
+ * form is read as data; the executable forms are rejected when loaded. */
 static const char *find_default_config_path(char *storage,
                                             size_t storage_size) {
   static const char *const filenames[] = {".versionrc", ".versionrc.cjs",
@@ -563,7 +564,7 @@ static int load_config(CsemverConfig *config, const char *path) {
   if (path_has_suffix(selected_path, ".js") ||
       path_has_suffix(selected_path, ".cjs") ||
       path_has_suffix(selected_path, ".mjs")) {
-    errorf("JavaScript configuration files require Node and are unsupported");
+    errorf("executable configuration files are not supported; use TOML");
     free(contents);
     return 0;
   }
@@ -930,7 +931,7 @@ static int load_package_config_contents(CsemverConfig *config, char *contents) {
                 array_options[option_index].max_values, &value_count))
           continue;
         if (package_files_have_custom_updater) {
-          errorf("custom JavaScript updaters require Node and are unsupported");
+          errorf("executable updater programs are not supported; use the regex updater");
           free(contents);
           return 0;
         }
@@ -1009,7 +1010,7 @@ static int load_package_config_contents(CsemverConfig *config, char *contents) {
           NULL, type_precedes_filename, argument_json, argument_json_valid,
           &has_custom_updater, CSEMVER_MAX_FILES, &value_count);
       if (typed_files && has_custom_updater) {
-        errorf("custom JavaScript updaters require Node and are unsupported");
+        errorf("executable updater programs are not supported; use the regex updater");
         free(contents);
         return 0;
       }

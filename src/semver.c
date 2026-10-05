@@ -62,8 +62,10 @@ static int validate_identifiers(const char *start, size_t length,
   return 1;
 }
 
-static size_t javascript_whitespace_length(const unsigned char *text,
-                                           size_t remaining) {
+/* The SemVer parser trims the whitespace characters the upstream runtime
+ * treats as whitespace, which includes the ECMAScript set beyond ASCII. */
+static size_t trim_whitespace_length(const unsigned char *text,
+                                    size_t remaining) {
   if (remaining == 0)
     return 0;
   if (text[0] == 0x20 || (text[0] >= 0x09 && text[0] <= 0x0d))
@@ -85,12 +87,11 @@ static size_t javascript_whitespace_length(const unsigned char *text,
   return 0;
 }
 
-static size_t javascript_whitespace_suffix_length(const unsigned char *text,
-                                                  size_t length) {
+static size_t trim_whitespace_suffix_length(const unsigned char *text,
+                                            size_t length) {
   size_t index = length > 3 ? length - 3 : 0;
   for (; index < length; ++index) {
-    size_t whitespace =
-        javascript_whitespace_length(text + index, length - index);
+    size_t whitespace = trim_whitespace_length(text + index, length - index);
     if (whitespace != 0 && index + whitespace == length)
       return whitespace;
   }
@@ -159,14 +160,14 @@ int semver_parse(const char *text, Semver *version) {
   end = total_length;
   while (start < end) {
     size_t whitespace =
-        javascript_whitespace_length(bytes + start, end - start);
+        trim_whitespace_length(bytes + start, end - start);
     if (whitespace == 0)
       break;
     start += whitespace;
   }
   while (end > start) {
     size_t whitespace =
-        javascript_whitespace_suffix_length(bytes + start, end - start);
+        trim_whitespace_suffix_length(bytes + start, end - start);
     if (whitespace == 0)
       break;
     end -= whitespace;
@@ -199,7 +200,7 @@ int semver_clean(const char *text, Semver *version) {
   length = strlen(text);
   while (start < length) {
     size_t whitespace =
-        javascript_whitespace_length(bytes + start, length - start);
+        trim_whitespace_length(bytes + start, length - start);
     if (whitespace == 0)
       break;
     start += whitespace;

@@ -389,7 +389,7 @@ static void test_package_lock_rejects_non_json_values(void) {
   assert(strcmp(error, expected) == 0);
 }
 
-static void test_json_invalid_identifier_diagnostics_match_node(void) {
+static void test_json_invalid_identifier_diagnostics_match_reference(void) {
   const struct {
     const char *input;
     const char *expected;
@@ -413,7 +413,7 @@ static void test_json_invalid_identifier_diagnostics_match_node(void) {
   }
 }
 
-static void test_json_trailing_comma_diagnostic_matches_node(void) {
+static void test_json_trailing_comma_diagnostic_matches_reference(void) {
   const char *input = "{\"name\":\"x\",}";
   const char *expected = "Expected double-quoted property name in JSON at "
                          "position 12 (line 1 column 13)";
@@ -425,7 +425,7 @@ static void test_json_trailing_comma_diagnostic_matches_node(void) {
   assert(strcmp(error, expected) == 0);
 }
 
-static void test_json_array_trailing_comma_diagnostic_matches_node(void) {
+static void test_json_array_trailing_comma_diagnostic_matches_reference(void) {
   const char *input = "{\"name\":[1,]}";
   const char *expected =
       "Unexpected token ']', \"{\"name\":[1,]}\" is not valid JSON";
@@ -437,7 +437,7 @@ static void test_json_array_trailing_comma_diagnostic_matches_node(void) {
   assert(strcmp(error, expected) == 0);
 }
 
-static void test_json_missing_object_value_diagnostic_matches_node(void) {
+static void test_json_missing_object_value_diagnostic_matches_reference(void) {
   const char *input = "{\"name\":\"malformed-primary\",\"version\":}\n";
   const char *expected =
       "Unexpected token '}', ...\"\"version\":}\n\" is not valid JSON";
@@ -449,7 +449,7 @@ static void test_json_missing_object_value_diagnostic_matches_node(void) {
   assert(strcmp(error, expected) == 0);
 }
 
-static void test_json_leading_zero_diagnostic_matches_node(void) {
+static void test_json_leading_zero_diagnostic_matches_reference(void) {
   const char *input = "{\"name\":01}";
   const char *expected =
       "Unexpected number in JSON at position 9 (line 1 column 10)";
@@ -1847,11 +1847,11 @@ int main(void) {
   test_json_version_with_embedded_nul_is_rejected();
   test_truncated_package_lock_reports_parse_error();
   test_package_lock_rejects_non_json_values();
-  test_json_invalid_identifier_diagnostics_match_node();
-  test_json_trailing_comma_diagnostic_matches_node();
-  test_json_array_trailing_comma_diagnostic_matches_node();
-  test_json_missing_object_value_diagnostic_matches_node();
-  test_json_leading_zero_diagnostic_matches_node();
+  test_json_invalid_identifier_diagnostics_match_reference();
+  test_json_trailing_comma_diagnostic_matches_reference();
+  test_json_array_trailing_comma_diagnostic_matches_reference();
+  test_json_missing_object_value_diagnostic_matches_reference();
+  test_json_leading_zero_diagnostic_matches_reference();
   test_package_lock_updates_only_root_package();
   test_package_lock_adds_missing_root_package_version();
   test_package_lock_adds_missing_root_version_fields();

@@ -3117,7 +3117,7 @@ for custom_updater_location in packageFiles bumpFiles; do
   test "$custom_updater_status" -eq 2
   test ! -s "$tmp/custom-updater.stdout"
   printf '%s\n' \
-    'csemver: custom JavaScript updaters require Node and are unsupported' \
+    'csemver: executable updater programs are not supported; use the regex updater' \
     > "$tmp/custom-updater.expected.stderr"
   cmp "$tmp/custom-updater.expected.stderr" "$tmp/custom-updater.stderr"
   test -z "$(git status --porcelain)"
