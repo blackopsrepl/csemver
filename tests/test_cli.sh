@@ -10,7 +10,7 @@ printf '%s\n' "$help" | grep -q -- '--dry-run'
 printf '%s\n' "$help" | grep -q -- '--preset'
 printf '%s\n' "$help" | grep -Fq 'How many releases of changelog you want to generate.'
 for option in --first-release --packageFiles --bumpFiles --lerna-package \
-    --tag-force --git-tag-fallback --noBumpWhenEmptyChanges --scripts --skip \
+    --tag-force --git-tag-fallback --scripts --skip \
     --sign --signoff --silent --changelogHeader; do
     if ! printf '%s\n' "$help" | grep -Fq -- "$option"; then
         printf 'help is missing upstream option %s\n' "$option" >&2

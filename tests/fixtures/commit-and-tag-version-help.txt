@@ -1,58 +1,90 @@
 Usage: commit-and-tag-version [options]
 
+Preset Configuration:
+      --header                      A string to be used as the main header section of the
+                                    CHANGELOG.                    [string] [default: "# Changelog
+
+                         All notable changes to this project will be documented in this file. See
+  [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit
+                                                                                      guidelines.
+                                                                                               "]
+      --types                       An array of `type` objects representing the explicitly
+                                    supported commit message types, and whether they should show
+                                    up in generated `CHANGELOG`s.
+  [array] [default: [{"type":"feat","section":"Features"},{"type":"fix","section":"Bug Fixes"},{"
+  type":"chore","hidden":true},{"type":"docs","hidden":true},{"type":"style","hidden":true},{"typ
+       e":"refactor","hidden":true},{"type":"perf","hidden":true},{"type":"test","hidden":true}]]
+      --preMajor                    Boolean indicating whether or not the action being run
+                                    (generating CHANGELOG, recommendedBump, etc.) is being
+                                    performed for a pre-major release (<1.0.0).
+                                    This config setting will generally be set by tooling and not
+                                    a user.                            [boolean] [default: false]
+      --commitUrlFormat             A URL representing a specific commit at a hash.
+                          [string] [default: "{{host}}/{{owner}}/{{repository}}/commit/{{hash}}"]
+      --compareUrlFormat            A URL representing the comparison between two git SHAs.
+                                                                               [string] [default:
+                    "{{host}}/{{owner}}/{{repository}}/compare/{{previousTag}}...{{currentTag}}"]
+      --issueUrlFormat              A URL representing the issue format (allowing a different URL
+                                    format to be swapped in for Gitlab, Bitbucket, etc).
+                            [string] [default: "{{host}}/{{owner}}/{{repository}}/issues/{{id}}"]
+      --userUrlFormat               A URL representing the a user's profile URL on GitHub,
+                                    Gitlab, etc. This URL is used for substituting @bcoe with
+                                    https://github.com/bcoe in commit messages.
+                                                          [string] [default: "{{host}}/{{user}}"]
+      --releaseCommitMessageFormat  A string to be used to format the auto-generated release
+                                    commit message.
+                                             [string] [default: "chore(release): {{currentTag}}"]
+      --issuePrefixes               An array of prefixes used to detect references to issues
+                                                                         [array] [default: ["#"]]
+
 Options:
-  -h, --help                    Show help                                               [boolean]
-  -v, --version                 Show version number                                     [boolean]
+  -h, --help              Show help                                                     [boolean]
+  -v, --version           Show version number                                           [boolean]
       --packageFiles             [array] [default: ["package.json","bower.json","manifest.json"]]
       --bumpFiles                                                               [array] [default:
          ["package.json","bower.json","manifest.json","package-lock.json","npm-shrinkwrap.json"]]
-  -r, --release-as              Specify the release type manually (like npm version
-                                <major|minor|patch>)                                     [string]
-  -p, --prerelease              make a pre-release with optional option value to specify a tag id
+  -r, --release-as        Specify the release type manually (like npm version
+                          <major|minor|patch>)                                           [string]
+  -p, --prerelease        make a pre-release with optional option value to specify a tag id
                                                                                          [string]
-  -i, --infile                  Read the CHANGELOG from this file       [default: "CHANGELOG.md"]
-  -m, --message                 [DEPRECATED] Commit message, replaces %s with new version.
-                                This option will be removed in the next major version, please use
-                                --releaseCommitMessageFormat.                            [string]
-  -f, --first-release           Is this the first release?             [boolean] [default: false]
-  -s, --sign                    Should the git commit and tag be signed?
+  -i, --infile            Read the CHANGELOG from this file             [default: "CHANGELOG.md"]
+  -m, --message           [DEPRECATED] Commit message, replaces %s with new version.
+                          This option will be removed in the next major version, please use
+                          --releaseCommitMessageFormat.                                  [string]
+  -f, --first-release     Is this the first release?                   [boolean] [default: false]
+  -s, --sign              Should the git commit and tag be signed?     [boolean] [default: false]
+      --signoff           Should the git commit have a "Signed-off-by" trailer
                                                                        [boolean] [default: false]
-      --signoff                 Should the git commit have a "Signed-off-by" trailer
+  -n, --no-verify         Bypass pre-commit or commit-msg git hooks during the commit phase
                                                                        [boolean] [default: false]
-  -n, --no-verify               Bypass pre-commit or commit-msg git hooks during the commit phase
-                                                                       [boolean] [default: false]
-  -a, --commit-all              Commit all staged changes, not just files affected by
-                                commit-and-tag-version                 [boolean] [default: false]
-      --silent                  Don't print logs and errors            [boolean] [default: false]
-  -t, --tag-prefix              Set a custom prefix for the git tag to be created
+  -a, --commit-all        Commit all staged changes, not just files affected by
+                          commit-and-tag-version                       [boolean] [default: false]
+      --silent            Don't print logs and errors                  [boolean] [default: false]
+  -t, --tag-prefix        Set a custom prefix for the git tag to be created
                                                                           [string] [default: "v"]
-      --release-count           How many releases of changelog you want to generate. It counts
-                                from the upcoming release. Useful when you forgot to generate any
-                                previous changelog. Set to 0 to regenerate all.
-                                                                            [number] [default: 1]
-      --tag-force               Allow tag replacement                  [boolean] [default: false]
-      --scripts                 Provide scripts to execute for lifecycle events (prebump,
-                                precommit, etc.,)                                   [default: {}]
-      --skip                    Map of steps in the release process that should be skipped
-                                                                                    [default: {}]
-      --dry-run                 See the commands that running commit-and-tag-version would run
+      --release-count     How many releases of changelog you want to generate. It counts from the
+                          upcoming release. Useful when you forgot to generate any previous
+                          changelog. Set to 0 to regenerate all.            [number] [default: 1]
+      --tag-force         Allow tag replacement                        [boolean] [default: false]
+      --scripts           Provide scripts to execute for lifecycle events (prebump, precommit,
+                          etc.,)                                                    [default: {}]
+      --skip              Map of steps in the release process that should be skipped[default: {}]
+      --dry-run           See the commands that running commit-and-tag-version would run
                                                                        [boolean] [default: false]
-      --git-tag-fallback        fallback to git tags for version, if no meta-information file is
-                                found (e.g., package.json)              [boolean] [default: true]
-      --path                    Only populate commits made under this path               [string]
-      --changelogHeader         [DEPRECATED] Use a custom header when generating and updating
-                                changelog.
-                                This option will be removed in the next major version, please use
-                                --header.                                                [string]
-      --preset                  Commit message guideline preset
-                                 [string] [default: "conventional-changelog-conventionalcommits"]
-      --lerna-package           Name of the package from which the tags will be extracted[string]
-      --npmPublishHint          Customized publishing hint                               [string]
-  -c, --config                  Path to a custom configuration file                      [string]
-      --noBumpWhenEmptyChanges  Avoid bumping files and generating changelog if there are no
-                                changes.                               [boolean] [default: false]
+      --git-tag-fallback  fallback to git tags for version, if no meta-information file is found
+                          (e.g., package.json)                          [boolean] [default: true]
+      --path              Only populate commits made under this path                     [string]
+      --changelogHeader   [DEPRECATED] Use a custom header when generating and updating
+                          changelog.
+                          This option will be removed in the next major version, please use
+                          --header.                                                      [string]
+      --preset            Commit message guideline preset
+  [string] [default: "/usr/local/lib/node_modules/commit-and-tag-version/node_modules/conventiona
+                                                       l-changelog-conventionalcommits/index.js"]
+      --lerna-package     Name of the package from which the tags will be extracted      [string]
+      --npmPublishHint    Customized publishing hint                                     [string]
 
 Examples:
-  commit-and-tag-version                                     Update changelog and tag release
-  commit-and-tag-version -m "%s: see changelog for details"  Update changelog and tag release with custom commit
-                                             message
+  commit-and-tag-version                            Update changelog and tag release
+  commit-and-tag-version -m "%s: see changelog for  Update changelog and tag release with custom
+  details"                                          commit message
