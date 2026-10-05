@@ -875,12 +875,21 @@ grep -q 'Revert "feat(api): add fast mode"' CHANGELOG.md || {
   exit 1
 }
 
-if "$bin" --preset csemver-unsupported --dry-run > "$tmp/unsupported-preset.out" 2>&1; then
-  printf 'unsupported changelog preset unexpectedly succeeded\n' >&2
+set +e
+"$bin" --preset csemver-unsupported --dry-run > "$tmp/unsupported-preset.out" 2>&1
+unsupported_preset_status=$?
+set -e
+test "$unsupported_preset_status" -eq 1 || {
+  printf 'unsupported changelog preset exited %s, expected 1\n' \
+    "$unsupported_preset_status" >&2
   exit 1
-fi
-grep -q "unsupported changelog preset 'csemver-unsupported'" \
+}
+grep -q 'Unable to load the "csemver-unsupported" preset package. Please make sure it.s installed.' \
   "$tmp/unsupported-preset.out"
+FORCE_COLOR=1 "$bin" --preset csemver-unsupported --dry-run \
+  > "$tmp/unsupported-preset-color.out" 2>&1 || true
+grep -q $'\033\[31mUnable to load the "csemver-unsupported" preset package' \
+  "$tmp/unsupported-preset-color.out"
 
 mkdir "$tmp/angular-bump"
 cd "$tmp/angular-bump"

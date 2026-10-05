@@ -167,6 +167,15 @@ static void print_styled(FILE *stream, const char *text, const char *start,
     fputs(text, stream);
 }
 
+/* Mirror upstream's printError: chalk red enabled by stdout detection even
+ * though the message itself is written to stderr. */
+static void print_error_line(const char *text) {
+  if (terminal_supports_color(stdout))
+    fprintf(stderr, "\033[31m%s\033[39m\n", text);
+  else
+    fprintf(stderr, "%s\n", text);
+}
+
 static void print_checkpoint_tick(const CsemverConfig *config) {
   print_styled(stdout, "✔", config->dry_run ? "33" : "32", "39");
 }
@@ -4477,8 +4486,13 @@ static int csemver_main_impl(int argc, char **argv) {
       return 1;
   }
   if (!preset_is_supported(&config)) {
-    errorf("unsupported changelog preset '%s'", config.preset);
-    return 2;
+    char message[256];
+    snprintf(message, sizeof message,
+             "Unable to load the \"%s\" preset package. Please make sure "
+             "it's installed.",
+             config.preset);
+    print_error_line(message);
+    return 1;
   }
   {
     const char *args[] = {"rev-parse", "--is-inside-work-tree", NULL};
