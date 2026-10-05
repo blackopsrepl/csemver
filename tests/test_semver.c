@@ -55,6 +55,15 @@ int main(void) {
   expect_bump("1.2.3-beta.alpha.0.foo", "prerelease", "beta.alpha",
               "1.2.3-beta.alpha.1.foo");
   expect_bump("1.2.3-alpha.1", "patch", NULL, "1.2.3");
+  expect_bump("1.3.0-alpha.0", "minor", NULL, "1.3.0");
+  expect_bump("1.3.2-alpha.0", "minor", NULL, "1.4.0");
+  expect_bump("0.0.0-alpha.0", "minor", NULL, "0.0.0");
+  expect_bump("1.2.0-beta.0", "patch", NULL, "1.2.0");
+  expect_bump("1.2.1-beta.0", "patch", NULL, "1.2.1");
+  expect_bump("2.0.0-alpha.0", "major", NULL, "2.0.0");
+  expect_bump("2.0.1-alpha.0", "major", NULL, "3.0.0");
+  expect_bump("1.3.0-alpha.0", "preminor", "alpha", "1.4.0-alpha.0");
+  expect_bump("1.3.0-alpha.0", "premajor", "alpha", "2.0.0-alpha.0");
 
   assert(!semver_parse("01.2.3", &version));
   assert(!semver_parse("1.2", &version));

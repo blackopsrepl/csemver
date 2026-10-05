@@ -359,15 +359,20 @@ int semver_bump(const Semver *version, const char *release_type,
   }
 
   if (strcmp(base_type, "major") == 0) {
-    if (!increment(&next.major))
-      return 0;
+    if (!(!is_pre && version->has_prerelease) || version->minor != 0 ||
+        version->patch != 0) {
+      if (!increment(&next.major))
+        return 0;
+    }
     next.minor = 0;
     next.patch = 0;
     next.has_prerelease = 0;
     next.prerelease[0] = '\0';
   } else if (strcmp(base_type, "minor") == 0) {
-    if (!increment(&next.minor))
-      return 0;
+    if (!(!is_pre && version->has_prerelease) || version->patch != 0) {
+      if (!increment(&next.minor))
+        return 0;
+    }
     next.patch = 0;
     next.has_prerelease = 0;
     next.prerelease[0] = '\0';
