@@ -3354,21 +3354,25 @@ static int ignore_path_pattern_matches(const char *pattern,
 static int ignore_pattern_matches_core(const char *pattern,
                                        const char *filename, int rooted);
 
-/* Lower minimatch @(a|b) alternatives to the brace syntax handled below. */
-static int ignore_expand_extglob_alternation(const char *pattern,
-                                             char **expanded_pattern) {
+/* Match minimatch @(a|b) alternatives directly, trying each alternative as its
+   own pattern. This avoids lowering '|' to brace-comma syntax, which would
+   confuse a literal comma inside an alternative with an alternative split. */
+static int ignore_extglob_alternative_matches(const char *pattern,
+                                              const char *filename, int rooted,
+                                              int *handled) {
   const char *cursor;
-  if (expanded_pattern == NULL)
-    return -1;
-  *expanded_pattern = NULL;
+  *handled = 0;
   for (cursor = pattern; *cursor != '\0'; ++cursor) {
     const char *group_start;
     const char *body;
     const char *close = NULL;
     const char *scan;
+    const char *alternative;
     size_t depth = 1;
     int in_bracket = 0;
-    int has_alternatives = 0;
+    size_t prefix_length;
+    size_t suffix_length;
+    const char *suffix;
     if (*cursor == '\\' && cursor[1] != '\0') {
       ++cursor;
       continue;
@@ -3403,54 +3407,62 @@ static int ignore_expand_extglob_alternation(const char *pattern,
           close = scan;
           break;
         }
-      } else if (*scan == '|' && depth == 1) {
-        has_alternatives = 1;
       }
     }
-    if (close == NULL || !has_alternatives)
+    if (close == NULL)
       continue;
-    size_t prefix_length = (size_t)(group_start - pattern);
-    size_t body_length = (size_t)(close - body);
-    size_t suffix_length = strlen(close + 1);
-    size_t expanded_length;
-    size_t position = 0;
-    char *expanded;
-    if (prefix_length > SIZE_MAX - body_length ||
-        prefix_length + body_length > SIZE_MAX - 2 ||
-        suffix_length >= SIZE_MAX - prefix_length - body_length - 2)
-      return -1;
-    expanded_length = prefix_length + body_length + 2 + suffix_length;
-    expanded = malloc(expanded_length + 1);
-    if (expanded == NULL)
-      return -1;
-    memcpy(expanded, pattern, prefix_length);
-    position = prefix_length;
-    expanded[position++] = '{';
+    *handled = 1;
+    prefix_length = (size_t)(group_start - pattern);
+    suffix = close + 1;
+    suffix_length = strlen(suffix);
     depth = 1;
     in_bracket = 0;
-    for (scan = body; scan < close; ++scan) {
-      if (*scan == '\\' && scan + 1 < close) {
-        expanded[position++] = *scan++;
-      } else if (in_bracket) {
-        if (*scan == ']')
-          in_bracket = 0;
-      } else if (*scan == '[') {
-        in_bracket = 1;
-      } else if (*scan == '(') {
-        ++depth;
-      } else if (*scan == ')') {
-        --depth;
-      } else if (*scan == '|' && depth == 1) {
-        expanded[position++] = ',';
-        continue;
+    alternative = body;
+    for (scan = body;; ++scan) {
+      int delimiter = scan == close;
+      if (!delimiter) {
+        if (*scan == '\\' && scan[1] != '\0') {
+          ++scan;
+        } else if (in_bracket) {
+          if (*scan == ']')
+            in_bracket = 0;
+        } else if (*scan == '[') {
+          in_bracket = 1;
+        } else if (*scan == '(') {
+          ++depth;
+        } else if (*scan == ')') {
+          --depth;
+        } else if (*scan == '|' && depth == 1) {
+          delimiter = 1;
+        }
       }
-      expanded[position++] = *scan;
+      if (delimiter) {
+        size_t alternative_length = (size_t)(scan - alternative);
+        size_t trial_length;
+        char *trial;
+        int matches;
+        if (prefix_length > SIZE_MAX - alternative_length ||
+            prefix_length + alternative_length > SIZE_MAX - suffix_length)
+          return -1;
+        trial_length = prefix_length + alternative_length + suffix_length;
+        trial = malloc(trial_length + 1);
+        if (trial == NULL)
+          return -1;
+        memcpy(trial, pattern, prefix_length);
+        memcpy(trial + prefix_length, alternative, alternative_length);
+        memcpy(trial + prefix_length + alternative_length, suffix,
+               suffix_length);
+        trial[trial_length] = '\0';
+        matches = ignore_pattern_matches_core(trial, filename, rooted);
+        free(trial);
+        if (matches)
+          return 1;
+        alternative = scan + 1;
+      }
+      if (scan == close)
+        break;
     }
-    expanded[position++] = '}';
-    memcpy(expanded + position, close + 1, suffix_length);
-    expanded[expanded_length] = '\0';
-    *expanded_pattern = expanded;
-    return 1;
+    return 0;
   }
   return 0;
 }
@@ -3627,17 +3639,13 @@ static int ignore_brace_sequence_matches(const char *pattern, const char *open,
 
 static int ignore_pattern_matches_core(const char *pattern,
                                        const char *filename, int rooted) {
-  char *expanded_extglob = NULL;
-  int extglob_status =
-      ignore_expand_extglob_alternation(pattern, &expanded_extglob);
-  if (extglob_status < 0)
+  int extglob_handled = 0;
+  int extglob_match = ignore_extglob_alternative_matches(
+      pattern, filename, rooted, &extglob_handled);
+  if (extglob_match < 0)
     return 0;
-  if (extglob_status > 0) {
-    int matches =
-        ignore_pattern_matches_core(expanded_extglob, filename, rooted);
-    free(expanded_extglob);
-    return matches;
-  }
+  if (extglob_handled)
+    return extglob_match;
   const char *open = NULL;
   for (const char *cursor = pattern; *cursor != '\0'; ++cursor) {
     if (*cursor == '\\' && cursor[1] != '\0') {

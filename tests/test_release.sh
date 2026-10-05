@@ -2649,6 +2649,122 @@ cmp "$tmp/extglob-package.expected" package.json
 cmp "$tmp/extglob-lock.expected" package-lock.json
 test -z "$(git status --porcelain)"
 
+# A literal comma inside an alternative must not be treated as an alternative
+# split: '@(a,b|c).json' matches 'a,b.json' and 'c.json', never 'b.json'.
+mkdir "$tmp/extglob-comma-alternative"
+cd "$tmp/extglob-comma-alternative"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email test@example.invalid
+git config commit.gpgSign false
+printf '@(a,b|c).json\n' > .gitignore
+printf '{"name":"extglob-comma-alternative","version":"1.0.0"}\n' > 'a,b.json'
+printf '{"name":"extglob-comma-alternative","version":"1.0.0"}\n' > b.json
+printf '{"name":"extglob-comma-alternative","version":"1.0.0"}\n' > c.json
+cat > csemver.toml <<'TOML'
+packageFiles = [{ filename = "package.json", type = "json" }]
+bumpFiles = [
+  { filename = "a,b.json", type = "json" },
+  { filename = "b.json", type = "json" },
+  { filename = "c.json", type = "json" },
+]
+TOML
+printf '{"name":"extglob-comma-alternative","version":"1.0.0"}\n' > package.json
+git add -A
+git commit -qm 'chore: initialize extglob comma alternative fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise extglob comma alternative'
+cp 'a,b.json' "$tmp/extglob-comma-a,b.expected"
+cp c.json "$tmp/extglob-comma-c.expected"
+comma_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
+expected_comma_output=$(printf '%s\n' \
+  "Not updating file 'a,b.json', as it is ignored in Git" \
+  "✔ bumping version in b.json from 1.0.0 to 1.0.1" \
+  "Not updating file 'c.json', as it is ignored in Git")
+if [ "$comma_output" != "$expected_comma_output" ]; then
+  printf 'unexpected extglob comma alternative output:\n%s\n' "$comma_output" >&2
+  exit 1
+fi
+# The unignored file was bumped; the ignored comma/c files were left untouched.
+cmp "$tmp/extglob-comma-a,b.expected" 'a,b.json'
+cmp "$tmp/extglob-comma-c.expected" c.json
+grep -q '"version": "1.0.1"' b.json
+
+# Multiple and nested extglob groups match like minimatch.
+mkdir "$tmp/extglob-multiple-groups"
+cd "$tmp/extglob-multiple-groups"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email test@example.invalid
+git config commit.gpgSign false
+printf '@(a|b)-@(c|d).json\n' > .gitignore
+for f in a-c.json a-d.json b-c.json a-e.json; do
+  printf '{"name":"extglob-multiple-groups","version":"1.0.0"}\n' > "$f"
+  cp "$f" "$tmp/extglob-multi-$f.expected"
+done
+cat > csemver.toml <<'TOML'
+bumpFiles = [
+  { filename = "a-c.json", type = "json" },
+  { filename = "a-d.json", type = "json" },
+  { filename = "b-c.json", type = "json" },
+  { filename = "a-e.json", type = "json" },
+]
+TOML
+git add -A
+git commit -qm 'chore: initialize extglob multiple groups fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise extglob multiple groups'
+multi_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
+expected_multi_output=$(printf '%s\n' \
+  "Not updating file 'a-c.json', as it is ignored in Git" \
+  "Not updating file 'a-d.json', as it is ignored in Git" \
+  "Not updating file 'b-c.json', as it is ignored in Git" \
+  "✔ bumping version in a-e.json from 1.0.0 to 1.0.1")
+if [ "$multi_output" != "$expected_multi_output" ]; then
+  printf 'unexpected extglob multiple groups output:\n%s\n' "$multi_output" >&2
+  exit 1
+fi
+for f in a-c.json a-d.json b-c.json; do
+  cmp "$tmp/extglob-multi-$f.expected" "$f"
+done
+grep -q '"version": "1.0.1"' a-e.json
+
+# A negated extglob group ignores everything outside the listed alternatives.
+mkdir "$tmp/extglob-negated-group"
+cd "$tmp/extglob-negated-group"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email test@example.invalid
+git config commit.gpgSign false
+printf '@(!(a|b)).json\n' > .gitignore
+for f in a.json b.json c.json; do
+  printf '{"name":"extglob-negated-group","version":"1.0.0"}\n' > "$f"
+done
+cp c.json "$tmp/extglob-negated-c.expected"
+cat > csemver.toml <<'TOML'
+bumpFiles = [
+  { filename = "a.json", type = "json" },
+  { filename = "b.json", type = "json" },
+  { filename = "c.json", type = "json" },
+]
+TOML
+git add -A
+git commit -qm 'chore: initialize extglob negated group fixture'
+git tag -a v1.0.0 -m 'release 1.0.0'
+git commit --allow-empty -qm 'fix: exercise extglob negated group'
+negated_output=$("$bin" --skip.changelog --skip.commit --skip.tag 2>&1)
+expected_negated_output=$(printf '%s\n' \
+  "✔ bumping version in a.json from 1.0.0 to 1.0.1" \
+  "✔ bumping version in b.json from 1.0.0 to 1.0.1" \
+  "Not updating file 'c.json', as it is ignored in Git")
+if [ "$negated_output" != "$expected_negated_output" ]; then
+  printf 'unexpected extglob negated group output:\n%s\n' "$negated_output" >&2
+  exit 1
+fi
+grep -q '"version": "1.0.1"' a.json
+grep -q '"version": "1.0.1"' b.json
+cmp "$tmp/extglob-negated-c.expected" c.json
+
 mkdir "$tmp/gitignore-trim-patterns"
 cd "$tmp/gitignore-trim-patterns"
 git init -q -b master
