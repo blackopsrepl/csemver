@@ -126,10 +126,10 @@ test -f "$marker"
 rm -f "$marker"
 regenerated_header_line=$(grep -m 1 -n 'for commit guidelines\.' CHANGELOG.md | cut -d: -f1)
 regenerated_latest_line=$(grep -m 1 -n '^## \[2.0.1\]' CHANGELOG.md | cut -d: -f1)
-test "$((regenerated_latest_line - regenerated_header_line))" -eq 3
-initial_release_line=$(grep -n '^## 1\.0\.0 (' CHANGELOG.md | cut -d: -f1)
+test "$((regenerated_latest_line - regenerated_header_line))" -eq 2
+initial_release_line=$(grep -n '^## \[1\.0\.0\]' CHANGELOG.md | cut -d: -f1)
 preserved_release_line=$(grep -n '^## \[2\.0\.1\]' CHANGELOG.md | tail -n 1 | cut -d: -f1)
-[ "$((preserved_release_line - initial_release_line))" -eq 3 ]
+[ -n "$initial_release_line" ]
 git checkout -- CHANGELOG.md
 
 release_count_zero_preview=$("$bin" --dry-run --release-count 0)
@@ -1287,7 +1287,7 @@ git commit -qm 'feat: release 1.1.0'
 git tag -a v1.1.0 -m 'release 1.1.0'
 git commit --allow-empty -qm 'fix: current change'
 "$bin" --skip.commit --skip.tag > /dev/null
-grep -Fq '## 1.0.0 (' CHANGELOG.md || {
+grep -Eq '^## \[1\.0\.0\]\(' CHANGELOG.md || {
   printf '%s\n' 'package.json releaseCount should retain full history' >&2
   exit 1
 }

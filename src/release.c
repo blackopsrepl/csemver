@@ -2627,6 +2627,30 @@ static int compare_breaking_notes(const BreakingNote *left,
                                                   : 0;
 }
 
+/* Upstream sorts group titles (and tags) with the writer's case-insensitive
+ * comparator, which places untitled groups first. */
+static int case_insensitive_compare(const char *left, const char *right) {
+  const unsigned char *a = (const unsigned char *)left;
+  const unsigned char *b = (const unsigned char *)right;
+  while (*a != '\0' && *b != '\0') {
+    int lower_a = tolower(*a);
+    int lower_b = tolower(*b);
+    if (lower_a != lower_b)
+      return lower_a < lower_b ? -1 : 1;
+    ++a;
+    ++b;
+  }
+  if (*a == *b)
+    return 0;
+  return *a == '\0' ? -1 : 1;
+}
+
+static int compare_group_titles(const CsemverConfig *config, size_t left,
+                                size_t right) {
+  return case_insensitive_compare(config->commit_types[left].section,
+                                  config->commit_types[right].section);
+}
+
 static int changelog_section(const CsemverConfig *config, const Commit *commits,
                              size_t commit_count, CsemverBuffer *output) {
   CsemverBuffer groups[CSEMVER_MAX_TYPES];
@@ -2707,9 +2731,7 @@ static int changelog_section(const CsemverConfig *config, const Commit *commits,
       continue;
     index = type_index(config, type);
     if (index < 0 ||
-        (config->commit_types[index].hidden &&
-         !(angular && has_breaking_note)) ||
-        config->commit_types[index].section[0] == '\0')
+        (config->commit_types[index].hidden && !has_breaking_note))
       continue;
     used[index] = true;
     sort_keys[i].type_index = index;
@@ -2731,16 +2753,30 @@ static int changelog_section(const CsemverConfig *config, const Commit *commits,
   for (i = 0; i < group_count; ++i)
     group_order[i] = i;
   if (angular) {
+    /* Upstream sorts commit groups by title with the writer's
+     * case-insensitive comparator; untitled groups (only possible when a
+     * hidden type is forced visible by a breaking note) sort first. */
     for (i = 1; i < group_count; ++i) {
       size_t group_index = group_order[i];
       size_t j = i;
-      while (j > 0 && strcmp(config->commit_types[group_order[j - 1]].section,
-                             config->commit_types[group_index].section) > 0) {
+      while (j > 0 && compare_group_titles(config, group_order[j - 1],
+                                           group_index) > 0) {
         group_order[j] = group_order[j - 1];
         --j;
       }
       group_order[j] = group_index;
     }
+  } else {
+    /* The conventionalcommits preset groups by type in configuration order,
+     * but an untitled group (a hidden type kept visible by a breaking note)
+     * is emitted before the titled groups. */
+    size_t next = 0;
+    for (i = 0; i < group_count; ++i)
+      if (config->commit_types[i].section[0] == '\0')
+        group_order[next++] = i;
+    for (i = 0; i < group_count; ++i)
+      if (config->commit_types[i].section[0] != '\0')
+        group_order[next++] = i;
   }
   for (i = 0; i < breaking_note_count; ++i)
     if (!append_breaking_note(&breaking, config, &breaking_notes[i], base))
@@ -2750,34 +2786,32 @@ static int changelog_section(const CsemverConfig *config, const Commit *commits,
                                         commit_count, (int)i, base))
       goto fail;
   if (!angular && breaking.length > 0) {
-    if (!csemver_buffer_append(output, "\n", 1) ||
-        !csemver_buffer_appendf(output, "### ⚠ BREAKING CHANGES\n\n") ||
+    if (!csemver_buffer_append(output, "\n### ⚠ BREAKING CHANGES\n\n",
+                               sizeof "\n### ⚠ BREAKING CHANGES\n\n" - 1) ||
         !csemver_buffer_append(output, breaking.data, breaking.length))
       goto fail;
   }
   {
-    bool wrote_section = !angular && breaking.length > 0;
-    bool wrote_heading = wrote_section;
     for (i = 0; i < group_count; ++i) {
-      size_t index = angular ? group_order[i] : i;
+      size_t index = group_order[i];
       if (!used[index])
         continue;
-      if ((!wrote_heading && !csemver_buffer_append(output, "\n", 1)) ||
-          (wrote_section && !csemver_buffer_append(output, "\n", 1)) ||
-          !csemver_buffer_appendf(output, "### %s\n\n",
-                                  config->commit_types[index].section) ||
-          !csemver_buffer_append(output, groups[index].data,
-                                 groups[index].length))
+      if (!csemver_buffer_append(output, "\n", 1))
         goto fail;
-      wrote_heading = true;
-      wrote_section = true;
+      if (config->commit_types[index].section[0] != '\0' &&
+          !csemver_buffer_appendf(output, "### %s\n\n",
+                                  config->commit_types[index].section))
+        goto fail;
+      if (!csemver_buffer_append(output, groups[index].data,
+                                 groups[index].length) ||
+          !csemver_buffer_append(output, "\n", 1))
+        goto fail;
     }
     if (angular && breaking.length > 0) {
-      if ((!wrote_heading && !csemver_buffer_append(output, "\n", 1)) ||
-          (wrote_section && !csemver_buffer_append(output, "\n", 1)) ||
-          !csemver_buffer_append(output, "### BREAKING CHANGES\n\n",
-                                 sizeof "### BREAKING CHANGES\n\n" - 1) ||
-          !csemver_buffer_append(output, breaking.data, breaking.length))
+      if (!csemver_buffer_append(output, "\n### BREAKING CHANGES\n\n",
+                                 sizeof "\n### BREAKING CHANGES\n\n" - 1) ||
+          !csemver_buffer_append(output, breaking.data, breaking.length) ||
+          !csemver_buffer_append(output, "\n", 1))
         goto fail;
     }
   }
@@ -4806,10 +4840,18 @@ static int append_compare_heading(const CsemverConfig *config,
 static int append_release_heading(const CsemverConfig *config,
                                   CsemverBuffer *output, const char *base,
                                   const char *version, const char *previous_tag,
-                                  const char *tag, const char *date) {
+                                  const char *tag, const char *date,
+                                  const char *fallback_previous) {
   if (previous_tag != NULL)
     return append_compare_heading(config, output, base, version, previous_tag,
                                   tag, date);
+  /* Upstream back-fills the compare base for a section that has no older
+   * release tag: the oldest commit in the section's own range becomes
+   * previousTag and the compare link is still emitted, even when the host
+   * base is empty (yielding a ///compare/... link). */
+  if (fallback_previous != NULL)
+    return append_compare_heading(config, output, base, version,
+                                  fallback_previous, tag, date);
   if (preset_is_angular(config))
     return csemver_buffer_appendf(output, "%s %s (%s)\n\n",
                                   release_heading_level(config, version),
@@ -4835,7 +4877,7 @@ static int regenerate_all_changelogs(
     return 0;
   if (previous_tag == NULL || strcmp(previous_tag, new_tag) != 0) {
     if (!append_release_heading(config, output, base, version, previous_tag,
-                                new_tag, date) ||
+                                new_tag, date, NULL) ||
         !changelog_section(config, commits, commit_count, output))
       goto fail;
     wrote_section = true;
@@ -4868,8 +4910,11 @@ static int regenerate_all_changelogs(
           output->data[output->length - 2] == '\n') &&
         !csemver_buffer_append(output, "\n", 1))
       goto fail;
-    if (!append_release_heading(config, output, base, current_version,
-                                older_tag, tags[i], current_date) ||
+    if (!append_release_heading(
+            config, output, base, current_version, older_tag, tags[i],
+            current_date,
+            historical_count > 0 ? historical[historical_count - 1].hash
+                                 : NULL) ||
         !changelog_section(config, historical, historical_count, output))
       goto fail;
     wrote_section = true;
@@ -4946,17 +4991,15 @@ static int render_changelog(const CsemverConfig *config, const char *version,
   }
   if (config->release_count > 1) {
     size_t history_limit = (size_t)config->release_count - 1;
-    if (!config->dry_run && output->length > 0 &&
-        !csemver_buffer_append(output, "\n", 1))
-      goto fail;
     if (!regenerate_all_changelogs(config, version, previous_tag, new_tag,
                                    commits, commit_count, tags, tag_count,
                                    history_limit, date, base, output))
       goto fail;
+    /* The regenerated sections already end with the template's trailing
+     * blank, so the retained history is appended without another one. */
     if (*old_body != '\0' &&
-        (!csemver_buffer_append(output, "\n", 1) ||
-         !csemver_buffer_append(output, old_body,
-                                old_length - (size_t)(old_body - old_content))))
+        !csemver_buffer_append(output, old_body,
+                               old_length - (size_t)(old_body - old_content)))
       goto fail;
     if (!normalize_changelog_newlines(output))
       goto fail;
@@ -4983,10 +5026,10 @@ static int render_changelog(const CsemverConfig *config, const char *version,
       goto fail;
   } else if (config->first_release) {
     if (!append_release_heading(config, output, base, version, NULL, new_tag,
-                                date))
+                                date, NULL))
       goto fail;
   } else if (!append_release_heading(config, output, base, version, NULL,
-                                     new_tag, date))
+                                     new_tag, date, NULL))
     goto fail;
   if (!changelog_section(config, commits, commit_count, output))
     goto fail;
