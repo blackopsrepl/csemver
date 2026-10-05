@@ -3370,6 +3370,10 @@ static int ignore_extglob_alternative_matches(const char *pattern,
     const char *alternative;
     size_t depth = 1;
     int in_bracket = 0;
+    int negated_group = 0;
+    size_t candidate_length;
+    char *candidate;
+    int candidate_matches;
     size_t prefix_length;
     size_t suffix_length;
     const char *suffix;
@@ -3392,6 +3396,8 @@ static int ignore_extglob_alternative_matches(const char *pattern,
       continue;
     group_start = cursor;
     body = cursor + 2;
+    if (*body == '!')
+      negated_group = 1;
     for (scan = body; *scan != '\0'; ++scan) {
       if (*scan == '\\' && scan[1] != '\0') {
         ++scan;
@@ -3411,10 +3417,130 @@ static int ignore_extglob_alternative_matches(const char *pattern,
     }
     if (close == NULL)
       continue;
-    *handled = 1;
+    /* Only model '!(...)' when the group stands alone between literals in its
+       path component. Adjacent wildcards let the surrounding glob absorb part
+       of the name, which needs full component matching; defer those shapes to
+       the platform matcher instead of inventing a subset. */
+    if (negated_group) {
+      char before = group_start == pattern ? '\0' : group_start[-1];
+      const char *after = close + 1;
+      if (before == '*' || before == '?' || before == '[' || *after == '*' ||
+          *after == '?' || *after == '[')
+        continue;
+    }
     prefix_length = (size_t)(group_start - pattern);
     suffix = close + 1;
     suffix_length = strlen(suffix);
+    if (negated_group) {
+      /* '@(!(a|b))' matches only when the candidate matches none of the inner
+         alternatives. Rebuild a positive '@(alt)' trial for each alternative
+         and reject the whole group on the first hit. */
+      const char *inner_open = body + 1;
+      const char *inner_close = NULL;
+      size_t inner_depth = 1;
+      int inner_bracket = 0;
+      for (scan = inner_open + 1; *scan != '\0'; ++scan) {
+        if (*scan == '\\' && scan[1] != '\0') {
+          ++scan;
+        } else if (inner_bracket) {
+          if (*scan == ']')
+            inner_bracket = 0;
+        } else if (*scan == '[') {
+          inner_bracket = 1;
+        } else if (*scan == '(') {
+          ++inner_depth;
+        } else if (*scan == ')') {
+          if (--inner_depth == 0) {
+            inner_close = scan;
+            break;
+          }
+        }
+      }
+      if (inner_close == NULL)
+        continue;
+      *handled = 1;
+      /* The group matches any segment, so model the whole pattern with the
+         group replaced by '*'. If that baseline does not match, neither can
+         the negation. Runs of '*' are squeezed afterwards so a group adjacent
+         to a wildcard collapses instead of forming '**', which would wrongly
+         acquire whole-path semantics. */
+      candidate_length = prefix_length + 1 + suffix_length;
+      candidate = malloc(candidate_length + 1);
+      if (candidate == NULL)
+        return -1;
+      memcpy(candidate, pattern, prefix_length);
+      candidate[prefix_length] = '*';
+      memcpy(candidate + prefix_length + 1, suffix, suffix_length);
+      candidate[candidate_length] = '\0';
+      {
+        size_t read = 0;
+        size_t write = 0;
+        while (read < candidate_length) {
+          candidate[write++] = candidate[read];
+          if (candidate[read] == '*') {
+            while (read + 1 < candidate_length && candidate[read + 1] == '*')
+              ++read;
+          }
+          ++read;
+        }
+        candidate[write] = '\0';
+      }
+      candidate_matches =
+          ignore_pattern_matches_core(candidate, filename, rooted);
+      free(candidate);
+      if (!candidate_matches)
+        return 0;
+      depth = 1;
+      in_bracket = 0;
+      alternative = inner_open + 1;
+      for (scan = inner_open + 1;; ++scan) {
+        int delimiter = scan == inner_close;
+        if (!delimiter) {
+          if (*scan == '\\' && scan[1] != '\0') {
+            ++scan;
+          } else if (in_bracket) {
+            if (*scan == ']')
+              in_bracket = 0;
+          } else if (*scan == '[') {
+            in_bracket = 1;
+          } else if (*scan == '(') {
+            ++depth;
+          } else if (*scan == ')') {
+            --depth;
+          } else if (*scan == '|' && depth == 1) {
+            delimiter = 1;
+          }
+        }
+        if (delimiter) {
+          size_t alternative_length = (size_t)(scan - alternative);
+          size_t trial_length =
+              prefix_length + alternative_length + suffix_length;
+          char *trial;
+          int matches;
+          if (prefix_length > SIZE_MAX - alternative_length ||
+              prefix_length + alternative_length > SIZE_MAX - suffix_length)
+            return -1;
+          trial = malloc(trial_length + 1);
+          if (trial == NULL)
+            return -1;
+          memcpy(trial, pattern, prefix_length);
+          memcpy(trial + prefix_length, alternative, alternative_length);
+          memcpy(trial + prefix_length + alternative_length, suffix,
+                 suffix_length);
+          trial[trial_length] = '\0';
+          matches = ignore_pattern_matches_core(trial, filename, rooted);
+          free(trial);
+          if (matches)
+            return 0;
+          alternative = scan + 1;
+        }
+        if (scan == inner_close)
+          break;
+      }
+      /* Every listed alternative failed, so the negation holds. */
+      return 1;
+    }
+    *handled = 1;
     depth = 1;
     in_bracket = 0;
     alternative = body;
