@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [0.2.2](https://github.com/blackopsrepl/csemver/compare/v0.2.1...v0.2.2) (2026-10-05)
+
+### Bug Fixes
+
+* **ci:** provision Forgejo build dependencies ([e82baf4](https://github.com/blackopsrepl/csemver/commit/e82baf4b248c6e6411ba12053afe2cbac705d892))
+* **ci:** remove runner setup warnings ([9716b8d](https://github.com/blackopsrepl/csemver/commit/9716b8dd4687f3a6bb102db3dea2316f907bcbad))
+* **ci:** restore portable release test gates ([7285b4d](https://github.com/blackopsrepl/csemver/commit/7285b4dd12c29113a075bcd9aeff10402c498629))
+* **ci:** stabilize portable checks and runners ([34da9a6](https://github.com/blackopsrepl/csemver/commit/34da9a6cc1c19428acaa41540fd4b9cdc4b79bcb))
+* **gitignore:** match extglob alternatives without brace lowering ([76ad043](https://github.com/blackopsrepl/csemver/commit/76ad0438dcc673a0f61f788c9c3b765ffcb91d26))
+* **release:** support ignored extglobs portably ([86ac535](https://github.com/blackopsrepl/csemver/commit/86ac535536bfe006c26d4306eea8c90505ef8f06))
+
 ## [0.2.1](https://github.com/blackopsrepl/csemver/compare/v0.2.0...v0.2.1) (2026-10-04)
 
 ### Features
