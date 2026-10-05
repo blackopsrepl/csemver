@@ -113,7 +113,7 @@ printf 'stale generated history\n' > CHANGELOG.md
 grep -q '^## \[2.0.1\]' CHANGELOG.md
 header_line=$(grep -n 'for commit guidelines\.' CHANGELOG.md | cut -d: -f1)
 release_line=$(grep -n '^## \[2.0.1\]' CHANGELOG.md | cut -d: -f1)
-[ "$((release_line - header_line))" -eq 3 ]
+[ "$((release_line - header_line))" -eq 2 ]
 grep -q '^## \[2.0.0\]' CHANGELOG.md
 grep -q '^## \[1.1.1\]' CHANGELOG.md
 grep -q '^## \[1.1.0\]' CHANGELOG.md
@@ -269,7 +269,7 @@ case "$first_release_heading" in
 esac
 first_release_heading_line=$(grep -m 1 -n '^## 1.0.0 (' CHANGELOG.md | cut -d: -f1)
 first_release_section_line=$(grep -m 1 -n '^### Features$' CHANGELOG.md | cut -d: -f1)
-test "$((first_release_section_line - first_release_heading_line))" -eq 2
+test "$((first_release_section_line - first_release_heading_line))" -eq 3
 printf 'feature\n' > feature.txt
 git add feature.txt
 git commit -qm 'feat: add prerelease feature'
@@ -1287,8 +1287,8 @@ package_header_gap=$(awk '
   in_header && NF == 0 { blanks++; next }
   in_header { print blanks; exit }
 ' CHANGELOG.md)
-test "$package_header_gap" -eq 2 || {
-  printf '%s\n' 'releaseCount=0 should leave two blank lines before the first heading' >&2
+test "$package_header_gap" -eq 1 || {
+  printf '%s\n' 'releaseCount=0 should leave one blank line before the first heading' >&2
   exit 1
 }
 

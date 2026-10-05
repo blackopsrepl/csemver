@@ -2702,26 +2702,31 @@ static int changelog_section(const CsemverConfig *config, const Commit *commits,
                                         commit_count, (int)i, base))
       goto fail;
   if (!angular && breaking.length > 0) {
-    if (!csemver_buffer_appendf(output, "### ⚠ BREAKING CHANGES\n\n") ||
+    if (!csemver_buffer_append(output, "\n", 1) ||
+        !csemver_buffer_appendf(output, "### ⚠ BREAKING CHANGES\n\n") ||
         !csemver_buffer_append(output, breaking.data, breaking.length))
       goto fail;
   }
   {
     bool wrote_section = !angular && breaking.length > 0;
+    bool wrote_heading = wrote_section;
     for (i = 0; i < group_count; ++i) {
       size_t index = angular ? group_order[i] : i;
       if (!used[index])
         continue;
-      if ((wrote_section && !csemver_buffer_append(output, "\n", 1)) ||
+      if ((!wrote_heading && !csemver_buffer_append(output, "\n", 1)) ||
+          (wrote_section && !csemver_buffer_append(output, "\n", 1)) ||
           !csemver_buffer_appendf(output, "### %s\n\n",
                                   config->commit_types[index].section) ||
           !csemver_buffer_append(output, groups[index].data,
                                  groups[index].length))
         goto fail;
+      wrote_heading = true;
       wrote_section = true;
     }
     if (angular && breaking.length > 0) {
-      if ((wrote_section && !csemver_buffer_append(output, "\n", 1)) ||
+      if ((!wrote_heading && !csemver_buffer_append(output, "\n", 1)) ||
+          (wrote_section && !csemver_buffer_append(output, "\n", 1)) ||
           !csemver_buffer_append(output, "### BREAKING CHANGES\n\n",
                                  sizeof "### BREAKING CHANGES\n\n" - 1) ||
           !csemver_buffer_append(output, breaking.data, breaking.length))
@@ -4871,14 +4876,14 @@ static int render_changelog(const CsemverConfig *config, const char *version,
         (config->header[0] != '\0' && !csemver_buffer_append(output, "\n", 1)))
       goto fail;
   }
-  if (!config->dry_run && ((config->header[0] != '\0' &&
-                            !csemver_buffer_append(output, config->header,
-                                                   strlen(config->header))) ||
-                           !csemver_buffer_append(output, "\n", 1)))
+  if (!config->dry_run &&
+      ((config->header[0] != '\0' &&
+        !csemver_buffer_append(output, config->header,
+                               strlen(config->header))) ||
+       !csemver_buffer_append(output, "\n", 1)))
     goto fail;
   if (config->release_count == 0) {
-    if ((!config->dry_run && !csemver_buffer_append(output, "\n", 1)) ||
-        !regenerate_all_changelogs(config, version, previous_tag, new_tag,
+    if (!regenerate_all_changelogs(config, version, previous_tag, new_tag,
                                    commits, commit_count, tags, tag_count, 0,
                                    date, base, output) ||
         !normalize_changelog_newlines(output))
