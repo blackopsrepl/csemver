@@ -203,6 +203,12 @@ static int read_file_array(CsemverConfig *config, const toml_table_t *root,
         set_error(error, error_size, "file entries need a filename string");
         return 0;
       }
+      if (toml_key_exists(item, "updater")) {
+        set_error(error, error_size,
+                  "executable updater programs are not supported; use the "
+                  "regex updater");
+        return 0;
+      }
       filename = toml_string_in(item, "filename");
       type = toml_string_in(item, "type");
       pattern = toml_string_in(item, "pattern");

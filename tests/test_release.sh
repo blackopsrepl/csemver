@@ -297,8 +297,11 @@ cd "$tmp/prerelease-empty-id-tag-fallback"
 git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
-printf '{"name":"prerelease-empty-id-tag-fallback","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/prerelease-empty-id-tag-fallback.git"},"commit-and-tag-version":{"packageFiles":[]}}\n' > package.json
-git add package.json
+printf '{"name":"prerelease-empty-id-tag-fallback","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/prerelease-empty-id-tag-fallback.git"}}\n' > package.json
+cat > csemver.toml <<'TOML'
+packageFiles = []
+TOML
+git add package.json csemver.toml
 git commit -qm 'chore: seed unnamed prerelease fallback'
 git tag -a v1.2.3-beta.0 -m 'release 1.2.3-beta.0'
 git commit --allow-empty -qm 'feat: promote prerelease by feature bump'
@@ -328,9 +331,12 @@ run_named_prerelease_case() {
   git init -q -b master
   git config user.name 'C Semver Test'
   git config user.email 'test@example.invalid'
-  printf '{"name":"prerelease-named-%s","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/prerelease-named-%s.git"},"commit-and-tag-version":{"packageFiles":[]}}\n' \
+  printf '{"name":"prerelease-named-%s","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/prerelease-named-%s.git"}}\n' \
     "$case_name" "$case_name" > package.json
-  git add package.json
+  cat > csemver.toml <<'TOML'
+packageFiles = []
+TOML
+  git add package.json csemver.toml
   git commit -qm 'chore: seed named prerelease progression'
   git tag -a "v$tag_version" -m "release $tag_version"
   git commit --allow-empty -qm "$commit_message"
@@ -365,9 +371,12 @@ run_release_as_prerelease_case() {
   git init -q -b master
   git config user.name 'C Semver Test'
   git config user.email 'test@example.invalid'
-  printf '{"name":"release-as-prerelease-%s","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/release-as-prerelease-%s.git"},"commit-and-tag-version":{"packageFiles":[]}}\n' \
+  printf '{"name":"release-as-prerelease-%s","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/release-as-prerelease-%s.git"}}\n' \
     "$case_name" "$case_name" > package.json
-  git add package.json
+  cat > csemver.toml <<'TOML'
+packageFiles = []
+TOML
+  git add package.json csemver.toml
   git commit -qm 'chore: seed releaseAs prerelease progression'
   git tag -a v2.0.0-beta.0 -m 'release 2.0.0-beta.0'
   if [ -n "$prerelease_id" ]; then
@@ -410,9 +419,12 @@ run_release_as_semver_case() {
   git init -q -b master
   git config user.name 'C Semver Test'
   git config user.email 'test@example.invalid'
-  printf '{"name":"release-as-semver-%s","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/release-as-semver-%s.git"},"commit-and-tag-version":{"packageFiles":[]}}\n' \
+  printf '{"name":"release-as-semver-%s","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/release-as-semver-%s.git"}}\n' \
     "$case_name" "$case_name" > package.json
-  git add package.json
+  cat > csemver.toml <<'TOML'
+packageFiles = []
+TOML
+  git add package.json csemver.toml
   git commit -qm 'chore: seed exact releaseAs prerelease case'
   git tag -a "v$base_tag_version" -m "release $base_tag_version"
   if "$bin" --dry-run --skip.changelog --skip.commit --skip.tag \
@@ -1160,32 +1172,6 @@ if grep -Fq 'Modern header' CHANGELOG.md; then
   exit 1
 fi
 
-mkdir "$tmp/pkg-config"
-cd "$tmp/pkg-config"
-git init -q -b master
-git config user.name 'C Semver Test'
-git config user.email 'test@example.invalid'
-cat > package.json <<'JSON'
-{
-  "name": "pkg-config-fixture",
-  "version": "1.0.0",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-config.git"},
-  "standard-version": {"tagPrefix": "legacy-"},
-  "commit-and-tag-version": {"tagPrefix": "release-"}
-}
-JSON
-git add package.json
-git commit -qm 'chore: seed package config fixture'
-git tag -a legacy-1.0.0 -m 'legacy release'
-git tag -a release-1.0.0 -m 'release'
-git commit --allow-empty -qm 'feat: use package config'
-pkg_config_output=$("$bin" --skip.commit --skip.tag 2>&1)
-grep -Fq 'compare/legacy-1.0.0...legacy-1.1.0' CHANGELOG.md || {
-  printf 'package.json config should preserve upstream section precedence:\n%s\n' \
-    "$pkg_config_output" >&2
-  exit 1
-}
-
 mkdir "$tmp/pkg-array-config"
 cd "$tmp/pkg-array-config"
 git init -q -b master
@@ -1195,21 +1181,21 @@ cat > package.json <<'JSON'
 {
   "name": "pkg-array-config-fixture",
   "version": "1.0.0",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-array-config.git"},
-  "commit-and-tag-version": {
-    "packageFiles": ["package.json", "bower.json"],
-    "issuePrefixes": ["JIRA-", "GH-"],
-    "issueUrlFormat": "https://issues.example/{{prefix}}{{id}}"
-  }
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-array-config.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+packageFiles = ["package.json", "bower.json"]
+issuePrefixes = ["JIRA-", "GH-"]
+issueUrlFormat = "https://issues.example/{{prefix}}{{id}}"
+TOML
 cat > bower.json <<'JSON'
 {
   "name": "pkg-array-config-fixture",
   "version": "2.0.0"
 }
 JSON
-git add package.json bower.json
+git add package.json bower.json csemver.toml
 git commit -qm 'chore: seed package array config fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'fix: address JIRA-7 and GH-42'
@@ -1234,11 +1220,13 @@ git config user.email 'test@example.invalid'
 cat > package.json <<'JSON'
 {
   "name": "pkg-bool-config-fixture",
-  "version": "1.0.0",
-  "commit-and-tag-version": {"dryRun": true}
+  "version": "1.0.0"
 }
 JSON
-git add package.json
+cat > csemver.toml <<'TOML'
+dryRun = true
+TOML
+git add package.json csemver.toml
 git commit -qm 'chore: seed package boolean config fixture'
 git commit --allow-empty -qm 'feat: verify package boolean config'
 package_bool_output=$("$bin" 2>&1)
@@ -1267,19 +1255,20 @@ cat > package.json <<'JSON'
 {
   "name": "pkg-number-config-fixture",
   "version": "1.0.0",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-number-config.git"},
-  "commit-and-tag-version": {"releaseCount": 0}
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-number-config.git"}
 }
 JSON
-git add package.json
+cat > csemver.toml <<'TOML'
+releaseCount = 0
+TOML
+git add package.json csemver.toml
 git commit -qm 'chore: seed package number config fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 cat > package.json <<'JSON'
 {
   "name": "pkg-number-config-fixture",
   "version": "1.1.0",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-number-config.git"},
-  "commit-and-tag-version": {"releaseCount": 0}
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-number-config.git"}
 }
 JSON
 git add package.json
@@ -1310,14 +1299,14 @@ cat > package.json <<'JSON'
 {
   "name": "pkg-bumpfiles-config-fixture",
   "version": "1.0.0",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-config.git"},
-  "commit-and-tag-version": {
-    "bumpFiles": [{"filename": "VERSION", "type": "plain-text"}]
-  }
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-config.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+bumpFiles = [{filename = "VERSION", type = "plain-text"}]
+TOML
 printf '1.0.0\n' > VERSION
-git add package.json VERSION
+git add package.json VERSION csemver.toml
 git commit -qm 'chore: seed package bumpFiles config fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 printf 'new feature\n' > feature.txt
@@ -1342,24 +1331,26 @@ cat > package.json <<'JSON'
 {
   "name": "pkg-bumpfiles-strings-fixture",
   "version": "1.0.0",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-strings.git"},
-  "commit-and-tag-version": {"bumpFiles": ["version.txt"]}
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-strings.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+bumpFiles = ["version.txt"]
+TOML
 printf '1.0.0\n' > version.txt
-git add package.json version.txt
-git commit -qm 'chore: seed package bumpFiles string fixture'
+git add package.json csemver.toml version.txt
+git commit -qm 'chore: seed configured bumpFiles string fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 printf 'new feature\n' > feature.txt
 git add feature.txt
 git commit -qm 'feat: add configured string version file'
 "$bin" --skip.commit --skip.tag > /dev/null
 test "$(cat version.txt)" = '1.1.0' || {
-  printf '%s\n' 'package.json bumpFiles string should update its recognized plain-text file' >&2
+  printf '%s\n' 'configured bumpFiles string should update its recognized plain-text file' >&2
   exit 1
 }
 grep -Fq '"version": "1.0.0"' package.json || {
-  printf '%s\n' 'package.json bumpFiles string should not rewrite the package file' >&2
+  printf '%s\n' 'configured bumpFiles string should not rewrite the package file' >&2
   exit 1
 }
 
@@ -1371,29 +1362,29 @@ git config user.email 'test@example.invalid'
 cat > package.json <<'JSON'
 {
   "name": "pkg-bumpfiles-mixed-fixture",
-  "version": "1.0.0",
-  "commit-and-tag-version": {
-    "bumpFiles": ["VERSION.txt", {"filename": "metadata.json", "type": "json"}]
-  }
+  "version": "1.0.0"
 }
 JSON
+cat > csemver.toml <<'TOML'
+bumpFiles = ["VERSION.txt", {filename = "metadata.json", type = "json"}]
+TOML
 printf '1.0.0\n' > VERSION.txt
 printf '{"version":"1.0.0"}\n' > metadata.json
-git add package.json VERSION.txt metadata.json
-git commit -qm 'chore: seed mixed package bumpFiles fixture'
+git add package.json csemver.toml VERSION.txt metadata.json
+git commit -qm 'chore: seed mixed bumpFiles fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
-git commit --allow-empty -qm 'feat: test mixed package bumpFiles'
+git commit --allow-empty -qm 'feat: test mixed bumpFiles'
 "$bin" --skip.changelog --skip.commit --skip.tag > /dev/null
 test "$(cat VERSION.txt)" = '1.1.0' || {
-  printf '%s\n' 'mixed package bumpFiles should update its inferred string target' >&2
+  printf '%s\n' 'mixed bumpFiles should update its inferred string target' >&2
   exit 1
 }
 grep -Fq '"version": "1.0.0"' package.json || {
-  printf '%s\n' 'mixed package bumpFiles should not update package.json unless listed' >&2
+  printf '%s\n' 'mixed bumpFiles should not update package.json unless listed' >&2
   exit 1
 }
 grep -Fq '"version": "1.1.0"' metadata.json || {
-  printf '%s\n' 'mixed package bumpFiles should apply the typed JSON updater' >&2
+  printf '%s\n' 'mixed bumpFiles should apply the typed JSON updater' >&2
   exit 1
 }
 
@@ -1406,32 +1397,22 @@ cat > package.json <<'JSON'
 {
   "name": "pkg-bumpfiles-unsupported-fixture",
   "version": "1.0.0",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-unsupported.git"},
-  "commit-and-tag-version": {"bumpFiles": ["metadata.json"]}
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-unsupported.git"}
 }
 JSON
-cat > metadata.json <<'JSON'
-{
-  "version": "2.0.0"
-}
-JSON
-git add package.json metadata.json
-git commit -qm 'chore: seed unsupported package bump file fixture'
+cat > csemver.toml <<'TOML'
+bumpFiles = [{filename = "custom.dat", type = "custom"}]
+TOML
+printf 'version=2.0.0\n' > custom.dat
+git add package.json csemver.toml custom.dat
+git commit -qm 'chore: seed unknown bump file type fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
-git commit --allow-empty -qm 'fix: change with unsupported bump file'
-if unsupported_output=$("$bin" --skip.commit --skip.tag 2>&1); then
-  :
-else
-  printf '%s\n' 'unsupported package bumpFiles should be skipped like upstream' >&2
-  printf '%s\n' "$unsupported_output" >&2
-  exit 1
-fi
-printf '%s\n' "$unsupported_output" | grep -Fxq 'Unable to obtain updater for: "metadata.json"'
-printf '%s\n' "$unsupported_output" | grep -Fxq ' - Error: Unsupported file (metadata.json) provided for bumping.'
-printf '%s\n' "$unsupported_output" | grep -Fxq ' Please specify the updater `type` or use a custom `updater`.'
-printf '%s\n' "$unsupported_output" | grep -Fxq ' - Skipping...'
+git commit --allow-empty -qm 'fix: change with unknown bump file type'
+unsupported_output=$("$bin" --skip.commit --skip.tag 2>&1)
+printf '%s\n' "$unsupported_output" | grep -Fxq \
+  'unsupported or unreadable version file format'
 grep -Fq '"version": "1.0.0"' package.json
-grep -Fq '"version": "2.0.0"' metadata.json
+test "$(cat custom.dat)" = 'version=2.0.0'
 test -f CHANGELOG.md
 
 mkdir "$tmp/pkg-bumpfiles-typed-unsupported"
@@ -1443,261 +1424,41 @@ cat > package.json <<'JSON'
 {
   "name": "pkg-bumpfiles-typed-unsupported-fixture",
   "version": "1.0.0",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-typed-unsupported.git"},
-  "commit-and-tag-version": {
-    "packageFiles": ["package.json"],
-    "bumpFiles": [
-      {"filename": "package.json", "type": "json"},
-      {"filename": "metadata.toml", "type": "toml"},
-      {"type": "custom", "filename": "custom.dat", "label": "retained"}
-    ]
-  }
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-typed-unsupported.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+packageFiles = ["package.json"]
+bumpFiles = [
+  {filename = "package.json", type = "json"},
+  {filename = "metadata.toml", type = "toml"},
+  {filename = "custom.dat", type = "custom"}
+]
+TOML
 printf 'version = "1.0.0"\n' > metadata.toml
 printf 'version=1.0.0\n' > custom.dat
-git add package.json metadata.toml custom.dat
-git commit -qm 'chore: seed typed unsupported updater fixture'
+git add package.json csemver.toml metadata.toml custom.dat
+git commit -qm 'chore: seed native updater type fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
-git commit --allow-empty -qm 'fix: trigger typed unsupported updater fixture'
+git commit --allow-empty -qm 'fix: trigger native updater type fixture'
 "$bin" --release-as 1.0.1 --skip.changelog --skip.commit --skip.tag \
   > "$tmp/typed-unsupported.stdout" 2> "$tmp/typed-unsupported.stderr"
-printf '%s\n' '✔ bumping version in package.json from 1.0.0 to 1.0.1' \
+printf '%s\n' \
+  '✔ bumping version in package.json from 1.0.0 to 1.0.1' \
+  '✔ bumping version in metadata.toml from 1.0.0 to 1.0.1' \
   > "$tmp/typed-unsupported.expected.stdout"
 cmp "$tmp/typed-unsupported.expected.stdout" "$tmp/typed-unsupported.stdout"
-printf '%s\n' \
-  'Unable to obtain updater for: {"filename":"metadata.toml","type":"toml"}' \
-  ' - Error: Unable to locate updater for provided type (toml).' \
-  ' - Skipping...' \
-  'Unable to obtain updater for: {"type":"custom","filename":"custom.dat","label":"retained"}' \
-  ' - Error: Unable to locate updater for provided type (custom).' \
-  ' - Skipping...' > "$tmp/typed-unsupported.expected.stderr"
+printf '%s\n' 'unsupported or unreadable version file format' \
+  > "$tmp/typed-unsupported.expected.stderr"
 if ! cmp "$tmp/typed-unsupported.expected.stderr" "$tmp/typed-unsupported.stderr"; then
-  printf 'actual typed-updater diagnostics:\n' >&2
+  printf 'actual native-updater diagnostics:\n' >&2
   cat "$tmp/typed-unsupported.stderr" >&2
   exit 1
 fi
 grep -Fq '"version": "1.0.1"' package.json
-test "$(cat metadata.toml)" = 'version = "1.0.0"'
+test "$(cat metadata.toml)" = 'version = "1.0.1"'
 test "$(cat custom.dat)" = 'version=1.0.0'
 test ! -e CHANGELOG.md
-
-for package_source_type in toml custom; do
-  mkdir "$tmp/pkg-packagefiles-typed-$package_source_type"
-  cd "$tmp/pkg-packagefiles-typed-$package_source_type"
-  git init -q -b master
-  git config user.name 'C Semver Test'
-  git config user.email 'test@example.invalid'
-  printf '{\n  "name": "pkg-packagefiles-typed-%s-fixture",\n  "version": "1.0.0",\n  "repository": {"type": "git", "url": "https://github.com/example/pkg-packagefiles-typed.git"},\n  "commit-and-tag-version": {"packageFiles": [{"filename": "metadata.toml", "type": "%s"}, "package.json"], "bumpFiles": ["package.json"]}\n}\n' \
-    "$package_source_type" "$package_source_type" > package.json
-  printf 'version = "3.0.0"\n' > metadata.toml
-  git add package.json metadata.toml
-  git commit -qm 'chore: seed typed packageFiles updater fixture'
-  git tag -a v1.0.0 -m 'release 1.0.0'
-  git commit --allow-empty -qm 'fix: trigger typed packageFiles updater fixture'
-  "$bin" --release-as 1.0.1 --skip.changelog --skip.commit --skip.tag \
-    > "$tmp/packagefiles-typed.stdout" 2> "$tmp/packagefiles-typed.stderr"
-  test ! -s "$tmp/packagefiles-typed.stdout"
-  printf 'Unable to obtain updater for: {"filename":"metadata.toml","type":"%s"}\n - Error: Unable to locate updater for provided type (%s).\n - Skipping...\n' \
-    "$package_source_type" "$package_source_type" \
-    > "$tmp/packagefiles-typed.expected.stderr"
-  cmp "$tmp/packagefiles-typed.expected.stderr" \
-    "$tmp/packagefiles-typed.stderr"
-  grep -Fq '"version": "1.0.0"' package.json
-  test "$(cat metadata.toml)" = 'version = "3.0.0"'
-  test ! -e CHANGELOG.md
-  test -z "$(git status --porcelain)"
-done
-
-mkdir "$tmp/pkg-packagefiles-typed-order"
-cd "$tmp/pkg-packagefiles-typed-order"
-git init -q -b master
-git config user.name 'C Semver Test'
-git config user.email 'test@example.invalid'
-cat > package.json <<'JSON'
-{
-  "name": "pkg-packagefiles-typed-order-fixture",
-  "version": "1.0.0",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-packagefiles-typed-order.git"},
-  "commit-and-tag-version": {
-    "packageFiles": [
-      {"type": "custom", "filename": "metadata.dat", "label": "retained", "extra": {"10": "ten", "2": "two", "list": [true, null]}},
-      "package.json"
-    ],
-    "bumpFiles": ["package.json"]
-  }
-}
-JSON
-printf 'version=3.0.0\n' > metadata.dat
-git add package.json metadata.dat
-git commit -qm 'chore: seed typed packageFiles ordering fixture'
-git tag -a v1.0.0 -m 'release 1.0.0'
-git commit --allow-empty -qm 'fix: trigger typed packageFiles ordering fixture'
-"$bin" --skip.changelog --skip.commit --skip.tag \
-  > "$tmp/packagefiles-ordering.stdout" 2> "$tmp/packagefiles-ordering.stderr"
-test ! -s "$tmp/packagefiles-ordering.stdout"
-printf '%s\n' \
-  'Unable to obtain updater for: {"type":"custom","filename":"metadata.dat","label":"retained","extra":{"2":"two","10":"ten","list":[true,null]}}' \
-  ' - Error: Unable to locate updater for provided type (custom).' \
-  ' - Skipping...' > "$tmp/packagefiles-ordering.expected.stderr"
-cmp "$tmp/packagefiles-ordering.expected.stderr" \
-  "$tmp/packagefiles-ordering.stderr"
-grep -Fq '"version": "1.0.0"' package.json
-test "$(cat metadata.dat)" = 'version=3.0.0'
-test -z "$(git status --porcelain)"
-
-for package_source_case in untyped-string untyped-object inferred-string inferred-object; do
-  mkdir "$tmp/pkg-packagefiles-$package_source_case"
-  cd "$tmp/pkg-packagefiles-$package_source_case"
-  git init -q -b master
-  git config user.name 'C Semver Test'
-  git config user.email 'test@example.invalid'
-  case "$package_source_case" in
-    untyped-string)
-      package_source_entry='"metadata.toml"'
-      package_source_filename=metadata.toml
-      package_source_expected_identifier='"metadata.toml"'
-      ;;
-    untyped-object)
-      package_source_entry='{"filename":"metadata.toml","label":"retained"}'
-      package_source_filename=metadata.toml
-      package_source_expected_identifier='{"filename":"metadata.toml","label":"retained"}'
-      ;;
-    inferred-string)
-      package_source_entry='"openapi.yaml"'
-      package_source_filename=openapi.yaml
-      ;;
-    inferred-object)
-      package_source_entry='{"filename":"openapi.yaml"}'
-      package_source_filename=openapi.yaml
-      ;;
-  esac
-  printf '{\n  "name": "pkg-packagefiles-%s-fixture",\n  "version": "1.0.0",\n  "repository": {"type": "git", "url": "https://github.com/example/pkg-packagefiles-inferred.git"},\n  "commit-and-tag-version": {"packageFiles": [%s, "package.json"], "bumpFiles": ["package.json"]}\n}\n' \
-    "$package_source_case" "$package_source_entry" > package.json
-  if [ "$package_source_filename" = metadata.toml ]; then
-    printf 'version = "3.0.0"\n' > "$package_source_filename"
-  else
-    printf 'openapi: 3.0.0\ninfo:\n  title: fixture\n  version: 3.0.0\npaths: {}\n' \
-      > "$package_source_filename"
-  fi
-  git add package.json "$package_source_filename"
-  git commit -qm 'chore: seed inferred packageFiles fixture'
-  git tag -a v1.0.0 -m 'release 1.0.0'
-  git commit --allow-empty -qm 'fix: trigger inferred packageFiles fixture'
-  "$bin" --skip.changelog --skip.commit --skip.tag \
-    > "$tmp/packagefiles-inferred.stdout" 2> "$tmp/packagefiles-inferred.stderr"
-  case "$package_source_case" in
-    untyped-string|untyped-object)
-      test ! -s "$tmp/packagefiles-inferred.stdout"
-      printf 'Unable to obtain updater for: %s\n - Error: Unsupported file (%s) provided for bumping.\n Please specify the updater `type` or use a custom `updater`.\n - Skipping...\n' \
-        "$package_source_expected_identifier" "$package_source_filename" \
-        > "$tmp/packagefiles-inferred.expected.stderr"
-      cmp "$tmp/packagefiles-inferred.expected.stderr" \
-        "$tmp/packagefiles-inferred.stderr"
-      grep -Fq '"version": "1.0.0"' package.json
-      test -z "$(git status --porcelain)"
-      ;;
-    inferred-string|inferred-object)
-      printf '%s\n' '✔ bumping version in package.json from 1.0.0 to 3.0.1' \
-        > "$tmp/packagefiles-inferred.expected.stdout"
-      cmp "$tmp/packagefiles-inferred.expected.stdout" \
-        "$tmp/packagefiles-inferred.stdout"
-      test ! -s "$tmp/packagefiles-inferred.stderr"
-      grep -Fq '"version": "3.0.1"' package.json
-      grep -Fq 'version: 3.0.0' openapi.yaml
-      git diff --quiet -- openapi.yaml
-      test -z "$(git ls-files --others --exclude-standard)"
-      ;;
-  esac
-done
-
-for updater_order_case in gradle-before-maven csproj-after-maven python-before-yaml; do
-  mkdir "$tmp/pkg-packagefiles-$updater_order_case"
-  cd "$tmp/pkg-packagefiles-$updater_order_case"
-  git init -q -b master
-  git config user.name 'C Semver Test'
-  git config user.email 'test@example.invalid'
-  case "$updater_order_case" in
-    gradle-before-maven)
-      package_source_filename=build.gradle.pom.xml
-      cat > "$package_source_filename" <<'XML'
-<project><modelVersion>4.0.0</modelVersion><groupId>x</groupId><artifactId>x</artifactId><version>3.0.0</version></project>
-XML
-      ;;
-    csproj-after-maven)
-      package_source_filename=pom.xml.csproj
-      cat > "$package_source_filename" <<'XML'
-<project><modelVersion>4.0.0</modelVersion><groupId>x</groupId><artifactId>x</artifactId><version>3.0.0</version><Version>9.9.9</Version></project>
-XML
-      ;;
-    python-before-yaml)
-      package_source_filename=pyproject.toml.yaml
-      printf 'version: 3.0.0\n' > "$package_source_filename"
-      ;;
-  esac
-  printf '{\n  "name": "pkg-packagefiles-%s-fixture",\n  "version": "1.0.0",\n  "repository": {"type": "git", "url": "https://github.com/example/pkg-packagefiles-order.git"},\n  "commit-and-tag-version": {"packageFiles": ["%s", "package.json"], "bumpFiles": ["package.json"]}\n}\n' \
-    "$updater_order_case" "$package_source_filename" > package.json
-  git add package.json "$package_source_filename"
-  git commit -qm 'chore: seed updater inference order fixture'
-  git tag -a v1.0.0 -m 'release 1.0.0'
-  git commit --allow-empty -qm 'fix: trigger updater inference order fixture'
-  "$bin" --skip.changelog --skip.commit --skip.tag \
-    > "$tmp/packagefiles-order.stdout" 2> "$tmp/packagefiles-order.stderr"
-  printf '%s\n' '✔ bumping version in package.json from 1.0.0 to 3.0.1' \
-    > "$tmp/packagefiles-order.expected.stdout"
-  cmp "$tmp/packagefiles-order.expected.stdout" \
-    "$tmp/packagefiles-order.stdout"
-  test ! -s "$tmp/packagefiles-order.stderr"
-  grep -Fq '"version": "3.0.1"' package.json
-  git diff --quiet -- "$package_source_filename"
-  test -z "$(git ls-files --others --exclude-standard)"
-done
-
-for regex_case in pom-dot-wildcard gradle-dot-wildcard openapi-dot-wildcard python-dot-wildcard; do
-  mkdir "$tmp/pkg-packagefiles-$regex_case"
-  cd "$tmp/pkg-packagefiles-$regex_case"
-  git init -q -b master
-  git config user.name 'C Semver Test'
-  git config user.email 'test@example.invalid'
-  case "$regex_case" in
-    pom-dot-wildcard)
-      package_source_filename=pom-xml
-      cat > "$package_source_filename" <<'XML'
-<project><modelVersion>4.0.0</modelVersion><groupId>x</groupId><artifactId>x</artifactId><version>3.0.0</version></project>
-XML
-      ;;
-    gradle-dot-wildcard)
-      package_source_filename=build-gradle
-      printf 'plugins {}\nversion = "3.0.0"\n' > "$package_source_filename"
-      ;;
-    openapi-dot-wildcard)
-      package_source_filename=openapi-yaml
-      printf 'openapi: 3.0.0\ninfo:\n  title: fixture\n  version: 3.0.0\npaths: {}\n' \
-        > "$package_source_filename"
-      ;;
-    python-dot-wildcard)
-      package_source_filename=pyproject-toml
-      printf '[project]\nname = "fixture"\nversion = "3.0.0"\n' \
-        > "$package_source_filename"
-      ;;
-  esac
-  printf '{\n  "name": "pkg-packagefiles-%s-fixture",\n  "version": "1.0.0",\n  "repository": {"type": "git", "url": "https://github.com/example/pkg-packagefiles-dot-wildcard.git"},\n  "commit-and-tag-version": {"packageFiles": ["%s", "package.json"], "bumpFiles": ["package.json"]}\n}\n' \
-    "$regex_case" "$package_source_filename" > package.json
-  git add package.json "$package_source_filename"
-  git commit -qm 'chore: seed updater regex inference fixture'
-  git tag -a v1.0.0 -m 'release 1.0.0'
-  git commit --allow-empty -qm 'fix: trigger updater regex inference fixture'
-  "$bin" --skip.changelog --skip.commit --skip.tag \
-    > "$tmp/packagefiles-regex.stdout" 2> "$tmp/packagefiles-regex.stderr"
-  printf '%s\n' '✔ bumping version in package.json from 1.0.0 to 3.0.1' \
-    > "$tmp/packagefiles-regex.expected.stdout"
-  cmp "$tmp/packagefiles-regex.expected.stdout" \
-    "$tmp/packagefiles-regex.stdout"
-  test ! -s "$tmp/packagefiles-regex.stderr"
-  grep -Fq '"version": "3.0.1"' package.json
-  git diff --quiet -- "$package_source_filename"
-  test -z "$(git ls-files --others --exclude-standard)"
-done
 
 mkdir "$tmp/pkg-bumpfiles-inferred-object"
 cd "$tmp/pkg-bumpfiles-inferred-object"
@@ -1708,14 +1469,14 @@ cat > package.json <<'JSON'
 {
   "name": "pkg-bumpfiles-inferred-object-fixture",
   "version": "1.0.0",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-inferred-object.git"},
-  "commit-and-tag-version": {
-    "bumpFiles": [{"filename": "VERSION.txt"}]
-  }
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-bumpfiles-inferred-object.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+bumpFiles = [{filename = "VERSION.txt"}]
+TOML
 printf '1.0.0\n' > VERSION.txt
-git add package.json VERSION.txt
+git add package.json csemver.toml VERSION.txt
 git commit -qm 'chore: seed inferred bumpFiles fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'fix: trigger inferred bumpFiles fixture'
@@ -1738,17 +1499,22 @@ cat > package.json <<'JSON'
 {
   "name": "pkg-custom-types-fixture",
   "version": "1.0.0",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-custom-types.git"},
-  "commit-and-tag-version": {
-    "types": [
-      {"type": "feature", "section": "Custom Features", "hidden": false},
-      {"type": "docs", "section": "Documentation", "hidden": false}
-    ]
-  }
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-custom-types.git"}
 }
 JSON
-git add package.json
-git commit -qm 'chore: seed package custom types fixture'
+cat > csemver.toml <<'TOML'
+[[types]]
+type = "feature"
+section = "Custom Features"
+hidden = false
+
+[[types]]
+type = "docs"
+section = "Documentation"
+hidden = false
+TOML
+git add package.json csemver.toml
+git commit -qm 'chore: seed custom types fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 for message in 'feature: custom feature' 'docs: update manual' 'feat: default feature'; do
   git commit --allow-empty -qm "$message"
@@ -1774,19 +1540,19 @@ cat > package.json <<'JSON'
 {
   "name": "pkg-package-files-object-fixture",
   "version": "1.0.0",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-package-files-object.git"},
-  "commit-and-tag-version": {
-    "packageFiles": [{"filename": "manifest.data", "type": "json"}]
-  }
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-package-files-object.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+packageFiles = [{filename = "manifest.data", type = "json"}]
+TOML
 cat > manifest.data <<'JSON'
 {
     "name": "manifest",
     "version": "2.3.4"
 }
 JSON
-git add package.json manifest.data
+git add package.json csemver.toml manifest.data
 git commit -qm 'chore: seed packageFiles object fixture'
 git tag -a v2.3.4 -m 'release 2.3.4'
 git commit --allow-empty -qm 'feat: update object package file'
@@ -1803,15 +1569,15 @@ git config user.email 'test@example.invalid'
 cat > package.json <<'JSON'
 {
   "name": "pkg-package-files-mixed-fixture",
-  "version": "1.0.0",
-  "commit-and-tag-version": {
-    "packageFiles": ["VERSION.txt", {"filename": "metadata.json", "type": "json"}]
-  }
+  "version": "1.0.0"
 }
 JSON
+cat > csemver.toml <<'TOML'
+packageFiles = ["VERSION.txt", {filename = "metadata.json", type = "json"}]
+TOML
 printf '2.0.0\n' > VERSION.txt
 printf '{"version":"2.0.0"}\n' > metadata.json
-git add package.json VERSION.txt metadata.json
+git add package.json csemver.toml VERSION.txt metadata.json
 git commit -qm 'chore: seed mixed packageFiles fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'feat: test mixed packageFiles'
@@ -1848,12 +1614,15 @@ cat > package.json <<'JSON'
 {
   "name": "pkg-skip-config-fixture",
   "version": "1.0.0",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-skip-config.git"},
-  "commit-and-tag-version": {"skip": {"changelog": true}}
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-skip-config.git"}
 }
 JSON
-git add package.json
-git commit -qm 'chore: seed package skip fixture'
+cat > csemver.toml <<'TOML'
+[skip]
+changelog = true
+TOML
+git add package.json csemver.toml
+git commit -qm 'chore: seed skip fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'feat: release with changelog skipped'
 "$bin" --skip.commit --skip.tag >/dev/null
@@ -1868,13 +1637,15 @@ cat > package.json <<'JSON'
 {
   "name": "pkg-skip-precedence-fixture",
   "version": "1.0.0",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-skip-precedence.git"},
-  "commit-and-tag-version": {"skip": {"changelog": true}},
-  "standard-version": {"skip": {"changelog": false}}
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-skip-precedence.git"}
 }
 JSON
-git add package.json
-git commit -qm 'chore: seed package skip precedence fixture'
+cat > csemver.toml <<'TOML'
+[skip]
+changelog = false
+TOML
+git add package.json csemver.toml
+git commit -qm 'chore: seed skip precedence fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'feat: release with package config precedence'
 "$bin" --skip.commit --skip.tag >/dev/null
@@ -1886,33 +1657,28 @@ git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
 package_script_marker="$tmp/package-script-ran"
-package_script_superseded_marker="$tmp/package-script-superseded"
 package_script_command="touch $package_script_marker"
-package_script_superseded_command="touch $package_script_superseded_marker"
-cat > package.json <<JSON
+cat > package.json <<'JSON'
 {
   "name": "pkg-lifecycle-scripts-fixture",
-  "version": "1.0.0",
-  "commit-and-tag-version": {
-    "scripts": {"prerelease": "$package_script_superseded_command"}
-  },
-  "standard-version": {
-    "scripts": {"prerelease": "$package_script_command"}
-  }
+  "version": "1.0.0"
 }
 JSON
-git add package.json
-git commit -qm 'chore: seed package lifecycle script fixture'
+cat > csemver.toml <<TOML
+[scripts]
+prerelease = "$package_script_command"
+TOML
+git add package.json csemver.toml
+git commit -qm 'chore: seed lifecycle script fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
-git commit --allow-empty -qm 'feat: exercise package lifecycle script'
+git commit --allow-empty -qm 'feat: exercise lifecycle script'
 package_script_output=$("$bin" --skip.commit --skip.tag)
 test -f "$package_script_marker"
-test ! -e "$package_script_superseded_marker"
 printf '%s\n' "$package_script_output" |
   grep -Fxq '✔ Running lifecycle script "prerelease"'
 printf '%s\n' "$package_script_output" |
   grep -Fxq "ℹ - execute command: \"$package_script_command\""
-rm -f "$package_script_marker" "$package_script_superseded_marker"
+rm -f "$package_script_marker"
 package_script_output=$("$bin" --silent --skip.commit --skip.tag)
 test -f "$package_script_marker"
 test -z "$package_script_output"
@@ -1927,12 +1693,15 @@ cat > package.json <<'JSON'
 {
   "name": "pkg-prebump-fixture",
   "version": "1.2.3",
-  "repository": {"type": "git", "url": "https://github.com/example/pkg-prebump.git"},
-  "commit-and-tag-version": {"scripts": {"prebump": "printf 1.3.0"}}
+  "repository": {"type": "git", "url": "https://github.com/example/pkg-prebump.git"}
 }
 JSON
-git add package.json
-git commit -qm 'chore: seed package prebump fixture'
+cat > csemver.toml <<'TOML'
+[scripts]
+prebump = "printf 1.3.0"
+TOML
+git add package.json csemver.toml
+git commit -qm 'chore: seed prebump fixture'
 git tag -a v1.2.3 -m 'release 1.2.3'
 git commit --allow-empty -qm 'fix: exercise package prebump override'
 "$bin" > "$tmp/pkg-prebump.stdout" 2> "$tmp/pkg-prebump.stderr"
@@ -1950,26 +1719,25 @@ cd "$tmp/dry-run-lifecycle-scripts"
 git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
-cat > package.json <<JSON
+cat > package.json <<'JSON'
 {
   "name": "dry-run-lifecycle-scripts-fixture",
-  "version": "1.0.0",
-  "commit-and-tag-version": {
-    "scripts": {
-      "prerelease": "touch $tmp/dryrun-prerelease",
-      "prebump": "touch $tmp/dryrun-prebump",
-      "postbump": "touch $tmp/dryrun-postbump",
-      "prechangelog": "touch $tmp/dryrun-prechangelog",
-      "postchangelog": "touch $tmp/dryrun-postchangelog",
-      "precommit": "touch $tmp/dryrun-precommit",
-      "postcommit": "touch $tmp/dryrun-postcommit",
-      "pretag": "touch $tmp/dryrun-pretag",
-      "posttag": "touch $tmp/dryrun-posttag"
-    }
-  }
+  "version": "1.0.0"
 }
 JSON
-git add package.json
+cat > csemver.toml <<TOML
+[scripts]
+prerelease = "touch $tmp/dryrun-prerelease"
+prebump = "touch $tmp/dryrun-prebump"
+postbump = "touch $tmp/dryrun-postbump"
+prechangelog = "touch $tmp/dryrun-prechangelog"
+postchangelog = "touch $tmp/dryrun-postchangelog"
+precommit = "touch $tmp/dryrun-precommit"
+postcommit = "touch $tmp/dryrun-postcommit"
+pretag = "touch $tmp/dryrun-pretag"
+posttag = "touch $tmp/dryrun-posttag"
+TOML
+git add package.json csemver.toml
 git commit -qm 'chore: seed dry-run lifecycle fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'feat: exercise dry-run lifecycle scripts'
@@ -2012,23 +1780,22 @@ git config user.email 'test@example.invalid'
 cat > package.json <<'JSON'
 {
   "name": "normal-lifecycle-scripts-fixture",
-  "version": "1.0.0",
-  "commit-and-tag-version": {
-    "scripts": {
-      "prerelease": "true",
-      "prebump": "true",
-      "postbump": "true",
-      "prechangelog": "true",
-      "postchangelog": "true",
-      "precommit": "true",
-      "postcommit": "true",
-      "pretag": "true",
-      "posttag": "true"
-    }
-  }
+  "version": "1.0.0"
 }
 JSON
-git add package.json
+cat > csemver.toml <<'TOML'
+[scripts]
+prerelease = "true"
+prebump = "true"
+postbump = "true"
+prechangelog = "true"
+postchangelog = "true"
+precommit = "true"
+postcommit = "true"
+pretag = "true"
+posttag = "true"
+TOML
+git add package.json csemver.toml
 git commit -qm 'chore: seed normal lifecycle fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'feat: exercise normal lifecycle scripts'
@@ -2046,13 +1813,14 @@ git config user.email 'test@example.invalid'
 cat > package.json <<'JSON'
 {
   "name": "lifecycle-script-failure-fixture",
-  "version": "1.0.0",
-  "commit-and-tag-version": {
-    "scripts": {"prerelease": "printf hook-stdout; printf hook-failure >&2; exit 7"}
-  }
+  "version": "1.0.0"
 }
 JSON
-git add package.json
+cat > csemver.toml <<'TOML'
+[scripts]
+prerelease = "printf hook-stdout; printf hook-failure >&2; exit 7"
+TOML
+git add package.json csemver.toml
 git commit -qm 'chore: seed lifecycle script failure fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'feat: exercise lifecycle script failure'
@@ -2074,13 +1842,14 @@ cmp "$tmp/lifecycle-failure.stderr.expected" "$tmp/lifecycle-failure.stderr"
 cat > package.json <<'JSON'
 {
   "name": "lifecycle-script-failure-fixture",
-  "version": "1.0.0",
-  "commit-and-tag-version": {
-    "scripts": {"prerelease": "printf hook-stdout; exit 7"}
-  }
+  "version": "1.0.0"
 }
 JSON
-git add package.json
+cat > csemver.toml <<'TOML'
+[scripts]
+prerelease = "printf hook-stdout; exit 7"
+TOML
+git add package.json csemver.toml
 git commit -qm 'chore: use stdout-only failing hook'
 set +e
 "$bin" --skip.changelog --skip.commit --skip.tag > "$tmp/lifecycle-failure-stdout-only.stdout" 2> "$tmp/lifecycle-failure-stdout-only.stderr"
@@ -2116,15 +1885,14 @@ git config user.email 'test@example.invalid'
 cat > package.json <<'JSON'
 {
   "name": "lifecycle-stream-fds-fixture",
-  "version": "1.0.0",
-  "commit-and-tag-version": {
-    "scripts": {
-      "prerelease": "yes x 2>/dev/null | head -c 262144 2>/dev/null; yes y 2>/dev/null | head -c 262144 >&2 2>/dev/null"
-    }
-  }
+  "version": "1.0.0"
 }
 JSON
-git add package.json
+cat > csemver.toml <<'TOML'
+[scripts]
+prerelease = "yes x 2>/dev/null | head -c 262144 2>/dev/null; yes y 2>/dev/null | head -c 262144 >&2 2>/dev/null"
+TOML
+git add package.json csemver.toml
 git commit -qm 'chore: seed lifecycle stream descriptor fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'feat: inspect lifecycle output descriptors'
@@ -2139,13 +1907,14 @@ git config user.email 'test@example.invalid'
 cat > package.json <<'JSON'
 {
   "name": "lifecycle-max-buffer-fixture",
-  "version": "1.0.0",
-  "commit-and-tag-version": {
-    "scripts": {"prerelease": "yes x 2>/dev/null | head -c 1100000 2>/dev/null"}
-  }
+  "version": "1.0.0"
 }
 JSON
-git add package.json
+cat > csemver.toml <<'TOML'
+[scripts]
+prerelease = "yes x 2>/dev/null | head -c 1100000 2>/dev/null"
+TOML
+git add package.json csemver.toml
 git commit -qm 'chore: seed lifecycle max buffer fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'feat: exceed lifecycle output buffer'
@@ -2187,13 +1956,14 @@ git config user.email 'test@example.invalid'
 cat > package.json <<'JSON'
 {
   "name": "lifecycle-max-buffer-stderr-fixture",
-  "version": "1.0.0",
-  "commit-and-tag-version": {
-    "scripts": {"prerelease": "yes x 2>/dev/null | head -c 1100000 >&2 2>/dev/null"}
-  }
+  "version": "1.0.0"
 }
 JSON
-git add package.json
+cat > csemver.toml <<'TOML'
+[scripts]
+prerelease = "yes x 2>/dev/null | head -c 1100000 >&2 2>/dev/null"
+TOML
+git add package.json csemver.toml
 git commit -qm 'chore: seed lifecycle stderr max buffer fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'feat: exceed lifecycle stderr output buffer'
@@ -2220,12 +1990,13 @@ git config user.email 'test@example.invalid'
 cat > package.json <<'JSON'
 {
   "name": "gradle-updater-fixture",
-  "commit-and-tag-version": {
-    "packageFiles": [{"filename": "build.gradle.kts", "type": "gradle"}],
-    "bumpFiles": ["build.gradle.kts"]
-  }
+  "version": "1.0.0"
 }
 JSON
+cat > csemver.toml <<'TOML'
+packageFiles = [{filename = "build.gradle.kts", type = "gradle"}]
+bumpFiles = ["build.gradle.kts"]
+TOML
 cat > build.gradle.kts <<'GRADLE'
 plugins {
     id("org.springframework.boot") version "2.4.6"
@@ -2241,7 +2012,7 @@ repositories {
     mavenCentral()
 }
 GRADLE
-git add package.json build.gradle.kts
+git add package.json csemver.toml build.gradle.kts
 git commit -qm 'chore: seed Gradle updater fixture'
 git tag -a v6.3.1 -m 'release 6.3.1'
 git commit --allow-empty -qm 'feat: add Gradle feature'
@@ -2273,12 +2044,13 @@ git config user.email 'test@example.invalid'
 cat > package.json <<'JSON'
 {
   "name": "csproj-updater-fixture",
-  "commit-and-tag-version": {
-    "packageFiles": [{"filename": "Project.csproj", "type": "csproj"}],
-    "bumpFiles": ["Project.csproj"]
-  }
+  "version": "1.0.0"
 }
 JSON
+cat > csemver.toml <<'TOML'
+packageFiles = [{filename = "Project.csproj", type = "csproj"}]
+bumpFiles = ["Project.csproj"]
+TOML
 cat > Project.csproj <<'CSPROJ'
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
@@ -2287,7 +2059,7 @@ cat > Project.csproj <<'CSPROJ'
   </PropertyGroup>
 </Project>
 CSPROJ
-git add package.json Project.csproj
+git add package.json csemver.toml Project.csproj
 git commit -qm 'chore: seed C# project updater fixture'
 git tag -a v6.3.1 -m 'release 6.3.1'
 git commit --allow-empty -qm 'feat: add C# project feature'
@@ -2312,18 +2084,19 @@ git config user.email 'test@example.invalid'
 cat > package.json <<'JSON'
 {
   "name": "maven-updater-fixture",
-  "commit-and-tag-version": {
-    "packageFiles": [{"filename": "pom.xml", "type": "maven"}],
-    "bumpFiles": ["pom.xml"]
-  }
+  "version": "1.0.0"
 }
 JSON
+cat > csemver.toml <<'TOML'
+packageFiles = [{filename = "pom.xml", type = "maven"}]
+bumpFiles = ["pom.xml"]
+TOML
 cat > pom.xml <<'POM'
 <project>
   <version>6.3.1</version>
 </project>
 POM
-git add package.json pom.xml
+git add package.json csemver.toml pom.xml
 git commit -qm 'chore: seed Maven updater fixture'
 git tag -a v6.3.1 -m 'release 6.3.1'
 git commit --allow-empty -qm 'feat: add Maven feature'
@@ -2346,18 +2119,19 @@ git config user.email 'test@example.invalid'
 cat > package.json <<'JSON'
 {
   "name": "python-updater-fixture",
-  "commit-and-tag-version": {
-    "packageFiles": [{"filename": "pyproject.toml", "type": "python"}],
-    "bumpFiles": [{"filename": "pyproject.toml", "type": "python"}]
-  }
+  "version": "1.0.0"
 }
 JSON
+cat > csemver.toml <<'TOML'
+packageFiles = [{filename = "pyproject.toml", type = "python"}]
+bumpFiles = [{filename = "pyproject.toml", type = "python"}]
+TOML
 cat > pyproject.toml <<'PY'
 # version = '6.3.1'
 [tool.poetry]
 version = "6.3.1"
 PY
-git add package.json pyproject.toml
+git add package.json csemver.toml pyproject.toml
 git commit -qm 'chore: seed Python updater fixture'
 git tag -a v6.3.1 -m 'release 6.3.1'
 git commit --allow-empty -qm 'feat: add Python feature'
@@ -2379,14 +2153,15 @@ git config user.email 'test@example.invalid'
 cat > package.json <<'JSON'
 {
   "name": "csproj-invalid-version-fixture",
-  "commit-and-tag-version": {
-    "packageFiles": [{"filename": "Project.csproj", "type": "csproj"}],
-    "bumpFiles": [{"filename": "Project.csproj", "type": "csproj"}]
-  }
+  "version": "1.0.0"
 }
 JSON
+cat > csemver.toml <<'TOML'
+packageFiles = [{filename = "Project.csproj", type = "csproj"}]
+bumpFiles = [{filename = "Project.csproj", type = "csproj"}]
+TOML
 printf '%s\n' '<Project><Version>not a version</Version></Project>' > Project.csproj
-git add package.json Project.csproj
+git add package.json csemver.toml Project.csproj
 git commit -qm 'chore: seed invalid C# project version'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'feat: test invalid C# project version'
@@ -2617,9 +2392,12 @@ git config user.name 'C Semver Test'
 git config user.email test@example.invalid
 git config commit.gpgSign false
 printf 'package{1..5..2}.json\n' > .gitignore
-printf '%s\n' '{"name":"brace-ignore-numeric-range","version":"1.0.0","commit-and-tag-version":{"bumpFiles":[{"filename":"package3.json","type":"json"}]}}' > package.json
+printf '%s\n' '{"name":"brace-ignore-numeric-range","version":"1.0.0"}' > package.json
+cat > csemver.toml <<'TOML'
+bumpFiles = [{filename = "package3.json", type = "json"}]
+TOML
 printf '{"version":"1.0.0"}\n' > package3.json
-git add -f .gitignore package.json package3.json
+git add -f .gitignore package.json csemver.toml package3.json
 git commit -qm 'chore: initialize numeric brace range fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'fix: exercise numeric brace range matching'
@@ -3065,27 +2843,6 @@ fi
 
 test -z "$(git status --porcelain)"
 
-mkdir "$tmp/large-typed-packagefile-diagnostic"
-cd "$tmp/large-typed-packagefile-diagnostic"
-git init -q -b master
-git config user.name 'C Semver Test'
-git config user.email 'test@example.invalid'
-long_label=$(printf '%*s' 3000 '' | tr ' ' x)
-printf '{\n  "name": "large-typed-packagefile-diagnostic-fixture",\n  "version": "1.0.0",\n  "repository": {"type": "git", "url": "https://github.com/example/large-typed-packagefile-diagnostic.git"},\n  "commit-and-tag-version": {"packageFiles": [{"type": "custom", "filename": "metadata.dat", "label": "%s"}, "package.json"], "bumpFiles": ["package.json"]}\n}\n' \
-  "$long_label" > package.json
-printf 'version=3.0.0\n' > metadata.dat
-git add package.json metadata.dat
-git commit -qm 'chore: seed large updater diagnostic fixture'
-git tag -a v1.0.0 -m 'release 1.0.0'
-git commit --allow-empty -qm 'fix: trigger large updater diagnostic fixture'
-"$bin" --skip.changelog --skip.commit --skip.tag \
-  > "$tmp/large-updater-diagnostic.stdout" \
-  2> "$tmp/large-updater-diagnostic.stderr"
-test ! -s "$tmp/large-updater-diagnostic.stdout"
-printf 'Unable to obtain updater for: {"type":"custom","filename":"metadata.dat","label":"%s"}\n - Error: Unable to locate updater for provided type (custom).\n - Skipping...\n' \
-  "$long_label" > "$tmp/large-updater-diagnostic.expected.stderr"
-cmp "$tmp/large-updater-diagnostic.expected.stderr" \
-  "$tmp/large-updater-diagnostic.stderr"
 test -z "$(git status --porcelain)"
 
 for custom_updater_location in packageFiles bumpFiles; do
@@ -3095,16 +2852,18 @@ for custom_updater_location in packageFiles bumpFiles; do
   git config user.name 'C Semver Test'
   git config user.email 'test@example.invalid'
   if [ "$custom_updater_location" = packageFiles ]; then
-    package_files='[{"filename":"metadata.dat","updater":"./custom-updater.js"},"package.json"]'
+    package_files='[{filename = "metadata.dat", updater = "./custom-updater.js"}, "package.json"]'
     bump_files='["package.json"]'
   else
     package_files='["package.json"]'
-    bump_files='[{"filename":"metadata.dat","updater":"./custom-updater.js"},"package.json"]'
+    bump_files='[{filename = "metadata.dat", updater = "./custom-updater.js"}, "package.json"]'
   fi
-  printf '{"name":"custom-updater-%s-fixture","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/custom-updater-fixture.git"},"commit-and-tag-version":{"packageFiles":%s,"bumpFiles":%s}}\n' \
-    "$custom_updater_location" "$package_files" "$bump_files" > package.json
+  printf '{"name":"custom-updater-%s-fixture","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/custom-updater-fixture.git"}}\n' \
+    "$custom_updater_location" > package.json
+  printf 'packageFiles = %s\nbumpFiles = %s\n' \
+    "$package_files" "$bump_files" > csemver.toml
   printf 'version=3.0.0\n' > metadata.dat
-  git add package.json metadata.dat
+  git add package.json csemver.toml metadata.dat
   git commit -qm 'chore: seed custom updater fixture'
   git tag -a v1.0.0 -m 'release 1.0.0'
   git commit --allow-empty -qm 'fix: trigger custom updater fixture'
@@ -3128,9 +2887,10 @@ cd "$tmp/plain-text-trailing-whitespace"
 git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
-printf '{"name":"plain-text-trailing-whitespace","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/plain-text-trailing-whitespace.git"},"commit-and-tag-version":{"packageFiles":["VERSION.txt"],"bumpFiles":["VERSION.txt"]}}\n' > package.json
+printf '%s\n' '{"name":"plain-text-trailing-whitespace","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/plain-text-trailing-whitespace.git"}}' > package.json
+printf 'packageFiles = ["VERSION.txt"]\nbumpFiles = ["VERSION.txt"]\n' > csemver.toml
 printf '1.0.0 \n' > VERSION.txt
-git add package.json VERSION.txt
+git add package.json csemver.toml VERSION.txt
 git commit -qm 'chore: seed plain-text whitespace fixture'
 git tag -a v1.0.0 -m 'release 1.0.0'
 git commit --allow-empty -qm 'fix: exercise plain-text whitespace'
@@ -3142,7 +2902,7 @@ else
   plain_text_whitespace_status=$?
 fi
 test "$plain_text_whitespace_status" -eq 0
-printf '✔ bumping version in VERSION.txt from 1.0.0 \n to 1.0.1\n' \
+printf '%s\n' '✔ bumping version in VERSION.txt from 1.0.0 ' ' to 1.0.1' \
   > "$tmp/plain-text-whitespace.expected.stdout"
 cmp "$tmp/plain-text-whitespace.expected.stdout" \
   "$tmp/plain-text-whitespace.stdout"
@@ -3156,8 +2916,9 @@ cd "$tmp/tag-fallback-prerelease-filter"
 git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
-printf '{"name":"tag-fallback-prerelease-filter","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/tag-fallback-prerelease-filter.git"},"commit-and-tag-version":{"packageFiles":[]}}\n' > package.json
-git add package.json
+printf '%s\n' '{"name":"tag-fallback-prerelease-filter","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/tag-fallback-prerelease-filter.git"}}' > package.json
+printf 'packageFiles = []\n' > csemver.toml
+git add package.json csemver.toml
 git commit -qm 'chore: seed prerelease fallback fixture'
 git tag -a v1.2.3-beta.0 -m 'release 1.2.3-beta.0'
 git commit --allow-empty -qm 'fix: exercise prerelease fallback filtering'
@@ -3181,8 +2942,9 @@ cd "$tmp/tag-prefix-regex"
 git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
-printf '{"name":"tag-prefix-regex","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/tag-prefix-regex.git"},"commit-and-tag-version":{"packageFiles":[],"tagPrefix":"v+"}}\n' > package.json
-git add package.json
+printf '%s\n' '{"name":"tag-prefix-regex","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/tag-prefix-regex.git"}}' > package.json
+printf 'packageFiles = []\ntagPrefix = "v+"\n' > csemver.toml
+git add package.json csemver.toml
 git commit -qm 'chore: seed tag prefix fixture'
 git tag -a 'v+1.0.0' -m 'release 1.0.0'
 git commit --allow-empty -qm 'fix: exercise tag prefix regex'
@@ -3217,8 +2979,9 @@ cd "$tmp/tag-decoration-parenthesis"
 git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
-printf '{"name":"tag-decoration-parenthesis","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/tag-decoration-parenthesis.git"},"commit-and-tag-version":{"packageFiles":[],"tagPrefix":"v(foo)"}}\n' > package.json
-git add package.json
+printf '%s\n' '{"name":"tag-decoration-parenthesis","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/tag-decoration-parenthesis.git"}}' > package.json
+printf 'packageFiles = []\ntagPrefix = "v(foo)"\n' > csemver.toml
+git add package.json csemver.toml
 git commit -qm 'chore: seed decorated tag fixture'
 git tag -a 'v(foo)1.0.0' -m 'release 1.0.0'
 git commit --allow-empty -qm 'fix: exercise decorated tag parsing'
@@ -3242,8 +3005,9 @@ cd "$tmp/tag-fallback-unreachable-tag"
 git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'
-printf '{"name":"tag-fallback-unreachable-tag","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/tag-fallback-unreachable-tag.git"},"commit-and-tag-version":{"packageFiles":[]}}\n' > package.json
-git add package.json
+printf '%s\n' '{"name":"tag-fallback-unreachable-tag","version":"1.0.0","repository":{"type":"git","url":"https://github.com/example/tag-fallback-unreachable-tag.git"}}' > package.json
+printf 'packageFiles = []\n' > csemver.toml
+git add package.json csemver.toml
 git commit -qm 'chore: seed unreachable tag fixture'
 git checkout -qb side
 git commit --allow-empty -qm 'feat: add unreachable tagged release'
@@ -3630,10 +3394,13 @@ cat > package.json <<'JSON'
 {
   "name": "pretag-script-failure",
   "version": "1.2.3",
-  "repository": {"type": "git", "url": "https://github.com/example/pretag-script-failure.git"},
-  "commit-and-tag-version": {"scripts": {"pretag": "./fail-pretag.sh"}}
+  "repository": {"type": "git", "url": "https://github.com/example/pretag-script-failure.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+[scripts]
+pretag = "./fail-pretag.sh"
+TOML
 cat > fail-pretag.sh <<'SH'
 #!/bin/sh
 printf 'stdout-marker\n'
@@ -3641,7 +3408,7 @@ printf 'stderr-marker\n' >&2
 exit 7
 SH
 chmod +x fail-pretag.sh
-git add package.json fail-pretag.sh
+git add package.json csemver.toml fail-pretag.sh
 git commit -qm 'chore: initialize pretag script fixture'
 git tag -a v1.2.3 -m 'release 1.2.3'
 printf 'fix\n' > fix.txt
@@ -3678,10 +3445,13 @@ cat > package.json <<'JSON'
 {
   "name": "postcommit-script-failure",
   "version": "1.2.3",
-  "repository": {"type": "git", "url": "https://github.com/example/postcommit-script-failure.git"},
-  "commit-and-tag-version": {"scripts": {"postcommit": "./fail-postcommit.sh"}}
+  "repository": {"type": "git", "url": "https://github.com/example/postcommit-script-failure.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+[scripts]
+postcommit = "./fail-postcommit.sh"
+TOML
 cat > fail-postcommit.sh <<'SH'
 #!/bin/sh
 printf 'stdout-marker\n'
@@ -3689,7 +3459,7 @@ printf 'stderr-marker\n' >&2
 exit 7
 SH
 chmod +x fail-postcommit.sh
-git add package.json fail-postcommit.sh
+git add package.json csemver.toml fail-postcommit.sh
 git commit -qm 'chore: initialize postcommit script fixture'
 git tag -a v1.2.3 -m 'release 1.2.3'
 printf 'fix\n' > fix.txt
@@ -3726,10 +3496,13 @@ cat > package.json <<'JSON'
 {
   "name": "posttag-script-failure",
   "version": "1.2.3",
-  "repository": {"type": "git", "url": "https://github.com/example/posttag-script-failure.git"},
-  "commit-and-tag-version": {"scripts": {"posttag": "./fail-posttag.sh"}}
+  "repository": {"type": "git", "url": "https://github.com/example/posttag-script-failure.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+[scripts]
+posttag = "./fail-posttag.sh"
+TOML
 cat > fail-posttag.sh <<'SH'
 #!/bin/sh
 printf 'stdout-marker\n'
@@ -3737,7 +3510,7 @@ printf 'stderr-marker\n' >&2
 exit 7
 SH
 chmod +x fail-posttag.sh
-git add package.json fail-posttag.sh
+git add package.json csemver.toml fail-posttag.sh
 git commit -qm 'chore: initialize posttag script fixture'
 git tag -a v1.2.3 -m 'release 1.2.3'
 printf 'fix\n' > fix.txt
@@ -3774,10 +3547,13 @@ cat > package.json <<'JSON'
 {
   "name": "postbump-script-failure",
   "version": "1.2.3",
-  "repository": {"type": "git", "url": "https://github.com/example/postbump-script-failure.git"},
-  "commit-and-tag-version": {"scripts": {"postbump": "./fail-postbump.sh"}}
+  "repository": {"type": "git", "url": "https://github.com/example/postbump-script-failure.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+[scripts]
+postbump = "./fail-postbump.sh"
+TOML
 cat > fail-postbump.sh <<'SH'
 #!/bin/sh
 printf 'stdout-marker\n'
@@ -3785,7 +3561,7 @@ printf 'stderr-marker\n' >&2
 exit 7
 SH
 chmod +x fail-postbump.sh
-git add package.json fail-postbump.sh
+git add package.json csemver.toml fail-postbump.sh
 git commit -qm 'chore: initialize postbump script fixture'
 git tag -a v1.2.3 -m 'release 1.2.3'
 printf 'fix\n' > fix.txt
@@ -3823,10 +3599,13 @@ cat > package.json <<'JSON'
 {
   "name": "postchangelog-script-failure",
   "version": "1.2.3",
-  "repository": {"type": "git", "url": "https://github.com/example/postchangelog-script-failure.git"},
-  "commit-and-tag-version": {"scripts": {"postchangelog": "./fail-postchangelog.sh"}}
+  "repository": {"type": "git", "url": "https://github.com/example/postchangelog-script-failure.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+[scripts]
+postchangelog = "./fail-postchangelog.sh"
+TOML
 cat > fail-postchangelog.sh <<'SH'
 #!/bin/sh
 printf 'stdout-marker\n'
@@ -3834,7 +3613,7 @@ printf 'stderr-marker\n' >&2
 exit 7
 SH
 chmod +x fail-postchangelog.sh
-git add package.json fail-postchangelog.sh
+git add package.json csemver.toml fail-postchangelog.sh
 git commit -qm 'chore: initialize postchangelog script fixture'
 git tag -a v1.2.3 -m 'release 1.2.3'
 printf 'fix\n' > fix.txt
@@ -3873,10 +3652,13 @@ cat > package.json <<'JSON'
 {
   "name": "prechangelog-script-failure",
   "version": "1.2.3",
-  "repository": {"type": "git", "url": "https://github.com/example/prechangelog-script-failure.git"},
-  "commit-and-tag-version": {"scripts": {"prechangelog": "./fail-prechangelog.sh"}}
+  "repository": {"type": "git", "url": "https://github.com/example/prechangelog-script-failure.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+[scripts]
+prechangelog = "./fail-prechangelog.sh"
+TOML
 cat > fail-prechangelog.sh <<'SH'
 #!/bin/sh
 printf 'stdout-marker\n'
@@ -3884,7 +3666,7 @@ printf 'stderr-marker\n' >&2
 exit 7
 SH
 chmod +x fail-prechangelog.sh
-git add package.json fail-prechangelog.sh
+git add package.json csemver.toml fail-prechangelog.sh
 git commit -qm 'chore: initialize prechangelog script fixture'
 git tag -a v1.2.3 -m 'release 1.2.3'
 printf 'fix\n' > fix.txt
@@ -3922,8 +3704,9 @@ run_pre_bump_lifecycle_failure() (
   git config user.name 'C Semver Test'
   git config user.email 'test@example.invalid'
   git config commit.gpgSign false
-  printf '{\n  "name": "%s-script-failure",\n  "version": "1.2.3",\n  "repository": {"type": "git", "url": "https://github.com/example/%s-script-failure.git"},\n  "commit-and-tag-version": {"scripts": {"%s": "./%s"}}\n}\n' \
-    "$hook" "$hook" "$hook" "$script" > package.json
+  printf '{\n  "name": "%s-script-failure",\n  "version": "1.2.3",\n  "repository": {"type": "git", "url": "https://github.com/example/%s-script-failure.git"}\n}\n' \
+    "$hook" "$hook" > package.json
+  printf '[scripts]\n%s = "./%s"\n' "$hook" "$script" > csemver.toml
   cp package.json "$tmp/$hook-package.expected.json"
   cat > "$script" <<'SH'
 #!/bin/sh
@@ -3932,7 +3715,7 @@ printf 'stderr-marker\n' >&2
 exit 7
 SH
   chmod +x "$script"
-  git add package.json "$script"
+  git add package.json csemver.toml "$script"
   git commit -qm "chore: initialize $hook failure fixture"
   git tag -a v1.2.3 -m 'release 1.2.3'
   printf 'fix\n' > fix.txt
@@ -3970,16 +3753,19 @@ cat > package.json <<'JSON'
 {
   "name": "precommit-message-override",
   "version": "1.2.3",
-  "repository": {"type": "git", "url": "https://github.com/example/precommit-message-override.git"},
-  "commit-and-tag-version": {"scripts": {"precommit": "./commit-message.sh"}}
+  "repository": {"type": "git", "url": "https://github.com/example/precommit-message-override.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+[scripts]
+precommit = "./commit-message.sh"
+TOML
 cat > commit-message.sh <<'SH'
 #!/bin/sh
 printf 'chore(release): selected by precommit hook\n'
 SH
 chmod +x commit-message.sh
-git add package.json commit-message.sh
+git add package.json csemver.toml commit-message.sh
 git commit -qm 'chore: initialize precommit fixture'
 git tag -a v1.2.3 -m 'release 1.2.3'
 printf 'fix\n' > fix.txt
@@ -4008,16 +3794,19 @@ cat > package.json <<'JSON'
 {
   "name": "precommit-blank-message",
   "version": "1.2.3",
-  "repository": {"type": "git", "url": "https://github.com/example/precommit-blank-message.git"},
-  "commit-and-tag-version": {"scripts": {"precommit": "./blank-message.sh"}}
+  "repository": {"type": "git", "url": "https://github.com/example/precommit-blank-message.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+[scripts]
+precommit = "./blank-message.sh"
+TOML
 cat > blank-message.sh <<'SH'
 #!/bin/sh
 printf '\n'
 SH
 chmod +x blank-message.sh
-git add package.json blank-message.sh
+git add package.json csemver.toml blank-message.sh
 git commit -qm 'chore: initialize blank precommit fixture'
 git tag -a v1.2.3 -m 'release 1.2.3'
 printf 'fix\n' > fix.txt
@@ -4054,10 +3843,13 @@ cat > package.json <<'JSON'
 {
   "name": "precommit-script-failure",
   "version": "1.2.3",
-  "repository": {"type": "git", "url": "https://github.com/example/precommit-script-failure.git"},
-  "commit-and-tag-version": {"scripts": {"precommit": "./fail-precommit.sh"}}
+  "repository": {"type": "git", "url": "https://github.com/example/precommit-script-failure.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+[scripts]
+precommit = "./fail-precommit.sh"
+TOML
 cat > fail-precommit.sh <<'SH'
 #!/bin/sh
 printf 'stdout-marker\n'
@@ -4065,7 +3857,7 @@ printf 'stderr-marker\n' >&2
 exit 7
 SH
 chmod +x fail-precommit.sh
-git add package.json fail-precommit.sh
+git add package.json csemver.toml fail-precommit.sh
 git commit -qm 'chore: initialize precommit script fixture'
 git tag -a v1.2.3 -m 'release 1.2.3'
 printf 'fix\n' > fix.txt
@@ -4121,10 +3913,13 @@ cat > package.json <<'JSON'
 {
   "name": "forced-color-lifecycle-failure",
   "version": "1.2.3",
-  "repository": {"type": "git", "url": "https://github.com/example/forced-color-lifecycle-failure.git"},
-  "commit-and-tag-version": {"scripts": {"prerelease": "./fail.sh"}}
+  "repository": {"type": "git", "url": "https://github.com/example/forced-color-lifecycle-failure.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+[scripts]
+prerelease = "./fail.sh"
+TOML
 cat > fail.sh <<'SH'
 #!/bin/sh
 printf 'stdout-marker\n'
@@ -4132,7 +3927,7 @@ printf 'stderr-marker\n' >&2
 exit 7
 SH
 chmod +x fail.sh
-git add package.json fail.sh
+git add package.json csemver.toml fail.sh
 git commit -qm 'chore: initialize colored lifecycle failure fixture'
 git tag -a v1.2.3 -m 'release 1.2.3'
 git commit --allow-empty -qm 'fix: exercise colored lifecycle failure'
@@ -4166,16 +3961,19 @@ cat > package.json <<'JSON'
 {
   "name": "forced-color-lifecycle-warning",
   "version": "1.2.3",
-  "repository": {"type": "git", "url": "https://github.com/example/forced-color-lifecycle-warning.git"},
-  "commit-and-tag-version": {"scripts": {"prerelease": "./warn.sh"}}
+  "repository": {"type": "git", "url": "https://github.com/example/forced-color-lifecycle-warning.git"}
 }
 JSON
+cat > csemver.toml <<'TOML'
+[scripts]
+prerelease = "./warn.sh"
+TOML
 cat > warn.sh <<'SH'
 #!/bin/sh
 printf 'warning-marker\n' >&2
 SH
 chmod +x warn.sh
-git add package.json warn.sh
+git add package.json csemver.toml warn.sh
 git commit -qm 'chore: initialize colored lifecycle warning fixture'
 git tag -a v1.2.3 -m 'release 1.2.3'
 git commit --allow-empty -qm 'fix: exercise colored lifecycle warning'
@@ -4193,31 +3991,6 @@ grep -q '"version": "1.2.4"' package.json
 test "$(git tag --list)" = "$(printf 'v1.2.3\nv1.2.4')"
 test "$(git log -1 --format=%s)" = 'chore(release): 1.2.4'
 test -z "$(git status --porcelain)"
-
-mkdir "$tmp/versionrc-json-config"
-cd "$tmp/versionrc-json-config"
-git init -q -b master
-git config user.name 'C Semver Test'
-git config user.email 'test@example.invalid'
-git config commit.gpgSign false
-printf '{"name":"versionrc-json-config","version":"1.2.3","repository":{"type":"git","url":"https://github.com/example/versionrc-json-config.git"}}\n' > package.json
-printf '{"tagPrefix":"release-"}\n' > .versionrc.json
-git add package.json .versionrc.json
-git commit -qm 'chore: initialize versionrc JSON config fixture'
-git tag -a v1.2.3 -m 'release 1.2.3'
-git tag -a release-1.2.3 -m 'release 1.2.3'
-git commit --allow-empty -qm 'fix: exercise versionrc JSON config'
-"$bin" --dry-run > "$tmp/versionrc-json-config.stdout"
-grep -F -x -q '✔ tagging release release-1.2.4' \
-  "$tmp/versionrc-json-config.stdout"
-mv .versionrc.json .versionrc
-"$bin" --dry-run > "$tmp/versionrc-json-config-extensionless.stdout"
-grep -F -x -q '✔ tagging release release-1.2.4' \
-  "$tmp/versionrc-json-config-extensionless.stdout"
-"$bin" --config=.versionrc --dry-run \
-  > "$tmp/versionrc-json-config-explicit.stdout"
-grep -F -x -q '✔ tagging release release-1.2.4' \
-  "$tmp/versionrc-json-config-explicit.stdout"
 
 mkdir "$tmp/generic-pattern-updater"
 cd "$tmp/generic-pattern-updater"

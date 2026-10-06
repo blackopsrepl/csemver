@@ -66,8 +66,6 @@ typedef struct {
 
 static char *trim(char *text);
 static int uses_plain_text_updater(const CsemverFile *file);
-static int load_package_config_contents(CsemverConfig *config, char *contents);
-static int load_json_config_contents(CsemverConfig *config, char *contents);
 static int render_changelog(const CsemverConfig *config, const char *version,
                             const char *previous_tag, const char *new_tag,
                             const Commit *commits, size_t commit_count,
@@ -479,67 +477,24 @@ static int run_git_execfile(const CsemverConfig *config,
   return 1;
 }
 
-/* Conventional config filenames, in discovery priority order. Only the JSON
- * form is read as data; the executable forms are rejected when loaded. */
+/* The configuration contract is csemver.toml, read from the current working
+ * directory or selected with -c. */
 static const char *find_default_config_path(char *storage,
                                             size_t storage_size) {
-  static const char *const filenames[] = {".versionrc", ".versionrc.cjs",
-                                          ".versionrc.mjs", ".versionrc.json",
-                                          ".versionrc.js"};
   char directory[CSEMVER_PATH_MAX];
-  int current_directory = 1;
+  char candidate[CSEMVER_PATH_MAX];
+  int length;
+
   if (getcwd(directory, sizeof directory) == NULL)
     return NULL;
-  for (;;) {
-    size_t index;
-    for (index = 0; index < sizeof filenames / sizeof filenames[0]; ++index) {
-      char candidate[CSEMVER_PATH_MAX];
-      int length =
-          snprintf(candidate, sizeof candidate, "%s%s%s", directory,
-                   strcmp(directory, "/") == 0 ? "" : "/", filenames[index]);
-      if (length < 0 || (size_t)length >= sizeof candidate)
-        continue;
-      if (access(candidate, F_OK) == 0) {
-        if (snprintf(storage, storage_size, "%s", candidate) >=
-            (int)storage_size)
-          return NULL;
-        return storage;
-      }
-    }
-    if (current_directory) {
-      char candidate[CSEMVER_PATH_MAX];
-      int length =
-          snprintf(candidate, sizeof candidate, "%s%s%s", directory,
-                   strcmp(directory, "/") == 0 ? "" : "/", "csemver.toml");
-      if (length >= 0 && (size_t)length < sizeof candidate &&
-          access(candidate, F_OK) == 0) {
-        if (snprintf(storage, storage_size, "%s", candidate) >=
-            (int)storage_size)
-          return NULL;
-        return storage;
-      }
-      current_directory = 0;
-    }
-    if (strcmp(directory, "/") == 0)
-      break;
-    {
-      char *slash = strrchr(directory, '/');
-      if (slash == NULL)
-        break;
-      if (slash == directory)
-        directory[1] = '\0';
-      else
-        *slash = '\0';
-    }
-  }
-  return NULL;
-}
-
-static int path_has_suffix(const char *path, const char *suffix) {
-  size_t path_length = strlen(path);
-  size_t suffix_length = strlen(suffix);
-  return path_length >= suffix_length &&
-         strcmp(path + path_length - suffix_length, suffix) == 0;
+  length = snprintf(candidate, sizeof candidate, "%s%s%s", directory,
+                    strcmp(directory, "/") == 0 ? "" : "/", "csemver.toml");
+  if (length < 0 || (size_t)length >= sizeof candidate ||
+      access(candidate, F_OK) != 0)
+    return NULL;
+  if (snprintf(storage, storage_size, "%s", candidate) >= (int)storage_size)
+    return NULL;
+  return storage;
 }
 
 static int load_config(CsemverConfig *config, const char *path) {
@@ -547,7 +502,6 @@ static int load_config(CsemverConfig *config, const char *path) {
   char error[256] = {0};
   char discovered_path[CSEMVER_PATH_MAX];
   const char *selected_path = path;
-  const char *first;
   if (selected_path == NULL) {
     selected_path =
         find_default_config_path(discovered_path, sizeof discovered_path);
@@ -555,29 +509,8 @@ static int load_config(CsemverConfig *config, const char *path) {
       return 1;
   }
   if (!csemver_read_file(selected_path, &contents, NULL)) {
-    if (path_has_suffix(selected_path, ".toml"))
-      errorf("cannot read TOML config '%s'", selected_path);
-    else
-      errorf("cannot read config '%s'", selected_path);
+    errorf("cannot read config '%s'", selected_path);
     return 0;
-  }
-  if (path_has_suffix(selected_path, ".js") ||
-      path_has_suffix(selected_path, ".cjs") ||
-      path_has_suffix(selected_path, ".mjs")) {
-    errorf("executable configuration files are not supported; use TOML");
-    free(contents);
-    return 0;
-  }
-  first = contents;
-  while (isspace((unsigned char)*first))
-    ++first;
-  if (*first == '{') {
-    if (!csemver_json_validate(contents)) {
-      errorf("invalid JSON config '%s'", selected_path);
-      free(contents);
-      return 0;
-    }
-    return load_json_config_contents(config, contents);
   }
   if (!csemver_config_parse(config, contents, error, sizeof error)) {
     errorf("%s", error);
@@ -588,75 +521,11 @@ static int load_config(CsemverConfig *config, const char *path) {
   return 1;
 }
 
-static int package_upstream_updater_type_supported(const char *type) {
-  static const char *const supported_types[] = {
-      "csproj",  "gradle",     "json",   "maven",
-      "openapi", "plain-text", "python", "yaml"};
-  size_t index;
-  for (index = 0; index < sizeof supported_types / sizeof supported_types[0];
-       ++index) {
-    if (strcmp(type, supported_types[index]) == 0)
-      return 1;
-  }
-  return 0;
-}
-
 static int package_path_ends_with(const char *path, const char *suffix) {
   size_t path_length = strlen(path);
   size_t suffix_length = strlen(suffix);
   return path_length >= suffix_length &&
          strcmp(path + path_length - suffix_length, suffix) == 0;
-}
-
-static int package_path_matches_upstream_pattern(const char *path,
-                                                 const char *pattern) {
-  size_t path_length = strlen(path);
-  size_t pattern_length = strlen(pattern);
-  size_t offset;
-  for (offset = 0; offset + pattern_length <= path_length; ++offset) {
-    size_t index;
-    for (index = 0; index < pattern_length; ++index) {
-      unsigned char actual = (unsigned char)path[offset + index];
-      unsigned char expected = (unsigned char)pattern[index];
-      if ((expected != '.' && actual != expected) ||
-          (expected == '.' && (actual == '\r' || actual == '\n')))
-        break;
-    }
-    if (index == pattern_length)
-      return 1;
-  }
-  return 0;
-}
-
-static const char *package_bump_file_type_from_filename(const char *filename) {
-  static const char *const json_filenames[] = {
-      "package.json", "bower.json", "manifest.json", "package-lock.json",
-      "npm-shrinkwrap.json"};
-  const char *base = strrchr(filename, '/');
-  size_t index;
-  base = base == NULL ? filename : base + 1;
-  for (index = 0; index < sizeof json_filenames / sizeof json_filenames[0];
-       ++index) {
-    if (strcmp(base, json_filenames[index]) == 0)
-      return "json";
-  }
-  if (strcmp(filename, "VERSION.txt") == 0 ||
-      strcmp(filename, "version.txt") == 0)
-    return "plain-text";
-  if (package_path_matches_upstream_pattern(filename, "pom.xml"))
-    return "maven";
-  if (package_path_matches_upstream_pattern(filename, "build.gradle"))
-    return "gradle";
-  if (package_path_ends_with(filename, ".csproj"))
-    return "csproj";
-  if (package_path_matches_upstream_pattern(filename, "openapi.yaml"))
-    return "openapi";
-  if (package_path_ends_with(filename, ".yaml") ||
-      package_path_ends_with(filename, ".yml"))
-    return "yaml";
-  if (package_path_matches_upstream_pattern(filename, "pyproject.toml"))
-    return "python";
-  return NULL;
 }
 
 static void print_json_quoted(FILE *stream, const char *value) {
@@ -751,388 +620,6 @@ static void warn_unsupported_package_updater_type(const char *filename,
           "\n - Error: Unable to locate updater for provided type (%s).\n"
           " - Skipping...\n",
           type);
-}
-
-static int load_package_config_contents(CsemverConfig *config, char *contents) {
-  typedef struct {
-    const char *json_key;
-    const char *config_key;
-  } PackageStringOption;
-  typedef struct {
-    const char *json_key;
-    const char *config_key;
-  } PackageBooleanOption;
-  typedef struct {
-    const char *json_key;
-    const char *config_key;
-    size_t max_values;
-  } PackageArrayOption;
-  static const char *const sections[] = {"commit-and-tag-version",
-                                         "standard-version"};
-  static const PackageStringOption options[] = {
-      {"release-as", "release-as"},
-      {"releaseAs", "releaseAs"},
-      {"prerelease", "prerelease"},
-      {"infile", "infile"},
-      {"message", "message"},
-      {"tag-prefix", "tag-prefix"},
-      {"tagPrefix", "tagPrefix"},
-      {"header", "header"},
-      {"changelogHeader", "changelogHeader"},
-      {"releaseCommitMessageFormat", "releaseCommitMessageFormat"},
-      {"release-commit-message-format", "release-commit-message-format"},
-      {"path", "path"},
-      {"preset", "preset"},
-      {"lerna-package", "lerna-package"},
-      {"lernaPackage", "lernaPackage"},
-      {"npmPublishHint", "npmPublishHint"},
-      {"npm-publish-hint", "npm-publish-hint"},
-      {"commitUrlFormat", "commitUrlFormat"},
-      {"commit-url-format", "commit-url-format"},
-      {"compareUrlFormat", "compareUrlFormat"},
-      {"compare-url-format", "compare-url-format"},
-      {"issueUrlFormat", "issueUrlFormat"},
-      {"issue-url-format", "issue-url-format"},
-      {"userUrlFormat", "userUrlFormat"},
-      {"user-url-format", "user-url-format"}};
-  static const PackageBooleanOption boolean_options[] = {
-      {"first-release", "first-release"},
-      {"firstRelease", "firstRelease"},
-      {"sign", "sign"},
-      {"signoff", "signoff"},
-      {"no-verify", "no-verify"},
-      {"noVerify", "noVerify"},
-      {"commit-all", "commit-all"},
-      {"commitAll", "commitAll"},
-      {"silent", "silent"},
-      {"tag-force", "tag-force"},
-      {"tagForce", "tagForce"},
-      {"dry-run", "dry-run"},
-      {"dryRun", "dryRun"},
-      {"git-tag-fallback", "git-tag-fallback"},
-      {"gitTagFallback", "gitTagFallback"},
-      {"noBumpWhenEmptyChanges", "noBumpWhenEmptyChanges"},
-      {"no-bump-when-empty-changes", "no-bump-when-empty-changes"},
-      {"preMajor", "preMajor"},
-      {"pre-major", "pre-major"}};
-  static const PackageArrayOption array_options[] = {
-      {"packageFiles", "packageFiles", CSEMVER_MAX_FILES},
-      {"package-files", "package-files", CSEMVER_MAX_FILES},
-      {"issuePrefixes", "issuePrefixes", CSEMVER_MAX_PREFIXES},
-      {"issue-prefixes", "issue-prefixes", CSEMVER_MAX_PREFIXES}};
-  static const char *const numeric_options[] = {"releaseCount",
-                                                "release-count"};
-  static const char *const skip_options[] = {"bump", "changelog", "commit",
-                                             "tag"};
-  static const char *const script_options[] = {
-      "prerelease", "prebump",    "postbump", "prechangelog", "postchangelog",
-      "precommit",  "postcommit", "pretag",   "posttag"};
-  static const char *const bump_file_options[] = {"bumpFiles", "bump-files"};
-  char error[256] = {0};
-  size_t section_index, option_index;
-  for (section_index = 0; section_index < sizeof sections / sizeof sections[0];
-       ++section_index) {
-    for (option_index = 0; option_index < sizeof options / sizeof options[0];
-         ++option_index) {
-      char value[CSEMVER_VALUE_MAX];
-      if (!csemver_json_object_string(contents, sections[section_index],
-                                      options[option_index].json_key, value,
-                                      sizeof value))
-        continue;
-      if (!csemver_config_set_string(config, options[option_index].config_key,
-                                     value, error, sizeof error)) {
-        errorf("%s", error);
-        free(contents);
-        return 0;
-      }
-    }
-    for (option_index = 0;
-         option_index < sizeof boolean_options / sizeof boolean_options[0];
-         ++option_index) {
-      bool value;
-      if (!csemver_json_object_boolean(contents, sections[section_index],
-                                       boolean_options[option_index].json_key,
-                                       &value))
-        continue;
-      if (!csemver_config_set_bool(config,
-                                   boolean_options[option_index].config_key,
-                                   value, error, sizeof error)) {
-        errorf("%s", error);
-        free(contents);
-        return 0;
-      }
-    }
-    for (option_index = 0;
-         option_index < sizeof skip_options / sizeof skip_options[0];
-         ++option_index) {
-      bool value;
-      char key[64];
-      if (!csemver_json_object_nested_boolean(
-              contents, sections[section_index], "skip",
-              skip_options[option_index], &value))
-        continue;
-      snprintf(key, sizeof key, "skip.%s", skip_options[option_index]);
-      if (!csemver_config_set_bool(config, key, value, error, sizeof error)) {
-        errorf("%s", error);
-        free(contents);
-        return 0;
-      }
-    }
-    for (option_index = 0;
-         option_index < sizeof script_options / sizeof script_options[0];
-         ++option_index) {
-      char command[CSEMVER_VALUE_MAX];
-      if (!csemver_json_object_nested_string(
-              contents, sections[section_index], "scripts",
-              script_options[option_index], command, sizeof command))
-        continue;
-      if (!csemver_config_set_script(config, script_options[option_index],
-                                     command, error, sizeof error)) {
-        errorf("%s", error);
-        free(contents);
-        return 0;
-      }
-    }
-    for (option_index = 0;
-         option_index < sizeof array_options / sizeof array_options[0];
-         ++option_index) {
-      char values[CSEMVER_MAX_FILES][CSEMVER_PATH_MAX];
-      char file_types[CSEMVER_MAX_FILES][32] = {{0}};
-      bool package_file_objects[CSEMVER_MAX_FILES] = {false};
-      bool package_file_type_precedes_filename[CSEMVER_MAX_FILES] = {false};
-      char *package_file_argument_json[CSEMVER_MAX_FILES] = {NULL};
-      bool package_file_argument_json_valid[CSEMVER_MAX_FILES] = {false};
-      bool package_files_have_custom_updater = false;
-      bool unsupported_types[CSEMVER_MAX_FILES] = {false};
-      bool unsupported_filenames[CSEMVER_MAX_FILES] = {false};
-      const char *value_pointers[CSEMVER_MAX_FILES];
-      size_t value_count, value_index;
-      int typed_package_files = 0;
-      int package_files_option =
-          strcmp(array_options[option_index].config_key, "packageFiles") == 0 ||
-          strcmp(array_options[option_index].config_key, "package-files") == 0;
-      if (!csemver_json_object_string_array(
-              contents, sections[section_index],
-              array_options[option_index].json_key, &values[0][0],
-              sizeof values[0], array_options[option_index].max_values,
-              &value_count)) {
-        if ((strcmp(array_options[option_index].config_key, "packageFiles") !=
-             0) &&
-            (strcmp(array_options[option_index].config_key, "package-files") !=
-             0))
-          continue;
-        if (!csemver_json_object_mixed_file_array(
-                contents, sections[section_index],
-                array_options[option_index].json_key, &values[0][0],
-                sizeof values[0], &file_types[0][0], sizeof file_types[0],
-                package_file_objects, package_file_type_precedes_filename,
-                package_file_argument_json, package_file_argument_json_valid,
-                &package_files_have_custom_updater,
-                array_options[option_index].max_values, &value_count))
-          continue;
-        if (package_files_have_custom_updater) {
-          errorf("executable updater programs are not supported; use the regex updater");
-          free(contents);
-          return 0;
-        }
-        typed_package_files = 1;
-      }
-      for (value_index = 0; value_index < value_count; ++value_index) {
-        if (typed_package_files && file_types[value_index][0] != '\0' &&
-            !package_upstream_updater_type_supported(file_types[value_index]))
-          unsupported_types[value_index] = true;
-        if (package_files_option && file_types[value_index][0] == '\0') {
-          const char *inferred_type =
-              package_bump_file_type_from_filename(values[value_index]);
-          if (inferred_type == NULL)
-            unsupported_filenames[value_index] = true;
-          else
-            snprintf(file_types[value_index], sizeof file_types[value_index],
-                     "%s", inferred_type);
-        }
-        value_pointers[value_index] = values[value_index];
-      }
-      if (!csemver_config_set_array(
-              config, array_options[option_index].config_key, value_pointers,
-              value_count, error, sizeof error)) {
-        errorf("%s", error);
-        free(contents);
-        return 0;
-      }
-      if (package_files_option) {
-        size_t file_index;
-        for (value_index = 0; value_index < value_count; ++value_index) {
-          for (file_index = 0; file_index < config->package_file_count;
-               ++file_index) {
-            if (strcmp(config->package_files[file_index].filename,
-                       values[value_index]) == 0) {
-              if (file_types[value_index][0] != '\0')
-                memcpy(config->package_files[file_index].type,
-                       file_types[value_index], sizeof file_types[value_index]);
-              config->package_files[file_index].compatibility_unsupported_type =
-                  unsupported_types[value_index];
-              config->package_files[file_index]
-                  .compatibility_unsupported_filename =
-                  unsupported_filenames[value_index];
-              config->package_files[file_index]
-                  .compatibility_updater_argument_object =
-                  package_file_objects[value_index];
-              config->package_files[file_index]
-                  .compatibility_updater_type_precedes_filename =
-                  package_file_type_precedes_filename[value_index];
-              config->package_files[file_index]
-                  .compatibility_updater_argument_json_valid =
-                  package_file_argument_json_valid[value_index];
-              if (package_file_argument_json_valid[value_index])
-                config->package_files[file_index]
-                    .compatibility_updater_argument_json =
-                    package_file_argument_json[value_index];
-            }
-          }
-        }
-      }
-    }
-    for (option_index = 0;
-         option_index < sizeof bump_file_options / sizeof bump_file_options[0];
-         ++option_index) {
-      char filenames[CSEMVER_MAX_FILES][CSEMVER_PATH_MAX];
-      char types[CSEMVER_MAX_FILES][32];
-      bool type_precedes_filename[CSEMVER_MAX_FILES] = {false};
-      char *argument_json[CSEMVER_MAX_FILES] = {NULL};
-      bool argument_json_valid[CSEMVER_MAX_FILES] = {false};
-      bool has_custom_updater = false;
-      bool unsupported_types[CSEMVER_MAX_FILES] = {false};
-      const char *value_pointers[CSEMVER_MAX_FILES];
-      size_t value_count, value_index;
-      int typed_files = csemver_json_object_mixed_file_array(
-          contents, sections[section_index], bump_file_options[option_index],
-          &filenames[0][0], sizeof filenames[0], &types[0][0], sizeof types[0],
-          NULL, type_precedes_filename, argument_json, argument_json_valid,
-          &has_custom_updater, CSEMVER_MAX_FILES, &value_count);
-      if (typed_files && has_custom_updater) {
-        errorf("executable updater programs are not supported; use the regex updater");
-        free(contents);
-        return 0;
-      }
-      if (!typed_files) {
-        if (!csemver_json_object_string_array(
-                contents, sections[section_index],
-                bump_file_options[option_index], &filenames[0][0],
-                sizeof filenames[0], CSEMVER_MAX_FILES, &value_count))
-          continue;
-        for (value_index = 0; value_index < value_count; ++value_index) {
-          const char *type =
-              package_bump_file_type_from_filename(filenames[value_index]);
-          if (type == NULL)
-            type = PACKAGE_UNSUPPORTED_FILENAME;
-          snprintf(types[value_index], sizeof types[value_index], "%s", type);
-        }
-      }
-      for (value_index = 0; value_index < value_count; ++value_index) {
-        if (types[value_index][0] == '\0') {
-          const char *type =
-              package_bump_file_type_from_filename(filenames[value_index]);
-          if (type == NULL)
-            type = PACKAGE_UNSUPPORTED_FILENAME;
-          snprintf(types[value_index], sizeof types[value_index], "%s", type);
-        }
-        unsupported_types[value_index] =
-            strcmp(types[value_index], PACKAGE_UNSUPPORTED_FILENAME) != 0 &&
-            !package_upstream_updater_type_supported(types[value_index]);
-        value_pointers[value_index] = filenames[value_index];
-      }
-      if (!csemver_config_set_array(config, "bumpFiles", value_pointers,
-                                    value_count, error, sizeof error)) {
-        errorf("%s", error);
-        free(contents);
-        return 0;
-      }
-      for (value_index = 0; value_index < value_count; ++value_index)
-        snprintf(config->bump_files[value_index].type,
-                 sizeof config->bump_files[value_index].type, "%s",
-                 types[value_index]);
-      for (value_index = 0; value_index < value_count; ++value_index)
-        config->bump_files[value_index].compatibility_unsupported_type =
-            unsupported_types[value_index];
-      for (value_index = 0; value_index < value_count; ++value_index)
-        config->bump_files[value_index]
-            .compatibility_updater_type_precedes_filename =
-            type_precedes_filename[value_index];
-      for (value_index = 0; value_index < value_count; ++value_index) {
-        config->bump_files[value_index]
-            .compatibility_updater_argument_json_valid =
-            argument_json_valid[value_index];
-        if (argument_json_valid[value_index])
-          config->bump_files[value_index].compatibility_updater_argument_json =
-              argument_json[value_index];
-      }
-    }
-    for (option_index = 0;
-         option_index < sizeof numeric_options / sizeof numeric_options[0];
-         ++option_index) {
-      unsigned value;
-      if (csemver_json_object_unsigned(contents, sections[section_index],
-                                       numeric_options[option_index], &value))
-        config->release_count = value;
-    }
-    {
-      char types[CSEMVER_MAX_TYPES][64];
-      char type_sections[CSEMVER_MAX_TYPES][128];
-      bool hidden[CSEMVER_MAX_TYPES];
-      bool bump[CSEMVER_MAX_TYPES];
-      size_t type_count, type_index;
-      if (csemver_json_object_commit_type_array(
-              contents, sections[section_index], "types", &types[0][0],
-              sizeof types[0], &type_sections[0][0], sizeof type_sections[0],
-              hidden, bump, CSEMVER_MAX_TYPES, &type_count)) {
-        memset(config->commit_types, 0, sizeof config->commit_types);
-        config->commit_type_count = type_count;
-        for (type_index = 0; type_index < type_count; ++type_index) {
-          snprintf(config->commit_types[type_index].type,
-                   sizeof config->commit_types[type_index].type, "%s",
-                   types[type_index]);
-          snprintf(config->commit_types[type_index].section,
-                   sizeof config->commit_types[type_index].section, "%s",
-                   type_sections[type_index]);
-          config->commit_types[type_index].hidden = hidden[type_index];
-          config->commit_types[type_index].bump = bump[type_index];
-        }
-      }
-    }
-  }
-  free(contents);
-  return 1;
-}
-
-static int load_package_config(CsemverConfig *config) {
-  char *contents = NULL;
-  if (!csemver_read_file("package.json", &contents, NULL))
-    return 1;
-  return load_package_config_contents(config, contents);
-}
-
-static int load_json_config_contents(CsemverConfig *config, char *contents) {
-  static const char prefix[] = "{\"commit-and-tag-version\":";
-  size_t prefix_length = sizeof prefix - 1;
-  size_t content_length = strlen(contents);
-  char *wrapped;
-  if (content_length > SIZE_MAX - prefix_length - 2) {
-    errorf("configuration file is too large");
-    free(contents);
-    return 0;
-  }
-  wrapped = malloc(prefix_length + content_length + 2);
-  if (wrapped == NULL) {
-    errorf("out of memory");
-    free(contents);
-    return 0;
-  }
-  memcpy(wrapped, prefix, prefix_length);
-  memcpy(wrapped + prefix_length, contents, content_length);
-  wrapped[prefix_length + content_length] = '}';
-  wrapped[prefix_length + content_length + 1] = '\0';
-  free(contents);
-  return load_package_config_contents(config, wrapped);
 }
 
 static int set_negated_boolean_option(CsemverConfig *config, const char *key) {
@@ -1405,7 +892,7 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
         strcmp(key, "--no-bump-when-empty-changes") == 0 ||
         strcmp(key, "--preMajor") == 0 || strcmp(key, "--pre-major") == 0 ||
         strncmp(key, "--skip.", 7) == 0) {
-      const char *name = key;
+      const char *name;
       bool flag = true;
       char error[256] = {0};
       if (value == NULL && i + 1 < argc &&
@@ -4511,6 +3998,7 @@ static int uses_plain_text_updater(const CsemverFile *file) {
          strstr(file->filename, ".toml") == NULL &&
          strstr(file->filename, "build.gradle") == NULL &&
          !package_path_ends_with(file->filename, ".csproj") &&
+         strstr(file->filename, "pom.xml") == NULL &&
          strstr(file->filename, ".yaml") == NULL &&
          strstr(file->filename, ".yml") == NULL;
 }
@@ -4540,7 +4028,7 @@ static int csemver_main_impl(int argc, char **argv) {
   config_path =
       find_config_path(argc, argv, config_storage, sizeof config_storage);
   csemver_config_defaults(&config);
-  if (!load_package_config(&config) || !load_config(&config, config_path))
+  if (!load_config(&config, config_path))
     return 2;
   parsed_args = parse_args(argc, argv, &config, &config_path);
   if (parsed_args != 0)
@@ -4639,7 +4127,6 @@ static int csemver_main_impl(int argc, char **argv) {
   }
   bump = calculate_bump(&config, commits, commit_count, &current_semver);
   if (config.first_release) {
-    bump = 0;
     snprintf(next, sizeof next, "%s", current);
   } else if (config.skip_bump) {
     snprintf(next, sizeof next, "%s", current);
@@ -4768,9 +4255,7 @@ static int csemver_main_impl(int argc, char **argv) {
 int csemver_main(int argc, char **argv) {
   int status;
 
-  csemver_json_diagnostics_clear();
   status = csemver_main_impl(argc, argv);
-  csemver_json_diagnostics_clear();
   return status;
 }
 
