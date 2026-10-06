@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [0.3.0](https://github.com/blackopsrepl/csemver/compare/v0.2.2...v0.3.0) (2026-10-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **config:** csemver no longer reads configuration from a package.json section or a .versionrc file; move that configuration into csemver.toml.
+
+* **config:** read configuration only from csemver.toml ([32a9c42](https://github.com/blackopsrepl/csemver/commit/32a9c42073c65a34523fb0460fbdd18fbf7def73))
+
+
+### Features
+
+* **help:** match upstream 12.5.0 usage output byte for byte ([ed210ee](https://github.com/blackopsrepl/csemver/commit/ed210ee592112eec53f6e391f5bd5d130ba467ed))
+
+
+### Bug Fixes
+
+* **changelog:** match upstream blank-line rhythm around release sections ([e95c1f9](https://github.com/blackopsrepl/csemver/commit/e95c1f90170274f5578cfb2a3b3e69aa1fce803d))
+* **changelog:** render sections with upstream's group and heading rules ([3e69f5e](https://github.com/blackopsrepl/csemver/commit/3e69f5e1fdb3e5592077b9d8e438f5015ee726f2))
+* **cli:** reject unknown changelog presets with upstream's message and status ([e0f8533](https://github.com/blackopsrepl/csemver/commit/e0f85333a34560d0559610c16fbca7fe140c97bd))
+* **gitignore:** match extglob negation without platform fnmatch ([efeda98](https://github.com/blackopsrepl/csemver/commit/efeda98bda0c819272f8730e879876c635b1c0de))
+* **semver:** drop prerelease when minor/major bump holds the component ([0f64cf8](https://github.com/blackopsrepl/csemver/commit/0f64cf8998d7c4744130f3d3800604f618717eed))
+* **tests:** build the ANSI escape portably instead of ANSI-C quoting ([bdbfad4](https://github.com/blackopsrepl/csemver/commit/bdbfad43659ea1825f8eec73b8f1c6cc136bf8dc))
+
+
 ## [0.2.2](https://github.com/blackopsrepl/csemver/compare/v0.2.1...v0.2.2) (2026-10-05)
 
 ### Bug Fixes
