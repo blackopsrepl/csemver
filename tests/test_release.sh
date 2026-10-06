@@ -900,7 +900,8 @@ grep -q 'Unable to load the "csemver-unsupported" preset package. Please make su
   "$tmp/unsupported-preset.out"
 FORCE_COLOR=1 "$bin" --preset csemver-unsupported --dry-run \
   > "$tmp/unsupported-preset-color.out" 2>&1 || true
-grep -q $'\033\[31mUnable to load the "csemver-unsupported" preset package' \
+esc=$(printf '\033')
+grep -q "${esc}\[31mUnable to load the \"csemver-unsupported\" preset package" \
   "$tmp/unsupported-preset-color.out"
 
 mkdir "$tmp/angular-bump"
