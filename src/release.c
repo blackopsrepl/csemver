@@ -6,6 +6,8 @@
 #include "common.h"
 #include "config.h"
 #include "gitignore.h"
+#include "lifecycle.h"
+#include "tty.h"
 #include "semver.h"
 #include "version.h"
 
@@ -65,114 +67,6 @@ static void errorf(const char *format, ...) {
   va_end(args);
 }
 
-static int color_environment_flag(const char *name) {
-  const char *value = getenv(name);
-  const unsigned char *cursor;
-  if (value == NULL)
-    return -1;
-  if (value[0] == '\0' || strcmp(value, "true") == 0)
-    return 1;
-  if (strcmp(value, "false") == 0)
-    return 0;
-  for (cursor = (const unsigned char *)value; *cursor != '\0'; ++cursor)
-    if (!isdigit(*cursor))
-      return -1;
-  return strtoul(value, NULL, 10) == 0 ? 0 : 1;
-}
-
-static int terminal_supports_color(FILE *stream) {
-  static const char *const ci_providers[] = {
-      "GITHUB_ACTIONS", "GITEA_ACTIONS", "CIRCLECI",  "TRAVIS",
-      "APPVEYOR",       "GITLAB_CI",     "BUILDKITE", "DRONE"};
-  static const char *const term_prefixes[] = {"screen", "xterm",  "vt100",
-                                              "vt220",  "rxvt",   "color",
-                                              "ansi",   "cygwin", "linux"};
-  const char *term = getenv("TERM");
-  const char *term_program = getenv("TERM_PROGRAM");
-  int forced = color_environment_flag("FORCE_COLOR");
-  size_t index;
-  if (forced >= 0)
-    return forced;
-  if (getenv("TF_BUILD") != NULL && getenv("AGENT_NAME") != NULL)
-    return 1;
-  if (!isatty(fileno(stream)))
-    return 0;
-  if (term != NULL && strcmp(term, "dumb") == 0)
-    return 0;
-  if (getenv("CI") != NULL) {
-    for (index = 0; index < sizeof ci_providers / sizeof ci_providers[0];
-         ++index)
-      if (getenv(ci_providers[index]) != NULL)
-        return 1;
-    return getenv("CI_NAME") != NULL &&
-           strcmp(getenv("CI_NAME"), "codeship") == 0;
-  }
-  if (getenv("TEAMCITY_VERSION") != NULL) {
-    const char *version = getenv("TEAMCITY_VERSION");
-    int major = 0;
-    int minor = 0;
-    if (sscanf(version, "%d.%d", &major, &minor) != 2)
-      return 0;
-    return major >= 10 || (major == 9 && minor >= 1);
-  }
-  if (term != NULL &&
-      (strcmp(term, "xterm-kitty") == 0 || strcmp(term, "xterm-ghostty") == 0 ||
-       strcmp(term, "wezterm") == 0))
-    return 1;
-  if (term_program != NULL && (strcmp(term_program, "iTerm.app") == 0 ||
-                               strcmp(term_program, "Apple_Terminal") == 0))
-    return 1;
-  if (getenv("COLORTERM") != NULL)
-    return 1;
-  if (term == NULL)
-    return 0;
-  {
-    size_t length = strlen(term);
-    if ((length >= 4 && strcasecmp(term + length - 4, "-256") == 0) ||
-        (length >= 9 && strcasecmp(term + length - 9, "-256color") == 0))
-      return 1;
-  }
-  for (index = 0; index < sizeof term_prefixes / sizeof term_prefixes[0];
-       ++index) {
-    size_t prefix_length = strlen(term_prefixes[index]);
-    if (strncasecmp(term, term_prefixes[index], prefix_length) == 0)
-      return 1;
-  }
-  return 0;
-}
-
-static void print_styled(FILE *stream, const char *text, const char *start,
-                         const char *end) {
-  if (terminal_supports_color(stream))
-    fprintf(stream, "\033[%sm%s\033[%sm", start, text, end);
-  else
-    fputs(text, stream);
-}
-
-/* Mirror upstream's printError: chalk red enabled by stdout detection even
- * though the message itself is written to stderr. */
-static void print_error_line(const char *text) {
-  if (terminal_supports_color(stdout))
-    fprintf(stderr, "\033[31m%s\033[39m\n", text);
-  else
-    fprintf(stderr, "%s\n", text);
-}
-
-static void print_checkpoint_tick(const CsemverConfig *config) {
-  print_styled(stdout, "✔", config->dry_run ? "33" : "32", "39");
-}
-
-static void print_checkpoint_cross(void) {
-  print_styled(stdout, "✖", "31", "39");
-}
-
-static void print_checkpoint_info(void) {
-  print_styled(stdout, "ℹ", "34", "39");
-}
-
-static void print_bold(const char *text) {
-  print_styled(stdout, text, "1", "22");
-}
 
 static int path_has_extension(const char *path) {
   const char *basename = strrchr(path, '/');
@@ -1360,164 +1254,6 @@ static const char *bump_name(int bump) {
   return bump == 3 ? "major" : bump == 2 ? "minor" : "patch";
 }
 
-static int run_lifecycle_command(const char *command, char **stdout_output,
-                                 char **stderr_output, int *max_buffer_stream,
-                                 int *exit_code) {
-  const char *argv[] = {"/bin/sh", "-c", command, NULL};
-  return csemver_run_process_capture_streams(argv, stdout_output, stderr_output,
-                                             LIFECYCLE_SCRIPT_MAX_BUFFER,
-                                             max_buffer_stream, exit_code);
-}
-
-static void print_lifecycle_message(const char *message, const char *color) {
-  const char *cursor;
-  if (message[0] == '\0') {
-    fputc('\n', stderr);
-    return;
-  }
-  if (!terminal_supports_color(stdout)) {
-    fprintf(stderr, "%s\n", message);
-    return;
-  }
-  fprintf(stderr, "\033[%sm", color);
-  cursor = message;
-  while (*cursor != '\0') {
-    if (strncmp(cursor, "\033[39m", 5) == 0) {
-      fprintf(stderr, "\033[%sm", color);
-      cursor += 5;
-    } else if (cursor[0] == '\r' && cursor[1] == '\n') {
-      fputs("\033[39m\r\n", stderr);
-      fprintf(stderr, "\033[%sm", color);
-      cursor += 2;
-    } else if (*cursor == '\n') {
-      fputs("\033[39m\n", stderr);
-      fprintf(stderr, "\033[%sm", color);
-      ++cursor;
-    } else {
-      fputc(*cursor, stderr);
-      ++cursor;
-    }
-  }
-  fputs("\033[39m\n", stderr);
-}
-
-static int lifecycle_stderr_is_pipe(void) {
-  struct stat status;
-  if (fstat(STDERR_FILENO, &status) != 0)
-    return 0;
-  return S_ISFIFO(status.st_mode) || S_ISSOCK(status.st_mode);
-}
-
-static void print_lifecycle_max_buffer_error(const CsemverConfig *config,
-                                             int max_buffer_stream,
-                                             const char *captured_error,
-                                             const char *error_message) {
-  if (config->silent)
-    return;
-  if (max_buffer_stream == CSEMVER_CAPTURE_STDERR_MAX_BUFFER &&
-      lifecycle_stderr_is_pipe()) {
-    size_t length = strlen(captured_error);
-    if (length > LIFECYCLE_PIPE_ERROR_FLUSH_LIMIT)
-      length = LIFECYCLE_PIPE_ERROR_FLUSH_LIMIT;
-    (void)fwrite(captured_error, 1, length, stderr);
-    (void)fflush(stderr);
-    return;
-  }
-  print_lifecycle_message(
-      captured_error[0] != '\0' ? captured_error : error_message, "31");
-  print_lifecycle_message(error_message, "31");
-}
-
-static char *lifecycle_error_message(const char *command,
-                                     const char *stderr_text) {
-  CsemverBuffer message;
-  csemver_buffer_init(&message);
-  if (!csemver_buffer_append(&message, "Command failed: ", 16) ||
-      !csemver_buffer_append(&message, command, strlen(command)) ||
-      !csemver_buffer_append(&message, "\n", 1))
-    goto failure;
-  if (stderr_text[0] != '\0' &&
-      !csemver_buffer_append(&message, stderr_text, strlen(stderr_text)))
-    goto failure;
-  return message.data;
-
-failure:
-  csemver_buffer_free(&message);
-  return NULL;
-}
-
-static int run_lifecycle_capture(const CsemverConfig *config, const char *name,
-                                 char **output) {
-  size_t i;
-  if (output != NULL)
-    *output = NULL;
-  for (i = 0; i < config->script_count; ++i) {
-    int status = 0;
-    int max_buffer_stream = 0;
-    char *captured_output = NULL;
-    char *captured_error = NULL;
-    char *error_message;
-    int keep_output;
-    if (strcmp(config->scripts[i].name, name) != 0)
-      continue;
-    if (!config->silent) {
-      print_checkpoint_tick(config);
-      printf(" Running lifecycle script \"");
-      print_bold(name);
-      printf("\"\n");
-      print_checkpoint_info();
-      printf(" - execute command: \"");
-      print_bold(config->scripts[i].command);
-      printf("\"\n");
-    }
-    if (config->dry_run)
-      continue;
-    keep_output = output != NULL && *output == NULL;
-    if (!run_lifecycle_command(config->scripts[i].command, &captured_output,
-                               &captured_error, &max_buffer_stream, &status)) {
-      errorf("unable to capture lifecycle script output");
-      free(captured_output);
-      free(captured_error);
-      return 0;
-    }
-    if (max_buffer_stream != 0) {
-      const char *max_buffer_error =
-          max_buffer_stream == CSEMVER_CAPTURE_STDOUT_MAX_BUFFER
-              ? "stdout maxBuffer length exceeded"
-              : "stderr maxBuffer length exceeded";
-      print_lifecycle_max_buffer_error(config, max_buffer_stream,
-                                       captured_error, max_buffer_error);
-      free(captured_output);
-      free(captured_error);
-      return 0;
-    }
-    if (status != 0) {
-      error_message =
-          lifecycle_error_message(config->scripts[i].command, captured_error);
-      if (!config->silent && error_message != NULL) {
-        print_lifecycle_message(
-            captured_error[0] != '\0' ? captured_error : error_message, "31");
-        print_lifecycle_message(error_message, "31");
-      }
-      free(error_message);
-      free(captured_output);
-      free(captured_error);
-      return 0;
-    }
-    if (!config->silent && captured_error[0] != '\0')
-      print_lifecycle_message(captured_error, "33");
-    if (keep_output)
-      *output = captured_output;
-    else
-      free(captured_output);
-    free(captured_error);
-  }
-  return 1;
-}
-
-static int run_lifecycle(const CsemverConfig *config, const char *name) {
-  return run_lifecycle_capture(config, name, NULL);
-}
 
 static int prepare_bump(CsemverConfig *config) {
   char *output = NULL;
@@ -1527,8 +1263,8 @@ static int prepare_bump(CsemverConfig *config) {
   Semver parsed;
   if (config->skip_bump)
     return 1;
-  if (!run_lifecycle(config, "prerelease") ||
-      !run_lifecycle_capture(config, "prebump", &output)) {
+  if (!csemver_run_lifecycle(config, "prerelease") ||
+      !csemver_run_lifecycle_capture(config, "prebump", &output)) {
     free(output);
     return 0;
   }
@@ -1879,7 +1615,7 @@ static int update_files(const CsemverConfig *config, const char *version,
   if (config->skip_bump)
     return 1;
   if (config->first_release)
-    return dry_run ? 1 : run_lifecycle(config, "postbump");
+    return dry_run ? 1 : csemver_run_lifecycle(config, "postbump");
   for (i = 0; i < config->bump_file_count; ++i) {
     char *content = NULL;
     char *updated = NULL;
@@ -1938,13 +1674,13 @@ static int update_files(const CsemverConfig *config, const char *version,
       const char *display_old = uses_plain_text_updater(&config->bump_files[i])
                                     ? content
                                     : old_version;
-      print_checkpoint_tick(config);
+      csemver_print_checkpoint_tick(config);
       printf(" bumping version in ");
       printf("%s", config->bump_files[i].filename);
       printf(" from ");
-      print_bold(display_old);
+      csemver_print_bold(display_old);
       printf(" to ");
-      print_bold(version);
+      csemver_print_bold(version);
       putchar('\n');
     }
     if (!dry_run && !csemver_write_file(config->bump_files[i].filename, updated,
@@ -1960,7 +1696,7 @@ static int update_files(const CsemverConfig *config, const char *version,
       snprintf(paths[(*path_count)++], CSEMVER_PATH_MAX, "%s",
                config->bump_files[i].filename);
   }
-  return dry_run ? 1 : run_lifecycle(config, "postbump");
+  return dry_run ? 1 : csemver_run_lifecycle(config, "postbump");
 }
 
 static int write_changelog(const CsemverConfig *config, const char *version,
@@ -1973,12 +1709,12 @@ static int write_changelog(const CsemverConfig *config, const char *version,
   int ok;
   if (config->skip_changelog)
     return 1;
-  if (!run_lifecycle(config, "prechangelog"))
+  if (!csemver_run_lifecycle(config, "prechangelog"))
     return 0;
   if (!config->silent && access(config->infile, F_OK) != 0) {
-    print_checkpoint_tick(config);
+    csemver_print_checkpoint_tick(config);
     printf(" created ");
-    print_bold(config->infile);
+    csemver_print_bold(config->infile);
     putchar('\n');
   }
   csemver_buffer_init(&content);
@@ -1989,9 +1725,9 @@ static int write_changelog(const CsemverConfig *config, const char *version,
     return 0;
   }
   if (!config->silent) {
-    print_checkpoint_tick(config);
+    csemver_print_checkpoint_tick(config);
     printf(" outputting changes to ");
-    print_bold(config->infile);
+    csemver_print_bold(config->infile);
     putchar('\n');
   }
   if (config->dry_run) {
@@ -2009,7 +1745,7 @@ static int write_changelog(const CsemverConfig *config, const char *version,
     snprintf(paths[(*path_count)++], CSEMVER_PATH_MAX, "%s", config->infile);
   csemver_buffer_free(&content);
   if (ok)
-    ok = run_lifecycle(config, "postchangelog");
+    ok = csemver_run_lifecycle(config, "postchangelog");
   return ok;
 }
 
@@ -2050,7 +1786,7 @@ static int commit_release(CsemverConfig *config, const char *version,
     return 1;
   if (path_count == 0 && !config->commit_all)
     return 1;
-  if (!run_lifecycle_capture(config, "precommit", &hook_message)) {
+  if (!csemver_run_lifecycle_capture(config, "precommit", &hook_message)) {
     free(hook_message);
     return 0;
   }
@@ -2108,7 +1844,7 @@ static int commit_release(CsemverConfig *config, const char *version,
   }
   if (status != 0)
     return 0;
-  return run_lifecycle(config, "postcommit");
+  return csemver_run_lifecycle(config, "postcommit");
 }
 
 static int tag_release(const CsemverConfig *config, const char *tag,
@@ -2120,13 +1856,13 @@ static int tag_release(const CsemverConfig *config, const char *tag,
   int status = 0;
   if (config->skip_tag)
     return 1;
-  if (!run_lifecycle(config, "pretag"))
+  if (!csemver_run_lifecycle(config, "pretag"))
     return 0;
   if (!config->silent) {
-    print_checkpoint_tick(config);
+    csemver_print_checkpoint_tick(config);
     printf(" tagging release ");
-    print_bold(config->tag_prefix);
-    print_bold(tag + strlen(config->tag_prefix));
+    csemver_print_bold(config->tag_prefix);
+    csemver_print_bold(tag + strlen(config->tag_prefix));
     putchar('\n');
   }
   args[index++] = "tag";
@@ -2148,7 +1884,7 @@ static int tag_release(const CsemverConfig *config, const char *tag,
     return 0;
   if (!print_publish_hint(config, is_private, paths, path_count))
     return 0;
-  return run_lifecycle(config, "posttag");
+  return csemver_run_lifecycle(config, "posttag");
 }
 
 static void
@@ -2157,7 +1893,7 @@ print_commit_summary(const CsemverConfig *config,
                      size_t path_count) {
   if (config->silent || config->skip_commit)
     return;
-  print_checkpoint_tick(config);
+  csemver_print_checkpoint_tick(config);
   fputs(" committing ", stdout);
   bool has_changelog = !config->skip_changelog && path_count > 0 &&
                        strcmp(paths[path_count - 1], config->infile) == 0;
@@ -2165,19 +1901,19 @@ print_commit_summary(const CsemverConfig *config,
   for (size_t i = version_path_count; i > 0; --i) {
     if (i != version_path_count)
       fputs(" and ", stdout);
-    print_bold(paths[i - 1]);
+    csemver_print_bold(paths[i - 1]);
   }
   if (has_changelog) {
     if (version_path_count != 0)
       fputs(" and ", stdout);
-    print_bold(paths[path_count - 1]);
+    csemver_print_bold(paths[path_count - 1]);
   }
   if (config->commit_all) {
     if (path_count > 0) {
       fputs(" and ", stdout);
-      print_bold("all staged files");
+      csemver_print_bold("all staged files");
     } else {
-      print_bold("all staged files");
+      csemver_print_bold("all staged files");
       fputs(" and %s", stdout);
     }
   }
@@ -2214,9 +1950,9 @@ print_publish_hint(const CsemverConfig *config, bool is_private,
     else
       publish_command = "npm publish";
   }
-  print_checkpoint_info();
+  csemver_print_checkpoint_info();
   printf(" Run `");
-  if (terminal_supports_color(stdout))
+  if (csemver_terminal_supports_color(stdout))
     fputs("\033[1m", stdout);
   printf("git push --follow-tags origin %s", trim(branch_output));
   free(branch_output);
@@ -2227,7 +1963,7 @@ print_publish_hint(const CsemverConfig *config, bool is_private,
                               ? "prerelease"
                               : config->prerelease_id);
   }
-  if (terminal_supports_color(stdout))
+  if (csemver_terminal_supports_color(stdout))
     fputs("\033[22m", stdout);
   puts("` to publish");
   return 1;
@@ -2312,7 +2048,7 @@ static int csemver_main_impl(int argc, char **argv) {
              "Unable to load the \"%s\" preset package. Please make sure "
              "it's installed.",
              config.preset);
-    print_error_line(message);
+    csemver_print_error_line(message);
     return 1;
   }
   {
@@ -2392,7 +2128,7 @@ static int csemver_main_impl(int argc, char **argv) {
   } else if (config.release_as[0] == '\0' && bump == 0 &&
              config.no_bump_when_empty_changes) {
     if (!config.silent) {
-      print_checkpoint_cross();
+      csemver_print_checkpoint_cross();
       puts(" no commits found, so not bumping version");
     }
     free(commits);
@@ -2424,7 +2160,7 @@ static int csemver_main_impl(int argc, char **argv) {
     return 1;
   }
   if (!config.silent && config.first_release && !config.skip_bump) {
-    print_checkpoint_cross();
+    csemver_print_checkpoint_cross();
     puts(" skip version bump on first release");
   }
   if (!config.dry_run && !update_files(&config, next, release_as_null, paths,
@@ -2435,7 +2171,7 @@ static int csemver_main_impl(int argc, char **argv) {
   if (release_as_null) {
     if (config.dry_run && (!update_files(&config, next, release_as_null, paths,
                                          &path_count, true) ||
-                           !run_lifecycle(&config, "postbump"))) {
+                           !csemver_run_lifecycle(&config, "postbump"))) {
       free(commits);
       return 1;
     }
@@ -2456,7 +2192,7 @@ static int csemver_main_impl(int argc, char **argv) {
     return 1;
   }
   if (config.dry_run && !config.skip_bump &&
-      !run_lifecycle(&config, "postbump")) {
+      !csemver_run_lifecycle(&config, "postbump")) {
     free(commits);
     return 1;
   }
@@ -2477,30 +2213,30 @@ static int csemver_main_impl(int argc, char **argv) {
     }
   } else {
     if (!config.skip_commit) {
-      if (!run_lifecycle(&config, "precommit")) {
+      if (!csemver_run_lifecycle(&config, "precommit")) {
         free(commits);
         return 1;
       }
       print_commit_summary(&config, paths, path_count);
-      if (!run_lifecycle(&config, "postcommit")) {
+      if (!csemver_run_lifecycle(&config, "postcommit")) {
         free(commits);
         return 1;
       }
     }
     if (!config.skip_tag) {
-      if (!run_lifecycle(&config, "pretag")) {
+      if (!csemver_run_lifecycle(&config, "pretag")) {
         free(commits);
         return 1;
       }
       if (!config.silent) {
-        print_checkpoint_tick(&config);
+        csemver_print_checkpoint_tick(&config);
         printf(" tagging release ");
-        print_bold(config.tag_prefix);
-        print_bold(new_tag + strlen(config.tag_prefix));
+        csemver_print_bold(config.tag_prefix);
+        csemver_print_bold(new_tag + strlen(config.tag_prefix));
         putchar('\n');
       }
       if (!print_publish_hint(&config, is_private, paths, path_count) ||
-          !run_lifecycle(&config, "posttag")) {
+          !csemver_run_lifecycle(&config, "posttag")) {
         free(commits);
         return 1;
       }

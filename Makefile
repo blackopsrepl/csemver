@@ -13,14 +13,14 @@ WARNINGS = -std=c17 -Wall -Wextra -Wpedantic -Werror
 
 all: build/csemver build/commit-and-tag-version
 
-build/csemver: src/main.c src/release.c src/release.h src/common.c src/common.h src/version.c src/version.h src/maven.c src/maven.h src/config.c src/config.h src/semver.c src/semver.h src/gitignore.c src/gitignore.h src/changelog.c src/changelog.h src/toml.c src/toml.h | build
-	$(CC) $(CPPFLAGS) $(VERSION_CPPFLAGS) $(XML2_CFLAGS) $(YAML_CFLAGS) $(CFLAGS) $(WARNINGS) -o $@ src/main.c src/release.c src/common.c src/version.c src/maven.c src/config.c src/semver.c src/gitignore.c src/changelog.c src/toml.c $(XML2_LIBS) $(YAML_LIBS)
+build/csemver: src/main.c src/release.c src/release.h src/common.c src/common.h src/version.c src/version.h src/maven.c src/maven.h src/config.c src/config.h src/semver.c src/semver.h src/gitignore.c src/gitignore.h src/changelog.c src/changelog.h src/lifecycle.c src/lifecycle.h src/tty.c src/tty.h src/toml.c src/toml.h | build
+	$(CC) $(CPPFLAGS) $(VERSION_CPPFLAGS) $(XML2_CFLAGS) $(YAML_CFLAGS) $(CFLAGS) $(WARNINGS) -o $@ src/main.c src/release.c src/common.c src/version.c src/maven.c src/config.c src/semver.c src/gitignore.c src/changelog.c src/lifecycle.c src/tty.c src/toml.c $(XML2_LIBS) $(YAML_LIBS)
 
 build/commit-and-tag-version: build/csemver
 	ln -sf csemver $@
 
-build/csemver-version-test: src/main.c src/release.c src/release.h src/common.c src/common.h src/version.c src/version.h src/maven.c src/maven.h src/config.c src/config.h src/semver.c src/semver.h src/gitignore.c src/gitignore.h src/changelog.c src/changelog.h src/toml.c src/toml.h | build
-	$(CC) $(CPPFLAGS) $(XML2_CFLAGS) $(YAML_CFLAGS) $(CFLAGS) $(WARNINGS) -DCSEMVER_VERSION='"9.8.7"' -o $@ src/main.c src/release.c src/common.c src/version.c src/maven.c src/config.c src/semver.c src/gitignore.c src/changelog.c src/toml.c $(XML2_LIBS) $(YAML_LIBS)
+build/csemver-version-test: src/main.c src/release.c src/release.h src/common.c src/common.h src/version.c src/version.h src/maven.c src/maven.h src/config.c src/config.h src/semver.c src/semver.h src/gitignore.c src/gitignore.h src/changelog.c src/changelog.h src/lifecycle.c src/lifecycle.h src/tty.c src/tty.h src/toml.c src/toml.h | build
+	$(CC) $(CPPFLAGS) $(XML2_CFLAGS) $(YAML_CFLAGS) $(CFLAGS) $(WARNINGS) -DCSEMVER_VERSION='"9.8.7"' -o $@ src/main.c src/release.c src/common.c src/version.c src/maven.c src/config.c src/semver.c src/gitignore.c src/changelog.c src/lifecycle.c src/tty.c src/toml.c $(XML2_LIBS) $(YAML_LIBS)
 
 build/test_config: tests/test_config.c src/config.c src/config.h src/toml.c src/toml.h | build
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARNINGS) -o $@ tests/test_config.c src/config.c src/toml.c
