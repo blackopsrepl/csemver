@@ -226,7 +226,7 @@ git add api.txt
 git commit -qm 'feat(api)!: remove the legacy endpoint'
 printf 'breaking output change\n' > output.txt
 git add output.txt
-git commit -qm 'feat(cli)!: change output format #990' -m 'BREAKING CHANGE: scripts must update to the new output.' -m 'References #99' -m 'Fixes #98'
+git commit -qm 'feat(cli)!: change output format #990' -m 'BREAKING CHANGE: scripts must update to the new output.' -m 'References #99' -m 'Fixes #98' -m 'Calls Webhook#deliver, then #retry.'
 "$bin" > /dev/null
 [ "$(cat VERSION)" = '2.0.0' ]
 grep -Fq '* **api:** remove the legacy endpoint' CHANGELOG.md
@@ -234,6 +234,12 @@ grep -Fq '* **cli:** scripts must update to the new output.' CHANGELOG.md
 grep -Fq '* **cli:** change output format' CHANGELOG.md
 grep -Fq 'references [#99](https://github.com/example/breaking/issues/99)' CHANGELOG.md
 grep -Fq 'closes [#98](https://github.com/example/breaking/issues/98)' CHANGELOG.md
+# An issue reference ends in a digit, as upstream's [\w-]*\d+ requires: a method
+# name such as Webhook#deliver or a bare #retry is prose, not an issue.
+if grep -Eq '#(deliver|retry)' CHANGELOG.md; then
+  echo 'prose after # was rendered as an issue reference' >&2
+  exit 1
+fi
 api_note_line=$(grep -m 1 -nF '* **api:** remove the legacy endpoint' CHANGELOG.md | cut -d: -f1)
 cli_note_line=$(grep -m 1 -nF '* **cli:** scripts must update to the new output.' CHANGELOG.md | cut -d: -f1)
 test "$api_note_line" -lt "$cli_note_line"

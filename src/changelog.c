@@ -528,7 +528,10 @@ static int collect_body_references(const CsemverConfig *config,
         issue_end = issue_start;
         while (issue_end < line_end && is_reference_word_char(*issue_end))
           ++issue_end;
+        /* Upstream's issue pattern is [\w-]*\d+: an issue id ends in a digit,
+           so `Webhook#deliver` or a bare `#retry` is prose, not a reference. */
         if (issue_end == issue_start ||
+            !isdigit((unsigned char)issue_end[-1]) ||
             (issue_end < line_end && *issue_end != ' ' && *issue_end != '\t' &&
              *issue_end != ',' && *issue_end != ';' && *issue_end != '.' &&
              *issue_end != ')' && *issue_end != ']'))
