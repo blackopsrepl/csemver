@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [0.3.2](https://github.com/blackopsrepl/csemver/compare/v0.3.1...v0.3.2) (2026-11-01)
+
+
+### Bug Fixes
+
+* **changelog:** render the whole BREAKING CHANGE footer, not its first line ([31f3fe1](https://github.com/blackopsrepl/csemver/commit/31f3fe110d44428f5463bb1aae6bb99a2ffcf223))
+
+
 ## [0.3.1](https://github.com/blackopsrepl/csemver/compare/v0.3.0...v0.3.1) (2026-10-25)
 
 
