@@ -709,6 +709,55 @@ static int append_sorted_group(CsemverBuffer *section,
   return 1;
 }
 
+/* A note's text keeps its source line breaks; the changelog prints it as one
+ * bullet line. Each run of whitespace that spans a line break reads as a single
+ * space, and everything else is copied as written. */
+static int next_note_char(const char *text, size_t length, size_t *index,
+                          char *out) {
+  size_t i = *index;
+  size_t j;
+  bool breaks = false;
+  if (i >= length)
+    return 0;
+  if (!isspace((unsigned char)text[i])) {
+    *out = text[i];
+    *index = i + 1;
+    return 1;
+  }
+  for (j = i; j < length && isspace((unsigned char)text[j]); ++j)
+    if (text[j] == '\n' || text[j] == '\r')
+      breaks = true;
+  if (!breaks) {
+    *out = text[i];
+    *index = i + 1;
+    return 1;
+  }
+  *out = ' ';
+  *index = j;
+  return 1;
+}
+
+/* A Conventional Commits footer starts with a token followed by ": " or " #",
+ * where the token is a word of letters, digits and hyphens, or the literal
+ * BREAKING CHANGE. A footer's value runs until the next footer starts. */
+static int line_starts_footer(const char *line) {
+  const char *p = line;
+  if (strncmp(line, "BREAKING CHANGE:", 16) == 0)
+    return 1;
+  if (!isalnum((unsigned char)*p))
+    return 0;
+  while (isalnum((unsigned char)*p) || *p == '-')
+    ++p;
+  return (p[0] == ':' && (p[1] == ' ' || p[1] == '\t')) ||
+         (p[0] == ' ' && p[1] == '#');
+}
+
+static int line_is_blank(const char *line) {
+  while (*line == ' ' || *line == '\t' || *line == '\r')
+    ++line;
+  return *line == '\n' || *line == '\0';
+}
+
 static int add_breaking_note(BreakingNote **notes, size_t *note_count,
                              size_t *note_capacity, const Commit *commit,
                              const char *text, size_t text_length) {
@@ -744,8 +793,14 @@ static int append_breaking_note(CsemverBuffer *notes,
   text = malloc(note->text_length + 1);
   if (text == NULL)
     return 0;
-  memcpy(text, note->text, note->text_length);
-  text[note->text_length] = '\0';
+  {
+    size_t i = 0;
+    size_t length = 0;
+    char c;
+    while (next_note_char(note->text, note->text_length, &i, &c))
+      text[length++] = c;
+    text[length] = '\0';
+  }
   appended =
       csemver_buffer_append(notes, "* ", 2) &&
       (scope[0] == '\0' || csemver_buffer_appendf(notes, "**%s:** ", scope)) &&
@@ -771,14 +826,25 @@ static int collect_breaking_notes(const Commit *commit, BreakingNote **notes,
     if (note != NULL) {
       while (*note == ' ' || *note == '\t')
         ++note;
+      /* The note continues over the following lines of its paragraph until
+       * a blank line or the next footer, as the Conventional Commits footer
+       * grammar defines it; a wrapped note is not cut at its first newline. */
       end = strchr(note, '\n');
+      while (end != NULL && !line_is_blank(end + 1) &&
+             !line_starts_footer(end + 1))
+        end = strchr(end + 1, '\n');
       if (end == NULL)
         end = note + strlen(note);
-      while (end > note && (end[-1] == ' ' || end[-1] == '\r'))
+      line = end;
+      while (end > note && isspace((unsigned char)end[-1]))
         --end;
       if (end > note && !add_breaking_note(notes, note_count, note_capacity,
                                            commit, note, (size_t)(end - note)))
         return 0;
+      if (*line == '\0')
+        break;
+      ++line;
+      continue;
     }
     line = strchr(line, '\n');
     if (line == NULL)
@@ -790,15 +856,20 @@ static int collect_breaking_notes(const Commit *commit, BreakingNote **notes,
 
 static int compare_breaking_notes(const BreakingNote *left,
                                   const BreakingNote *right) {
-  size_t common_length = left->text_length < right->text_length
-                             ? left->text_length
-                             : right->text_length;
-  int order = memcmp(left->text, right->text, common_length);
-  if (order != 0)
-    return order;
-  return left->text_length < right->text_length   ? -1
-         : left->text_length > right->text_length ? 1
-                                                  : 0;
+  /* Order notes by the text the changelog prints, not by where their source
+   * lines happen to wrap. */
+  size_t i = 0;
+  size_t j = 0;
+  char a;
+  char b;
+  for (;;) {
+    int has_a = next_note_char(left->text, left->text_length, &i, &a);
+    int has_b = next_note_char(right->text, right->text_length, &j, &b);
+    if (!has_a || !has_b)
+      return has_a - has_b;
+    if (a != b)
+      return (unsigned char)a < (unsigned char)b ? -1 : 1;
+  }
 }
 
 /* Upstream sorts group titles (and tags) with the writer's case-insensitive

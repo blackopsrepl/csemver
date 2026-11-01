@@ -255,6 +255,21 @@ test "$(git cat-file -t refs/tags/v3.0.0)" = tag
 grep -q '^### .*BREAKING CHANGES' CHANGELOG.md
 grep -q 'callers must migrate to the new API' CHANGELOG.md
 
+# A note wrapped over several source lines is one bullet holding the whole
+# paragraph; it ends at the next footer, so the closing reference stays out.
+printf 'wrapped footer\n' > wrapped.txt
+git add wrapped.txt
+git commit -qm 'fix(api): rename the client' -m 'BREAKING CHANGE: Client::open is renamed Client::connect
+and now returns a Result; callers
+  must handle the error.
+Closes #7'
+"$bin" > /dev/null
+grep -qxF '* **api:** Client::open is renamed Client::connect and now returns a Result; callers must handle the error.' CHANGELOG.md
+if grep -q '^and now returns' CHANGELOG.md || grep -q 'error\. Closes' CHANGELOG.md; then
+  echo 'wrapped breaking note was cut or absorbed the next footer' >&2
+  exit 1
+fi
+
 mkdir "$tmp/prerelease-window"
 cd "$tmp/prerelease-window"
 git init -q -b master
