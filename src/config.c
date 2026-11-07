@@ -446,14 +446,14 @@ int csemver_config_parse(CsemverConfig *config, const char *toml, char *error,
       &config->commit_all,       &config->silent,
       &config->tag_force,        &config->dry_run,
       &config->git_tag_fallback, &config->no_bump_when_empty_changes,
-      &config->pre_major};
+      &config->pre_major,        &config->suppress_revert_pairs};
   static const char *const flag_names[] = {
       "firstRelease",   "sign",
       "signoff",        "noVerify",
       "commitAll",      "silent",
       "tagForce",       "dryRun",
       "gitTagFallback", "noBumpWhenEmptyChanges",
-      "preMajor"};
+      "preMajor",       "suppressRevertPairs"};
   char *string_targets[] = {config->tag_prefix,
                             config->infile,
                             config->header,

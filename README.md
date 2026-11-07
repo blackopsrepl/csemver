@@ -64,7 +64,7 @@ bumpFiles = [
 ]
 ```
 
-Other supported keys include `preset`, `infile`, `header`, `releaseAs`, `prerelease`, `releaseCount`, `tagPrefix`, `issuePrefixes`, `path`, `lernaPackage`, `preMajor`, `noBumpWhenEmptyChanges`, `releaseCommitMessageFormat`, `commitUrlFormat`, `compareUrlFormat`, `issueUrlFormat`, `userUrlFormat`, `packageFiles`, `bumpFiles`, `types`, `skip`, and `scripts`. A custom `types` array replaces the default types; each entry uses `type`, optional `section`, and either `hidden` or `effect = "hidden" | "changelog" | "bump"`. The built-in presets are `conventional-changelog-conventionalcommits` (default) and Angular (`angular` or `conventional-changelog-angular`).
+Other supported keys include `preset`, `infile`, `header`, `releaseAs`, `prerelease`, `releaseCount`, `tagPrefix`, `issuePrefixes`, `path`, `lernaPackage`, `preMajor`, `noBumpWhenEmptyChanges`, `suppressRevertPairs`, `releaseCommitMessageFormat`, `commitUrlFormat`, `compareUrlFormat`, `issueUrlFormat`, `userUrlFormat`, `packageFiles`, `bumpFiles`, `types`, `skip`, and `scripts`. A custom `types` array replaces the default types; each entry uses `type`, optional `section`, and either `hidden` or `effect = "hidden" | "changelog" | "bump"`. The built-in presets are `conventional-changelog-conventionalcommits` (default) and Angular (`angular` or `conventional-changelog-angular`). Under the default preset a reverted commit and its `Revert "…"` commit stay in the changelog, as upstream 12.5.0 renders them; `suppressRevertPairs = true` drops both when they fall in the same changelog window, which the Angular preset always does. The key affects changelog rendering only, not bump selection.
 
 ```toml
 types = [

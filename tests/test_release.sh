@@ -829,6 +829,41 @@ printf '%s\n' "$lerna_prerelease_dry_run" | grep -Fxq ' to 1.1.0' || {
   exit 1
 }
 
+mkdir "$tmp/default-revert-pairs"
+cd "$tmp/default-revert-pairs"
+git init -q -b master
+git config user.name 'C Semver Test'
+git config user.email 'test@example.invalid'
+git config commit.gpgSign false
+printf '{\n  "name": "default-revert-pairs",\n  "version": "1.0.0"\n}\n' > package.json
+git add package.json
+git commit -qm 'chore: initialize default revert fixture'
+git tag -a v1.0.0 -m 'chore(release): 1.0.0'
+git remote add origin 'https://github.com/blackopsrepl/default-revert-fixture.git'
+git commit --allow-empty -qm 'feat(map): draw route legs'
+default_reverted_hash=$(git rev-parse HEAD)
+git revert --no-edit "$default_reverted_hash" > /dev/null 2>&1 ||
+  git commit --allow-empty -qm "Revert \"feat(map): draw route legs\"" \
+    -m "This reverts commit $default_reverted_hash."
+git commit --allow-empty -qm 'feat(map): accept a dash pattern'
+"$bin" --release-as 1.1.0 --skip commit --skip tag > /dev/null
+grep -q 'draw route legs' CHANGELOG.md || {
+  printf 'default preset must keep a reverted commit, as upstream 12.5.0 does\n' >&2
+  exit 1
+}
+git checkout -q -- package.json
+rm CHANGELOG.md
+printf 'suppressRevertPairs = true\npackageFiles = ["package.json"]\nbumpFiles = ["package.json"]\n' > csemver.toml
+"$bin" --release-as 1.1.0 --skip commit --skip tag > /dev/null
+if grep -q 'draw route legs' CHANGELOG.md; then
+  printf 'suppressRevertPairs failed to drop the reverted commit pair\n' >&2
+  exit 1
+fi
+grep -q 'accept a dash pattern' CHANGELOG.md || {
+  printf 'suppressRevertPairs dropped a commit that was not reverted\n' >&2
+  exit 1
+}
+
 mkdir "$tmp/angular-preset"
 cd "$tmp/angular-preset"
 git init -q -b master

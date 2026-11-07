@@ -376,7 +376,7 @@ static int text_contains_reference(const char *text, const char *reference) {
   return 0;
 }
 
-static int angular_revert_target(const Commit *commit, char target[41]) {
+static int revert_target(const Commit *commit, char target[41]) {
   static const char marker[] = "This reverts commit ";
   const char *cursor;
   if (commit == NULL || strlen(commit->subject) < 7 ||
@@ -415,7 +415,7 @@ static int angular_revert_target(const Commit *commit, char target[41]) {
   return 0;
 }
 
-static void collect_angular_revert_pairs(const Commit *commits,
+static void collect_revert_pairs(const Commit *commits,
                                          size_t commit_count,
                                          bool reverted[CSEMVER_COMMIT_MAX]) {
   size_t i;
@@ -423,7 +423,7 @@ static void collect_angular_revert_pairs(const Commit *commits,
   for (i = 0; i < commit_count; ++i) {
     char target[41];
     size_t target_length, j, match = 0, match_count = 0;
-    if (!angular_revert_target(&commits[i], target))
+    if (!revert_target(&commits[i], target))
       continue;
     target_length = strlen(target);
     for (j = 0; j < commit_count; ++j) {
@@ -454,7 +454,7 @@ static int preset_commit_type_for_commit(const CsemverConfig *config,
   if (csemver_preset_commit_type(config, commit->subject, type, size, scope, scope_size,
                          description))
     return 1;
-  if (!csemver_preset_is_angular(config) || !angular_revert_target(commit, target) ||
+  if (!csemver_preset_is_angular(config) || !revert_target(commit, target) ||
       sizeof "revert" > size || scope_size == 0)
     return 0;
   memcpy(type, "revert", sizeof "revert");
@@ -910,10 +910,11 @@ int csemver_changelog_section(const CsemverConfig *config, const Commit *commits
   size_t group_order[CSEMVER_MAX_TYPES];
   bool angular = csemver_preset_is_angular(config);
   CsemverConfig angular_config;
+  bool suppress_reverts = angular || config->suppress_revert_pairs;
   if (commit_count > CSEMVER_COMMIT_MAX)
     return 0;
-  if (angular)
-    collect_angular_revert_pairs(commits, commit_count, reverted);
+  if (suppress_reverts)
+    collect_revert_pairs(commits, commit_count, reverted);
   if (angular) {
     size_t preset_count =
         sizeof angular_commit_types / sizeof angular_commit_types[0];
@@ -955,7 +956,7 @@ int csemver_changelog_section(const CsemverConfig *config, const Commit *commits
     int index;
     int parsed;
     bool has_breaking_note;
-    if (angular && reverted[i])
+    if (suppress_reverts && reverted[i])
       continue;
     parsed =
         preset_commit_type_for_commit(config, &commits[i], type, sizeof type,

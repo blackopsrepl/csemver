@@ -63,6 +63,7 @@ typedef struct {
   bool git_tag_fallback;
   bool no_bump_when_empty_changes;
   bool pre_major;
+  bool suppress_revert_pairs;
   bool has_prerelease;
   char prerelease_id[128];
   char tag_prefix[256];
