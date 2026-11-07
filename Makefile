@@ -1,7 +1,7 @@
 CC ?= cc
 CFLAGS ?= -O2
 CPPFLAGS ?=
-CSEMVER_VERSION ?= 0.1.0
+CSEMVER_VERSION ?= $(shell cat VERSION)
 VERSION_CPPFLAGS = -DCSEMVER_VERSION='"$(CSEMVER_VERSION)"'
 XML2_CFLAGS ?= $(shell pkg-config --cflags libxml-2.0 2>/dev/null || xml2-config --cflags)
 XML2_LIBS ?= $(shell pkg-config --libs libxml-2.0 2>/dev/null || xml2-config --libs)
@@ -13,7 +13,7 @@ WARNINGS = -std=c17 -Wall -Wextra -Wpedantic -Werror
 
 all: build/csemver build/commit-and-tag-version
 
-build/csemver: src/main.c src/release.c src/release.h src/common.c src/common.h src/version.c src/version.h src/maven.c src/maven.h src/config.c src/config.h src/semver.c src/semver.h src/gitignore.c src/gitignore.h src/changelog.c src/changelog.h src/lifecycle.c src/lifecycle.h src/tty.c src/tty.h src/toml.c src/toml.h | build
+build/csemver: VERSION src/main.c src/release.c src/release.h src/common.c src/common.h src/version.c src/version.h src/maven.c src/maven.h src/config.c src/config.h src/semver.c src/semver.h src/gitignore.c src/gitignore.h src/changelog.c src/changelog.h src/lifecycle.c src/lifecycle.h src/tty.c src/tty.h src/toml.c src/toml.h | build
 	$(CC) $(CPPFLAGS) $(VERSION_CPPFLAGS) $(XML2_CFLAGS) $(YAML_CFLAGS) $(CFLAGS) $(WARNINGS) -o $@ src/main.c src/release.c src/common.c src/version.c src/maven.c src/config.c src/semver.c src/gitignore.c src/changelog.c src/lifecycle.c src/tty.c src/toml.c $(XML2_LIBS) $(YAML_LIBS)
 
 build/commit-and-tag-version: build/csemver

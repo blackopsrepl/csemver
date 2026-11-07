@@ -128,7 +128,7 @@ Lifecycle commands run through `/bin/sh -c`; only use scripts from a trusted con
 
 ## Release builds
 
-The build embeds its version in `--version`; the default is `0.1.0`. Set it explicitly for a tagged build:
+The build embeds the version recorded in `VERSION` in `--version`. Override it for a build that should report another version:
 
 ```sh
 make clean all CSEMVER_VERSION=1.2.3
