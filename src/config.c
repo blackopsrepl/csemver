@@ -71,8 +71,8 @@ void csemver_config_defaults(CsemverConfig *config) {
   snprintf(config->header, sizeof config->header,
            "# Changelog\n\nAll notable changes to this project will be "
            "documented in this file. See "
-           "[commit-and-tag-version](https://github.com/absolute-version/"
-           "commit-and-tag-version) for commit guidelines.\n");
+           "[Conventional Commits](https://conventionalcommits.org) for commit "
+           "guidelines.\n");
   snprintf(config->preset, sizeof config->preset,
            "conventional-changelog-conventionalcommits");
   snprintf(config->commit_url_format, sizeof config->commit_url_format,

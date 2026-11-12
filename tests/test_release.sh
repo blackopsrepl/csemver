@@ -166,6 +166,12 @@ if [ "$changelog_first_line" != '---' ]; then
 fi
 test "$(grep -Fc 'status: new' CHANGELOG.md)" -eq 1
 test "$(grep -c '^# Changelog$' CHANGELOG.md)" -eq 1
+# A changelog written under an earlier default header gets the current one.
+grep -Fxq 'All notable changes to this project will be documented in this file. See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.' CHANGELOG.md
+if grep -Fq 'commit-and-tag-version' CHANGELOG.md; then
+  printf '%s\n' 'the earlier default header survived regeneration' >&2
+  exit 1
+fi
 grep -q '^## \[1.0.1\]' CHANGELOG.md
 grep -q '^## \[1.0.0\]' CHANGELOG.md
 test -z "$(git status --porcelain)"
@@ -3430,7 +3436,7 @@ printf '✔ bumping version in package.json from 1.2.3 to 1.2.4\n✔ created CHA
   > "$tmp/occupied-release-tag.expected.stdout"
 printf 'fatal: tag '\''v1.2.4'\'' already exists\n\nCommand failed: git tag -a v1.2.4 -m chore(release): 1.2.4\nfatal: tag '\''v1.2.4'\'' already exists\n\n' \
   > "$tmp/occupied-release-tag.expected.stderr"
-printf '# Changelog\n\nAll notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.\n\n\n' \
+printf '# Changelog\n\nAll notable changes to this project will be documented in this file. See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.\n\n\n' \
   > "$tmp/occupied-release-tag.expected.changelog"
 cmp "$tmp/occupied-release-tag.expected.stdout" \
   "$tmp/occupied-release-tag.stdout"
