@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## [0.4.1](https://github.com/blackopsrepl/csemver/compare/v0.4.0...v0.4.1) (2026-11-12)
+
+
+### Features
+
+* **build:** add a banner, help menu, gate, install and release targets ([a67ac58](https://github.com/blackopsrepl/csemver/commit/a67ac58e1ee94234bce39293539924f217ee5c89))
+
+
 ## [0.4.0](https://github.com/blackopsrepl/csemver/compare/v0.3.4...v0.4.0) (2026-11-12)
 
 
