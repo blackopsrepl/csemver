@@ -18,10 +18,9 @@ The source is split by concern: `release.c` holds the CLI, configuration load, a
 make
 make test
 ./build/csemver --version
-./build/commit-and-tag-version --version
 ```
 
-`make` emits `build/commit-and-tag-version` as a symlink to the same native C binary, so existing scripts can invoke csemver under the compatibility command name without a scripting runtime. `csemver --version` prints its embedded build version. The compatibility alias mirrors the package lookup of the release tooling it replaces and prints the nearest `package.json` version, or `unknown` when none is found.
+`csemver --version` prints its embedded build version.
 
 `make test` exercises the SemVer and TOML code, version-file updates, CLI parsing, and release operations in isolated Git repositories. Set `TMPDIR` to a writable scratch directory if `/tmp` is unavailable.
 

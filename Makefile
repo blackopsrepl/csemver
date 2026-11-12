@@ -11,13 +11,10 @@ WARNINGS = -std=c17 -Wall -Wextra -Wpedantic -Werror
 
 .PHONY: all test clean
 
-all: build/csemver build/commit-and-tag-version
+all: build/csemver
 
 build/csemver: VERSION src/main.c src/release.c src/release.h src/common.c src/common.h src/version.c src/version.h src/maven.c src/maven.h src/config.c src/config.h src/semver.c src/semver.h src/gitignore.c src/gitignore.h src/changelog.c src/changelog.h src/lifecycle.c src/lifecycle.h src/tty.c src/tty.h src/toml.c src/toml.h | build
 	$(CC) $(CPPFLAGS) $(VERSION_CPPFLAGS) $(XML2_CFLAGS) $(YAML_CFLAGS) $(CFLAGS) $(WARNINGS) -o $@ src/main.c src/release.c src/common.c src/version.c src/maven.c src/config.c src/semver.c src/gitignore.c src/changelog.c src/lifecycle.c src/tty.c src/toml.c $(XML2_LIBS) $(YAML_LIBS)
-
-build/commit-and-tag-version: build/csemver
-	ln -sf csemver $@
 
 build/csemver-version-test: src/main.c src/release.c src/release.h src/common.c src/common.h src/version.c src/version.h src/maven.c src/maven.h src/config.c src/config.h src/semver.c src/semver.h src/gitignore.c src/gitignore.h src/changelog.c src/changelog.h src/lifecycle.c src/lifecycle.h src/tty.c src/tty.h src/toml.c src/toml.h | build
 	$(CC) $(CPPFLAGS) $(XML2_CFLAGS) $(YAML_CFLAGS) $(CFLAGS) $(WARNINGS) -DCSEMVER_VERSION='"9.8.7"' -o $@ src/main.c src/release.c src/common.c src/version.c src/maven.c src/config.c src/semver.c src/gitignore.c src/changelog.c src/lifecycle.c src/tty.c src/toml.c $(XML2_LIBS) $(YAML_LIBS)
@@ -37,14 +34,13 @@ build/test_semver: tests/test_semver.c src/semver.c src/semver.h | build
 build:
 	mkdir -p $@
 
-test: build/csemver build/commit-and-tag-version build/csemver-version-test build/test_semver build/test_toml build/test_config build/test_version
+test: build/csemver build/csemver-version-test build/test_semver build/test_toml build/test_config build/test_version
 	./build/test_semver
 	./build/test_toml
 	./build/test_config
 	./build/test_version
 	./tests/test_cli.sh ./build/csemver $(CSEMVER_VERSION)
 	./tests/test_cli.sh ./build/csemver-version-test 9.8.7
-	./tests/test_compat_alias.sh ./build/commit-and-tag-version
 	./tests/test_help.sh ./build/csemver
 	./tests/test_release.sh
 
