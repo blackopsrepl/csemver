@@ -952,12 +952,12 @@ test "$unsupported_preset_status" -eq 1 || {
     "$unsupported_preset_status" >&2
   exit 1
 }
-grep -q 'Unable to load the "csemver-unsupported" preset package. Please make sure it.s installed.' \
+grep -Fxq 'csemver: unknown changelog preset "csemver-unsupported"; use conventional-changelog-conventionalcommits or angular' \
   "$tmp/unsupported-preset.out"
 FORCE_COLOR=1 "$bin" --preset csemver-unsupported --dry-run \
   > "$tmp/unsupported-preset-color.out" 2>&1 || true
 esc=$(printf '\033')
-grep -q "${esc}\[31mUnable to load the \"csemver-unsupported\" preset package" \
+grep -q "${esc}\[31mcsemver: unknown changelog preset \"csemver-unsupported\"" \
   "$tmp/unsupported-preset-color.out"
 
 mkdir "$tmp/angular-bump"
@@ -1201,17 +1201,17 @@ printf '%s\n' "$repeated_package_preview" | \
 legacy_warning_output=$("$bin" --dry-run --message 'chore(release): %s' \
   --changelogHeader 'Custom header' 2>&1)
 for warning in \
-  '[commit-and-tag-version]: --message (-m) will be removed in the next major release. Use --releaseCommitMessageFormat.' \
-  '[commit-and-tag-version]: --changelogHeader will be removed in the next major release. Use --header.'; do
+  'csemver: --message (-m) is deprecated; use --releaseCommitMessageFormat' \
+  'csemver: --changelogHeader is deprecated; use --header'; do
   printf '%s\n' "$legacy_warning_output" | grep -Fq "$warning" || {
-    printf 'upstream compatibility warning was missing (%s):\n%s\n' \
+    printf 'deprecated-option warning was missing (%s):\n%s\n' \
       "$warning" "$legacy_warning_output" >&2
     exit 1
   }
 done
 silent_legacy_output=$("$bin" --dry-run --message 'chore(release): %s' \
   --changelogHeader 'Custom header' --silent 2>&1)
-if printf '%s\n' "$silent_legacy_output" | grep -Fq '[commit-and-tag-version]:'; then
+if printf '%s\n' "$silent_legacy_output" | grep -Fq 'is deprecated'; then
   printf 'silent should suppress legacy-option warnings:\n%s\n' \
     "$silent_legacy_output" >&2
   exit 1

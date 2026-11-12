@@ -93,8 +93,8 @@ static void print_styled(FILE *stream, const char *text, const char *start,
     fputs(text, stream);
 }
 
-/* Mirror upstream's printError: chalk red enabled by stdout detection even
- * though the message itself is written to stderr. */
+/* Error lines are written to stderr but colored by stdout's color support,
+ * so a pipeline that captures stdout gets plain text on both streams. */
 void csemver_print_error_line(const char *text) {
   if (csemver_terminal_supports_color(stdout))
     fprintf(stderr, "\033[31m%s\033[39m\n", text);

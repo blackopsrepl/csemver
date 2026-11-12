@@ -617,13 +617,12 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
              config->changelog_header);
   if (!config->silent && config->has_message && config->message[0] != '\0')
     fprintf(stderr,
-            "[commit-and-tag-version]: --message (-m) will be removed in the "
-            "next major release. Use --releaseCommitMessageFormat.\n");
+            "csemver: --message (-m) is deprecated; use "
+            "--releaseCommitMessageFormat\n");
   if (!config->silent && config->has_changelog_header &&
       config->changelog_header[0] != '\0')
     fprintf(stderr,
-            "[commit-and-tag-version]: --changelogHeader will be removed in "
-            "the next major release. Use --header.\n");
+            "csemver: --changelogHeader is deprecated; use --header\n");
   return 0;
 }
 
@@ -1792,8 +1791,8 @@ static int csemver_main_impl(int argc, char **argv) {
   if (!csemver_preset_is_supported(&config)) {
     char message[256];
     snprintf(message, sizeof message,
-             "Unable to load the \"%s\" preset package. Please make sure "
-             "it's installed.",
+             "csemver: unknown changelog preset \"%s\"; use "
+             "conventional-changelog-conventionalcommits or angular",
              config.preset);
     csemver_print_error_line(message);
     return 1;
