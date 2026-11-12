@@ -63,8 +63,9 @@ purpose. Each fix is its own visible commit with a regression test.
 
 ## Validation
 
-- Gate: `make clean test`. Plain `make test` can reuse a binary built for
-  another `CSEMVER_VERSION` and fail the version check for the wrong reason.
+- Gate: `make check` (a clean build plus the full suite; CI runs the
+  equivalent `make clean test`). `make help` lists every target; `make test-unit`,
+  `test-cli` and `test-release` run one suite while iterating.
 - The build is `-std=c17 -Wall -Wextra -Wpedantic -Werror`. When removing code,
   delete the entry point and rebuild: the compiler names every helper that
   became unused. Then search `tests/` for the same symbols.
@@ -97,10 +98,12 @@ purpose. Each fix is its own visible commit with a regression test.
 
 csemver releases itself from its own `csemver.toml`:
 
-1. On a clean, synced `master`, run `make clean test`.
+1. On a clean, synced `master`, run `make check`.
 2. `./build/csemver --dry-run`: read the computed version and the rendered
    section against the commits it covers.
-3. `./build/csemver`, then `make clean test` again on the release commit.
+3. `./build/csemver`, then `make check` again on the release commit.
+   `make release` runs steps 1 and 3 in one go (`RELEASE_AS=` overrides the
+   bump); `make release-dry` is step 2.
 4. Push `master` and the tag to both remotes (`origin` on GitHub, `forgejo`).
    The tag starts the GitHub release workflow, which checks that the tag,
    `VERSION`, and the release commit agree.

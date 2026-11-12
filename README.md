@@ -15,10 +15,12 @@ Requirements: a C17 compiler, GNU Make, Git, libxml2 and libyaml development fil
 The source is split by concern: `release.c` holds the CLI, configuration load, and the release transaction; `changelog.c` the commit classification and changelog rendering; `version.c` the version-file readers and updaters; `config.c` the `csemver.toml` schema; `gitignore.c` the ignore matcher; `semver.c` SemVer parsing and bumping; `lifecycle.c` the lifecycle hooks; `tty.c` color and progress output; `common.c` buffers and process capture; and `maven.c` the XML/Maven reader.
 
 ```sh
-make
+make build
 make test
 ./build/csemver --version
 ```
+
+`make` alone lists every target. `make check` is the release gate: a clean build plus the full suite. `make install` copies the binary to `PREFIX/bin` (`PREFIX=/usr/local` by default; `DESTDIR` is honored).
 
 `csemver --version` prints its embedded build version.
 
