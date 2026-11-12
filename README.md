@@ -87,41 +87,57 @@ Lifecycle commands run through `/bin/sh -c`; only use scripts from a trusted con
 ## CLI options
 
 ```text
--h, --help                 Show help
--v, --version              Show the build version
--r, --release-as VERSION   Select major, minor, patch, or an exact SemVer
--p, --prerelease [ID]      Create a prerelease
--f, --first-release        Tag current version without bumping version files
--t, --tag-prefix PREFIX    Override the Git tag prefix
--i, --infile FILE          Override the changelog path
--c, --config FILE          Read another TOML configuration file
-    --dry-run              Preview without changing files, commits, or tags
-    --skip STEP            Skip bump, changelog, commit, or tag
-    --path PATH            Limit commit history to a path
-    --lerna-package NAME   Use package tags for bump selection
-    --packageFiles FILE... Override package version files
-    --bumpFiles FILE...    Override version files to update
-    --release-count N      Set regenerated sections; 0 rebuilds all history
-    --preset NAME           Select conventional or Angular changelog preset
-    --sign                 Sign the release commit and tag
-    --signoff              Add a DCO signoff to the commit
--m, --message FORMAT       Deprecated; use the TOML release message format
-    --releaseCommitMessageFormat FORMAT
-    --header TEXT           Changelog heading
-    --commitUrlFormat URL   Customize commit links
-    --compareUrlFormat URL  Customize compare links
-    --issueUrlFormat URL    Customize issue links
-    --userUrlFormat URL     Customize user links
-    --preMajor              Apply pre-1.0.0 bump rules
-    --issuePrefixes PREFIX... Issue prefixes to link
-    --tag-force             Replace an existing tag
-    --git-tag-fallback      Read version from a tag if no version file exists
-    --noBumpWhenEmptyChanges Do not bump for commits with no release effect
-    --scripts.EVENT COMMAND Override one lifecycle script
-    --npmPublishHint TEXT   Customize the publishing hint
--n, --no-verify            Bypass Git commit hooks
--a, --commit-all           Include all staged and working files
-    --silent               Suppress normal progress output
+Usage: csemver [options]
+
+Bump the version, update the changelog, commit, and tag a release from
+Conventional Commits. Configuration is read from csemver.toml; command-line
+options override it. Nothing is pushed.
+
+Options:
+  -h, --help                     Show this help
+  -v, --version                  Show the build version
+  -c, --config FILE              Read another TOML configuration file
+      --dry-run                  Preview without writing files, commits, or tags
+  -r, --release-as VERSION       Select major, minor, patch, or an exact SemVer
+  -p, --prerelease [ID]          Create a prerelease
+  -f, --first-release            Tag the current version without bumping files
+  -t, --tag-prefix PREFIX        Git tag prefix (default: v)
+  -i, --infile FILE              Changelog path (default: CHANGELOG.md)
+      --skip STEP                Skip bump, changelog, commit, or tag (repeat)
+      --path PATH                Limit commit history to a path
+      --lerna-package NAME       Select the bump from NAME@VERSION tags
+      --packageFiles FILE...     Files the current version is read from
+      --bumpFiles FILE...        Version files to update
+      --release-count N          Changelog sections to regenerate (default: 1;
+                                 0 rebuilds all history)
+      --preset NAME              Changelog preset: angular, or the default
+                                 conventional-changelog-conventionalcommits
+      --header TEXT              Changelog header
+      --releaseCommitMessageFormat FORMAT
+                                 Release commit message
+                                 (default: chore(release): {{currentTag}})
+      --commitUrlFormat URL      Commit link format
+      --compareUrlFormat URL     Compare link format
+      --issueUrlFormat URL       Issue link format
+      --userUrlFormat URL        User link format
+      --issuePrefixes PREFIX...  Issue reference prefixes (default: #)
+      --preMajor                 Apply pre-1.0.0 bump rules
+      --noBumpWhenEmptyChanges   Leave the version unchanged when no commit
+                                 selects a bump
+      --git-tag-fallback         Read the version from the latest tag when no
+                                 version file is found (default: on)
+      --tag-force                Replace an existing tag
+  -s, --sign                     Sign the release commit and tag
+      --signoff                  Add a Signed-off-by trailer to the commit
+  -n, --no-verify                Bypass Git commit hooks
+  -a, --commit-all               Also commit every staged change
+      --scripts.EVENT COMMAND    Override one lifecycle script
+      --npmPublishHint TEXT      Publishing hint printed after the release
+      --silent                   Suppress progress output
+  -m, --message FORMAT           Deprecated; use --releaseCommitMessageFormat
+      --changelogHeader TEXT     Deprecated; use --header
+
+Boolean options accept --no-NAME to turn them off.
 ```
 
 `--release-as` accepts `major`, `minor`, `patch`, or an exact SemVer version without the tag prefix. `--skip STEP` can be repeated. CLI flags override the TOML values. `--dry-run` logs configured lifecycle hooks without executing them. With `--lerna-package NAME`, bump recommendation starts after the package's latest stable `NAME@VERSION` tag; changelog ranges and the created release tag continue to use `tagPrefix`. A positive `--release-count` regenerates that many recent release sections and retains older changelog content; `--release-count 0` rebuilds all tagged history.
