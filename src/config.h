@@ -17,12 +17,6 @@ typedef struct {
   char version_pattern[CSEMVER_VALUE_MAX];
   unsigned version_group;
   bool has_version_pattern;
-  bool compatibility_unsupported_type;
-  bool compatibility_unsupported_filename;
-  bool compatibility_updater_argument_object;
-  bool compatibility_updater_type_precedes_filename;
-  bool compatibility_updater_argument_json_valid;
-  char *compatibility_updater_argument_json;
 } CsemverFile;
 
 typedef struct {

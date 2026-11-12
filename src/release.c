@@ -44,7 +44,6 @@
 #define LIFECYCLE_SCRIPT_MAX_BUFFER (1024U * 1024U)
 /* Truncated pipe flush applied when a lifecycle script exceeds its buffer. */
 #define LIFECYCLE_PIPE_ERROR_FLUSH_LIMIT (64U * 1024U)
-#define PACKAGE_UNSUPPORTED_FILENAME "__unsupported_filename"
 
 static int uses_plain_text_updater(const CsemverFile *file);
 
@@ -404,100 +403,6 @@ static int package_path_ends_with(const char *path, const char *suffix) {
   size_t suffix_length = strlen(suffix);
   return path_length >= suffix_length &&
          strcmp(path + path_length - suffix_length, suffix) == 0;
-}
-
-static void print_json_quoted(FILE *stream, const char *value) {
-  const unsigned char *cursor = (const unsigned char *)value;
-  fputc('"', stream);
-  while (*cursor != '\0') {
-    switch (*cursor) {
-    case '"':
-      fputs("\\\"", stream);
-      break;
-    case '\\':
-      fputs("\\\\", stream);
-      break;
-    case '\b':
-      fputs("\\b", stream);
-      break;
-    case '\f':
-      fputs("\\f", stream);
-      break;
-    case '\n':
-      fputs("\\n", stream);
-      break;
-    case '\r':
-      fputs("\\r", stream);
-      break;
-    case '\t':
-      fputs("\\t", stream);
-      break;
-    default:
-      if (*cursor < 0x20)
-        fprintf(stream, "\\u%04x", (unsigned)*cursor);
-      else
-        fputc(*cursor, stream);
-      break;
-    }
-    ++cursor;
-  }
-  fputc('"', stream);
-}
-
-static void warn_unsupported_package_bump_file(const char *filename) {
-  fputs("Unable to obtain updater for: ", stderr);
-  print_json_quoted(stderr, filename);
-  fprintf(stderr,
-          "\n - Error: Unsupported file (%s) provided for bumping.\n"
-          " Please specify the updater `type` or use a custom `updater`.\n"
-          " - Skipping...\n",
-          filename);
-}
-
-static void warn_unsupported_package_bump_file_object(
-    const char *filename, bool argument_json_valid, const char *argument_json) {
-  fputs("Unable to obtain updater for: ", stderr);
-  if (argument_json_valid && argument_json != NULL) {
-    fputs(argument_json, stderr);
-  } else {
-    fputs("{\"filename\":", stderr);
-    print_json_quoted(stderr, filename);
-    fputc('}', stderr);
-  }
-  fprintf(stderr,
-          "\n - Error: Unsupported file (%s) provided for bumping.\n"
-          " Please specify the updater `type` or use a custom `updater`.\n"
-          " - Skipping...\n",
-          filename);
-}
-
-static void warn_unsupported_package_updater_type(const char *filename,
-                                                  const char *type,
-                                                  bool type_precedes_filename,
-                                                  bool argument_json_valid,
-                                                  const char *argument_json) {
-  fputs("Unable to obtain updater for: ", stderr);
-  if (argument_json_valid && argument_json != NULL) {
-    fputs(argument_json, stderr);
-  } else {
-    fputc('{', stderr);
-    if (type_precedes_filename) {
-      fputs("\"type\":", stderr);
-      print_json_quoted(stderr, type);
-      fputs(",\"filename\":", stderr);
-      print_json_quoted(stderr, filename);
-    } else {
-      fputs("\"filename\":", stderr);
-      print_json_quoted(stderr, filename);
-      fputs(",\"type\":", stderr);
-      print_json_quoted(stderr, type);
-    }
-    fputc('}', stderr);
-  }
-  fprintf(stderr,
-          "\n - Error: Unable to locate updater for provided type (%s).\n"
-          " - Skipping...\n",
-          type);
 }
 
 static int set_negated_boolean_option(CsemverConfig *config, const char *key) {
@@ -1088,29 +993,6 @@ static int get_version(const CsemverConfig *config, char *version,
   for (index = 0; index < config->package_file_count; ++index) {
     char *content = NULL;
     char error[256];
-    if (config->package_files[index].compatibility_unsupported_type) {
-      warn_unsupported_package_updater_type(
-          config->package_files[index].filename,
-          config->package_files[index].type,
-          config->package_files[index]
-              .compatibility_updater_type_precedes_filename,
-          config->package_files[index]
-              .compatibility_updater_argument_json_valid,
-          config->package_files[index].compatibility_updater_argument_json);
-      return -1;
-    }
-    if (config->package_files[index].compatibility_unsupported_filename) {
-      if (config->package_files[index].compatibility_updater_argument_object)
-        warn_unsupported_package_bump_file_object(
-            config->package_files[index].filename,
-            config->package_files[index]
-                .compatibility_updater_argument_json_valid,
-            config->package_files[index].compatibility_updater_argument_json);
-      else
-        warn_unsupported_package_bump_file(
-            config->package_files[index].filename);
-      return -1;
-    }
     if (!csemver_read_file(config->package_files[index].filename, &content,
                            NULL))
       continue;
@@ -1624,18 +1506,6 @@ static int update_files(const CsemverConfig *config, const char *version,
     size_t updated_size = 0;
     BumpFileKind file_kind;
     int update_ok;
-    if (config->bump_files[i].compatibility_unsupported_type) {
-      warn_unsupported_package_updater_type(
-          config->bump_files[i].filename, config->bump_files[i].type,
-          config->bump_files[i].compatibility_updater_type_precedes_filename,
-          config->bump_files[i].compatibility_updater_argument_json_valid,
-          config->bump_files[i].compatibility_updater_argument_json);
-      continue;
-    }
-    if (strcmp(config->bump_files[i].type, PACKAGE_UNSUPPORTED_FILENAME) == 0) {
-      warn_unsupported_package_bump_file(config->bump_files[i].filename);
-      continue;
-    }
     if (csemver_path_is_gitignored(config->bump_files[i].filename)) {
       printf("Not updating file '%s', as it is ignored in Git\n",
              config->bump_files[i].filename);
