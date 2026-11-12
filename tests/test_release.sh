@@ -240,7 +240,7 @@ grep -Fq '* **cli:** scripts must update to the new output.' CHANGELOG.md
 grep -Fq '* **cli:** change output format' CHANGELOG.md
 grep -Fq 'references [#99](https://github.com/example/breaking/issues/99)' CHANGELOG.md
 grep -Fq 'closes [#98](https://github.com/example/breaking/issues/98)' CHANGELOG.md
-# An issue reference ends in a digit, as upstream's [\w-]*\d+ requires: a method
+# An issue reference matches [\w-]*\d+ and so ends in a digit: a method
 # name such as Webhook#deliver or a bare #retry is prose, not an issue.
 if grep -Eq '#(deliver|retry)' CHANGELOG.md; then
   echo 'prose after # was rendered as an issue reference' >&2
@@ -292,7 +292,7 @@ git commit -qm 'feat: include first-release section'
 first_release_heading=$(grep -m 1 '^## ' CHANGELOG.md)
 case "$first_release_heading" in
   '## 1.0.0 ('*) ;;
-  *) printf 'first release heading is not in upstream format: %s\n' "$first_release_heading" >&2; exit 1 ;;
+  *) printf 'first release heading has an unexpected format: %s\n' "$first_release_heading" >&2; exit 1 ;;
 esac
 first_release_heading_line=$(grep -m 1 -n '^## 1.0.0 (' CHANGELOG.md | cut -d: -f1)
 first_release_section_line=$(grep -m 1 -n '^### Features$' CHANGELOG.md | cut -d: -f1)
@@ -854,7 +854,7 @@ git revert --no-edit "$default_reverted_hash" > /dev/null 2>&1 ||
 git commit --allow-empty -qm 'feat(map): accept a dash pattern'
 "$bin" --release-as 1.1.0 --skip commit --skip tag > /dev/null
 grep -q 'draw route legs' CHANGELOG.md || {
-  printf 'default preset must keep a reverted commit, as upstream 12.5.0 does\n' >&2
+  printf 'default preset must keep a reverted commit\n' >&2
   exit 1
 }
 git checkout -q -- package.json
@@ -1052,7 +1052,7 @@ printf '%s\n' "$pre_major_preview" | \
 default_pre_major_preview=$("$bin" --dry-run)
 printf '%s\n' "$default_pre_major_preview" | \
   grep -q 'bumping version in package.json from 0.1.0 to 0.1.1' || {
-    printf 'upstream should automatically apply pre-major rules below 1.0.0:\n%s\n' \
+    printf 'pre-major rules should apply automatically below 1.0.0:\n%s\n' \
       "$default_pre_major_preview" >&2
     exit 1
   }
@@ -1071,14 +1071,14 @@ printf '%s\n' "$types_override_preview" | grep -Fq '## [0.1.1]' || {
     exit 1
 }
 if printf '%s\n' "$types_override_preview" | grep -Fq '### Features'; then
-    printf 'string entries in upstream types array should not match commit objects\n' >&2
+    printf 'string entries in a --types array should not match commits\n' >&2
     exit 1
 fi
 git commit --allow-empty -m 'feat!: change the contract' -m 'BREAKING CHANGE: incompatible API.'
 breaking_preview=$("$bin" --dry-run)
 printf '%s\n' "$breaking_preview" | \
   grep -q 'bumping version in package.json from 0.1.0 to 0.2.0' || {
-    printf 'upstream should bump a 0.x breaking change to minor:\n%s\n' \
+    printf 'a 0.x breaking change should bump minor:\n%s\n' \
       "$breaking_preview" >&2
     exit 1
   }
@@ -2345,7 +2345,7 @@ printf '%s\n' "$malformed_package_preview" | \
   }
 printf '%s\n' "$malformed_package_preview" | \
   grep -Fq "Unexpected token '}', ...\"\"version\":}" || {
-    printf 'malformed package diagnostic did not match upstream:\n%s\n' \
+    printf 'malformed package diagnostic changed:\n%s\n' \
       "$malformed_package_preview" >&2
     exit 1
   }
@@ -2540,7 +2540,7 @@ cmp "$tmp/extglob-comma-a,b.expected" 'a,b.json'
 cmp "$tmp/extglob-comma-c.expected" c.json
 grep -q '"version": "1.0.1"' b.json
 
-# Multiple and nested extglob groups match like minimatch.
+# Multiple and nested extglob groups match each alternative.
 mkdir "$tmp/extglob-multiple-groups"
 cd "$tmp/extglob-multiple-groups"
 git init -q -b master
@@ -4108,8 +4108,8 @@ grep -F -x -q '✔ committing CHANGELOG.md' \
 test "$(git tag --list)" = "$(printf 'v1.2.3\nv1.2.4')"
 test -z "$(git status --porcelain)"
 
-mkdir "$tmp/generic-pattern-failure-upstream-compatible"
-cd "$tmp/generic-pattern-failure-upstream-compatible"
+mkdir "$tmp/generic-pattern-failure-continues"
+cd "$tmp/generic-pattern-failure-continues"
 git init -q -b master
 git config user.name 'C Semver Test'
 git config user.email 'test@example.invalid'

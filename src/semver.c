@@ -62,8 +62,9 @@ static int validate_identifiers(const char *start, size_t length,
   return 1;
 }
 
-/* The SemVer parser trims the whitespace characters the upstream runtime
- * treats as whitespace, which includes the ECMAScript set beyond ASCII. */
+/* Surrounding whitespace is trimmed before parsing: ASCII whitespace plus the
+ * Unicode space separators, line/paragraph separators and BOM (the
+ * ECMAScript whitespace set), so a version file saved by any editor parses. */
 static size_t trim_whitespace_length(const unsigned char *text,
                                     size_t remaining) {
   if (remaining == 0)

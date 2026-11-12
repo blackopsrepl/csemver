@@ -47,7 +47,7 @@ static void test_json_round_trip(void) {
   free(updated);
 }
 
-static void test_json_compact_input_uses_default_upstream_indent(void) {
+static void test_json_compact_input_uses_default_indent(void) {
   const char *input = "{\"name\":\"fixture\",\"version\":\"1.2.3\","
                       "\"repository\":{\"type\":\"git\","
                       "\"url\":\"https://github.com/example/project.git\"}}\n";
@@ -71,7 +71,7 @@ static void test_json_compact_input_uses_default_upstream_indent(void) {
   free(updated);
 }
 
-static void test_json_escape_sequences_normalize_like_upstream(void) {
+static void test_json_escape_sequences_normalize(void) {
   const char *input = "{\"name\":\"\\u0066ixture\\/x\",\"version\":\"1.2.3\"}";
   const char *expected = "{\n  \"name\": \"fixture/x\",\n"
                          "  \"version\": \"1.3.0\"\n}\n";
@@ -88,7 +88,7 @@ static void test_json_escape_sequences_normalize_like_upstream(void) {
   free(updated);
 }
 
-static void test_json_number_spelling_normalizes_like_upstream(void) {
+static void test_json_number_spelling_normalizes(void) {
   const char *input = "{\"name\":\"fixture\",\"version\":\"1.2.3\","
                       "\"weight\":1.0}";
   const char *expected = "{\n  \"name\": \"fixture\",\n"
@@ -107,7 +107,7 @@ static void test_json_number_spelling_normalizes_like_upstream(void) {
   free(updated);
 }
 
-static void test_json_integer_keys_reorder_like_upstream(void) {
+static void test_json_integer_keys_reorder_first(void) {
   const char *input = "{\"name\":\"fixture\",\"version\":\"1.2.3\","
                       "\"10\":\"ten\",\"2\":\"two\"}";
   const char *expected = "{\n  \"2\": \"two\",\n"
@@ -353,7 +353,7 @@ static void test_package_lock_adds_missing_root_version_fields(void) {
   free(updated);
 }
 
-static void test_plain_text_preserves_upstream_write_semantics(void) {
+static void test_plain_text_write_replaces_whole_file(void) {
   char version[128];
   char error[256];
   char *updated = NULL;
@@ -423,7 +423,7 @@ static void test_toml_and_yaml_surface(void) {
   free(updated);
 }
 
-static void test_yaml_strips_leading_blank_lines_like_upstream(void) {
+static void test_yaml_strips_leading_blank_lines(void) {
   const struct {
     const char *input;
     const char *expected;
@@ -598,7 +598,7 @@ static void test_openapi_uses_info_version_not_nested_schema_version(void) {
   free(updated);
 }
 
-static void test_openapi_flow_maps_match_upstream_spacing(void) {
+static void test_openapi_flow_map_spacing(void) {
   const char *input = "{openapi: 3.0.3, info: {version: 1.2.3}}\n";
   const char *expected = "{ openapi: 3.0.3, info: { version: 1.3.0 } }\n";
   char version[128];
@@ -617,7 +617,7 @@ static void test_openapi_flow_maps_match_upstream_spacing(void) {
   free(updated);
 }
 
-static void test_openapi_multiline_flow_comment_matches_upstream(void) {
+static void test_openapi_multiline_flow_comment(void) {
   const char *input =
       "{openapi: 3.0.3, info: {version: 1.2.3}, # cmt\npaths: {}}\n";
   const char *expected =
@@ -655,8 +655,7 @@ static void test_yaml_multiline_flow_map_without_comments_collapses(void) {
   free(updated);
 }
 
-static void
-test_yaml_multiline_flow_comment_before_close_matches_upstream(void) {
+static void test_yaml_multiline_flow_comment_before_close(void) {
   const char *input = "{version: 1.2.3, # cmt\n}\n";
   const char *expected = "{ version: 1.3.0 } # cmt\n";
   char version[128];
@@ -739,7 +738,7 @@ test_yaml_multiline_flow_consecutive_comments_with_blank_line(void) {
   free(updated);
 }
 
-static void test_yaml_multiline_nested_flow_comment_matches_upstream(void) {
+static void test_yaml_multiline_nested_flow_comment(void) {
   const char *input = "{version: 1.2.3, other: { # inner\nx: y}, more: z}\n";
   const char *expected = "{\n  version: 1.3.0,\n  other:\n    {\n      # "
                          "inner\n      x: y\n    },\n  more: z\n}\n";
@@ -848,8 +847,7 @@ static void test_yaml_multiline_nested_flow_sequence_multiple_comments(void) {
   free(updated);
 }
 
-static void
-test_yaml_leading_nested_flow_sequence_comment_matches_upstream_error(void) {
+static void test_yaml_leading_nested_flow_sequence_comment_error(void) {
   const char *input = "{version: 1.2.3, other: [# lead\na, b]}\n";
   char version[128];
   char error[256] = "";
@@ -863,8 +861,7 @@ test_yaml_leading_nested_flow_sequence_comment_matches_upstream_error(void) {
   free(updated);
 }
 
-static void
-test_yaml_and_openapi_multiple_documents_match_upstream_error(void) {
+static void test_yaml_and_openapi_multiple_documents_error(void) {
   const char *multiple_documents[] = {
       "version: 1.2.3\n---\nother: value\n",
       "version: 1.2.3\n...\n---\nother: value\n",
@@ -931,7 +928,7 @@ static void test_yaml_bare_cr_rows_match_stringifier_error(void) {
   }
 }
 
-static void test_yaml_quoted_bare_cr_matches_upstream_escape(void) {
+static void test_yaml_quoted_bare_cr_escape(void) {
   const char *input = "version: \"1.2.3\"\ntext: \"first\rsecond\"\n";
   const char *expected = "version: \"1.3.0\"\ntext: \"first\\rsecond\"\n";
   char version[128];
@@ -947,7 +944,7 @@ static void test_yaml_quoted_bare_cr_matches_upstream_escape(void) {
   free(updated);
 }
 
-static void test_yaml_plain_bare_cr_matches_upstream_escape(void) {
+static void test_yaml_plain_bare_cr_escape(void) {
   const char *input = "version: \"1.2.3\"\ntext: first\rsecond\n";
   const char *expected = "version: \"1.3.0\"\ntext: \"first\\rsecond\"\n";
   char version[128];
@@ -963,7 +960,7 @@ static void test_yaml_plain_bare_cr_matches_upstream_escape(void) {
   free(updated);
 }
 
-static void test_yaml_flow_bare_cr_many_values_match_upstream(void) {
+static void test_yaml_flow_bare_cr_many_values(void) {
   const size_t value_count = 10000;
   const size_t capacity = value_count * 16 + 32;
   char *input = malloc(capacity);
@@ -1005,7 +1002,7 @@ static void test_yaml_flow_bare_cr_many_values_match_upstream(void) {
   free(input);
 }
 
-static void test_yaml_plain_bare_cr_matrix_matches_upstream(void) {
+static void test_yaml_plain_bare_cr_matrix(void) {
   const struct {
     const char *filename;
     const char *type;
@@ -1075,7 +1072,7 @@ static void test_yaml_plain_bare_cr_matrix_matches_upstream(void) {
   }
 }
 
-static void test_yaml_nested_flow_comment_matches_upstream(void) {
+static void test_yaml_nested_flow_comment(void) {
   const struct {
     const char *input;
     const char *expected;
@@ -1387,7 +1384,7 @@ test_yaml_block_sequence_comment_dedents_overindented_literal(void) {
   free(updated);
 }
 
-static void test_yaml_folded_scalar_serialization_matches_upstream(void) {
+static void test_yaml_folded_scalar_serialization(void) {
   static const struct {
     const char *input;
     const char *expected;
@@ -1417,7 +1414,7 @@ static void test_yaml_folded_scalar_serialization_matches_upstream(void) {
   }
 }
 
-static void test_yaml_no_newline_matches_upstream_output(void) {
+static void test_yaml_no_trailing_newline(void) {
   const char *input = "version: 1.2.3";
   const char *expected = "version: 1.3.0undefined";
   char version[128];
@@ -1433,7 +1430,7 @@ static void test_yaml_no_newline_matches_upstream_output(void) {
   free(updated);
 }
 
-static void test_yaml_mixed_newlines_match_upstream(void) {
+static void test_yaml_mixed_newlines(void) {
   const char *input = "a: b\r\nversion: 1.2.3\n";
   const char *expected = "a: b\nversion: 1.3.0\n";
   char version[128];
@@ -1449,7 +1446,7 @@ static void test_yaml_mixed_newlines_match_upstream(void) {
   free(updated);
 }
 
-static void test_gradle_updater_matches_upstream(void) {
+static void test_gradle_updater(void) {
   const char *input =
       "plugins { }\n\nversion='6.3.1'\njava.sourceCompatibility = 8\n";
   const char *expected =
@@ -1491,7 +1488,7 @@ static void test_gradle_updater_handles_carriage_return_lines(void) {
   free(updated);
 }
 
-static void test_csproj_updater_matches_upstream(void) {
+static void test_csproj_updater(void) {
   const char *input =
       "<Project>\n    <PropertyGroup>\n        <Version>6.3.1</Version>\n"
       "    </PropertyGroup>\n</Project>\n";
@@ -1514,7 +1511,7 @@ static void test_csproj_updater_matches_upstream(void) {
   free(updated);
 }
 
-static void test_maven_updater_matches_upstream(void) {
+static void test_maven_updater(void) {
   const char *input = "<project>\n  <version>6.3.1</version>\n</project>";
   const char *expected =
       "<project>\n  <version>6.4.0</version>\n</project>\n\n";
@@ -1619,7 +1616,7 @@ static void test_maven_property_and_invalid_shapes(void) {
   free(updated);
 }
 
-static void test_python_updater_preserves_upstream_first_match(void) {
+static void test_python_updater_rewrites_first_match(void) {
   const char *input = "# VERSION = '6.3.1'\nversion = \"6.3.1\"\n";
   const char *expected = "# VERSION = '6.4.0'\nversion = \"6.3.1\"\n";
   const char *unmatched = "version =\t\"6.3.1\"\n";
@@ -1648,10 +1645,10 @@ static void test_python_updater_preserves_upstream_first_match(void) {
 int main(void) {
   test_repository_url_forms();
   test_json_round_trip();
-  test_json_compact_input_uses_default_upstream_indent();
-  test_json_escape_sequences_normalize_like_upstream();
-  test_json_number_spelling_normalizes_like_upstream();
-  test_json_integer_keys_reorder_like_upstream();
+  test_json_compact_input_uses_default_indent();
+  test_json_escape_sequences_normalize();
+  test_json_number_spelling_normalizes();
+  test_json_integer_keys_reorder_first();
   test_json_duplicate_version_uses_last_value();
   test_json_unicode_escapes_in_version_key_and_value();
   test_json_key_with_embedded_nul_does_not_match_version();
@@ -1666,37 +1663,37 @@ int main(void) {
   test_package_lock_updates_only_root_package();
   test_package_lock_adds_missing_root_package_version();
   test_package_lock_adds_missing_root_version_fields();
-  test_plain_text_preserves_upstream_write_semantics();
+  test_plain_text_write_replaces_whole_file();
   test_pattern_updater_replaces_only_selected_capture();
   test_toml_and_yaml_surface();
-  test_yaml_strips_leading_blank_lines_like_upstream();
+  test_yaml_strips_leading_blank_lines();
   test_yaml_separates_trailing_root_comments();
   test_yaml_removes_trailing_spaces_after_plain_version();
   test_yaml_normalizes_trailing_spaces_around_version();
   test_openapi_normalizes_version_mapping_spacing();
   test_openapi_uses_info_version_not_nested_schema_version();
-  test_openapi_flow_maps_match_upstream_spacing();
-  test_openapi_multiline_flow_comment_matches_upstream();
+  test_openapi_flow_map_spacing();
+  test_openapi_multiline_flow_comment();
   test_yaml_multiline_flow_map_without_comments_collapses();
-  test_yaml_multiline_flow_comment_before_close_matches_upstream();
+  test_yaml_multiline_flow_comment_before_close();
   test_yaml_multiline_flow_comment_on_own_line();
   test_yaml_multiline_flow_leading_comment();
   test_yaml_multiline_flow_consecutive_comments();
   test_yaml_multiline_flow_consecutive_comments_with_blank_line();
-  test_yaml_multiline_nested_flow_comment_matches_upstream();
+  test_yaml_multiline_nested_flow_comment();
   test_yaml_multiline_nested_flow_comment_after_entry();
   test_yaml_multiline_nested_flow_sequence_comment();
   test_yaml_multiline_nested_flow_sequence_consecutive_comments();
   test_yaml_multiline_nested_flow_sequence_three_items();
   test_yaml_multiline_nested_flow_sequence_multiple_comments();
-  test_yaml_leading_nested_flow_sequence_comment_matches_upstream_error();
-  test_yaml_and_openapi_multiple_documents_match_upstream_error();
+  test_yaml_leading_nested_flow_sequence_comment_error();
+  test_yaml_and_openapi_multiple_documents_error();
   test_yaml_bare_cr_rows_match_stringifier_error();
-  test_yaml_quoted_bare_cr_matches_upstream_escape();
-  test_yaml_plain_bare_cr_matches_upstream_escape();
-  test_yaml_flow_bare_cr_many_values_match_upstream();
-  test_yaml_plain_bare_cr_matrix_matches_upstream();
-  test_yaml_nested_flow_comment_matches_upstream();
+  test_yaml_quoted_bare_cr_escape();
+  test_yaml_plain_bare_cr_escape();
+  test_yaml_flow_bare_cr_many_values();
+  test_yaml_plain_bare_cr_matrix();
+  test_yaml_nested_flow_comment();
   test_yaml_normalizes_explicit_version_mapping_key();
   test_yaml_duplicate_version_key_reports_stringifier_error();
   test_yaml_block_mapping_leading_flow_sequence_comment_matches_error();
@@ -1709,17 +1706,17 @@ int main(void) {
   test_yaml_block_sequence_comment_dedents_block_scalar();
   test_yaml_block_sequence_comment_scalar_styles();
   test_yaml_block_sequence_comment_dedents_overindented_literal();
-  test_yaml_folded_scalar_serialization_matches_upstream();
-  test_yaml_no_newline_matches_upstream_output();
-  test_yaml_mixed_newlines_match_upstream();
+  test_yaml_folded_scalar_serialization();
+  test_yaml_no_trailing_newline();
+  test_yaml_mixed_newlines();
   test_yaml_updater_only_updates_root_version();
   test_yaml_version_alias_is_replaced_not_anchor_target();
-  test_gradle_updater_matches_upstream();
+  test_gradle_updater();
   test_gradle_updater_handles_carriage_return_lines();
-  test_csproj_updater_matches_upstream();
-  test_maven_updater_matches_upstream();
+  test_csproj_updater();
+  test_maven_updater();
   test_maven_property_and_invalid_shapes();
-  test_python_updater_preserves_upstream_first_match();
+  test_python_updater_rewrites_first_match();
   puts("version file tests passed");
   return 0;
 }

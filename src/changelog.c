@@ -528,8 +528,8 @@ static int collect_body_references(const CsemverConfig *config,
         issue_end = issue_start;
         while (issue_end < line_end && is_reference_word_char(*issue_end))
           ++issue_end;
-        /* Upstream's issue pattern is [\w-]*\d+: an issue id ends in a digit,
-           so `Webhook#deliver` or a bare `#retry` is prose, not a reference. */
+        /* An issue id matches [\w-]*\d+ and so ends in a digit:
+           `Webhook#deliver` or a bare `#retry` is prose, not a reference. */
         if (issue_end == issue_start ||
             !isdigit((unsigned char)issue_end[-1]) ||
             (issue_end < line_end && *issue_end != ' ' && *issue_end != '\t' &&
@@ -872,8 +872,8 @@ static int compare_breaking_notes(const BreakingNote *left,
   }
 }
 
-/* Upstream sorts group titles (and tags) with the writer's case-insensitive
- * comparator, which places untitled groups first. */
+/* Group titles (and tags) sort case-insensitively, which places untitled
+ * groups first. */
 static int case_insensitive_compare(const char *left, const char *right) {
   const unsigned char *a = (const unsigned char *)left;
   const unsigned char *b = (const unsigned char *)right;
@@ -999,9 +999,9 @@ int csemver_changelog_section(const CsemverConfig *config, const Commit *commits
   for (i = 0; i < group_count; ++i)
     group_order[i] = i;
   if (angular) {
-    /* Upstream sorts commit groups by title with the writer's
-     * case-insensitive comparator; untitled groups (only possible when a
-     * hidden type is forced visible by a breaking note) sort first. */
+    /* Angular sorts commit groups by title, case-insensitively; untitled
+     * groups (only possible when a hidden type is forced visible by a
+     * breaking note) sort first. */
     for (i = 1; i < group_count; ++i) {
       size_t group_index = group_order[i];
       size_t j = i;
@@ -1151,10 +1151,10 @@ int csemver_append_release_heading(const CsemverConfig *config,
   if (previous_tag != NULL)
     return append_compare_heading(config, output, base, version, previous_tag,
                                   tag, date);
-  /* Upstream back-fills the compare base for a section that has no older
-   * release tag: the oldest commit in the section's own range becomes
-   * previousTag and the compare link is still emitted, even when the host
-   * base is empty (yielding a ///compare/... link). */
+  /* A section with no older release tag compares from the oldest commit in
+   * its own range: that commit becomes previousTag and the compare link is
+   * still emitted, even when the host base is empty (yielding a
+   * ///compare/... link). */
   if (fallback_previous != NULL)
     return append_compare_heading(config, output, base, version,
                                   fallback_previous, tag, date);

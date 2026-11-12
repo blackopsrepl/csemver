@@ -728,7 +728,9 @@ int csemver_config_set_array(CsemverConfig *config, const char *key,
   size_t index;
 
   if (strcmp(key, "types") == 0) {
-    /* yargs passes these config-spec array entries as strings, not objects. */
+    /* Command-line --types values are bare strings, which carry no section or
+       visibility, so they clear the type list instead of defining types.
+       Custom types are declared in csemver.toml. */
     config->commit_type_count = 0;
     return 1;
   }

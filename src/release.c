@@ -178,9 +178,9 @@ static int run_git_capture_streams(const char *const args[],
   return 1;
 }
 
-static int append_git_execfile_error(const char *const args[],
-                                     const char *git_stderr,
-                                     CsemverBuffer *message) {
+static int append_git_failure_message(const char *const args[],
+                                      const char *git_stderr,
+                                      CsemverBuffer *message) {
   size_t index;
   if (!csemver_buffer_append(message, "Command failed: git",
                              sizeof("Command failed: git") - 1))
@@ -193,14 +193,13 @@ static int append_git_execfile_error(const char *const args[],
           csemver_buffer_append(message, git_stderr, strlen(git_stderr)));
 }
 
-static void print_execfile_error(const char *message) {
+static void print_git_failure(const char *message) {
   fputs(message, stderr);
   fputc('\n', stderr);
 }
 
-static int run_git_execfile(const CsemverConfig *config,
-                            const char *const args[], char **output,
-                            int *status) {
+static int run_git_step(const CsemverConfig *config, const char *const args[],
+                        char **output, int *status) {
   char *git_stdout = NULL;
   char *git_stderr = NULL;
   if (!run_git_capture_streams(args, &git_stdout, &git_stderr, status)) {
@@ -209,7 +208,8 @@ static int run_git_execfile(const CsemverConfig *config,
     return 0;
   }
   if (*status == 0) {
-    /* Match upstream's console.warn newline for execFile stderr. */
+    /* Relay a successful git command's stderr as a warning, followed by a
+       blank line. */
     if (git_stderr[0] != '\0' && !config->silent) {
       fputs(git_stderr, stderr);
       fputc('\n', stderr);
@@ -219,14 +219,14 @@ static int run_git_execfile(const CsemverConfig *config,
     int error_message_valid;
     csemver_buffer_init(&error_message);
     error_message_valid =
-        append_git_execfile_error(args, git_stderr, &error_message);
+        append_git_failure_message(args, git_stderr, &error_message);
     if (!config->silent) {
       if (git_stderr[0] != '\0')
-        print_execfile_error(git_stderr);
+        print_git_failure(git_stderr);
       else if (error_message_valid)
-        print_execfile_error(error_message.data);
+        print_git_failure(error_message.data);
       if (error_message_valid)
-        print_execfile_error(error_message.data);
+        print_git_failure(error_message.data);
     }
     csemver_buffer_free(&error_message);
   }
@@ -583,7 +583,7 @@ static int parse_args(int argc, char **argv, CsemverConfig *config,
     }
     if (set_negated_boolean_option(config, key))
       continue;
-    /* Upstream yargs accepts unknown flags and positional arguments. */
+    /* Unknown flags and positional arguments are ignored. */
     continue;
   }
   if (cli_package_files_set) {
@@ -1218,9 +1218,8 @@ static int release_as_is_valid(const char *release_as) {
          strcmp(release_type, "patch") == 0;
 }
 
-/* Upstream validates these types case-insensitively but later passes the
- * original spelling to semver.inc, which yields null for mixed-case values.
- */
+/* A release type spelled with different case (`Major`) passes validation
+ * but selects no bump, and the release version becomes the literal `null`. */
 static int release_as_type_case_mismatch(const char *release_as) {
   static const char *const release_types[] = {"major", "minor", "patch"};
   size_t type_index;
@@ -1558,7 +1557,7 @@ static int commit_release(CsemverConfig *config, const char *version,
     args[index++] = "add";
     index = append_release_paths(config, paths, path_count, args, index);
     args[index] = NULL;
-    if (!run_git_execfile(config, args, NULL, &status)) {
+    if (!run_git_step(config, args, NULL, &status)) {
       errorf("git add failed");
       return 0;
     }
@@ -1568,7 +1567,7 @@ static int commit_release(CsemverConfig *config, const char *version,
   } else if (config->commit_all) {
     args[index++] = "add";
     args[index] = NULL;
-    if (!run_git_execfile(config, args, NULL, &status) || status != 0)
+    if (!run_git_step(config, args, NULL, &status) || status != 0)
       return 0;
     index = 0;
   }
@@ -1584,7 +1583,7 @@ static int commit_release(CsemverConfig *config, const char *version,
   args[index++] = "-m";
   args[index++] = message;
   args[index] = NULL;
-  if (!run_git_execfile(config, args, NULL, &status)) {
+  if (!run_git_step(config, args, NULL, &status)) {
     errorf("git commit failed");
     return 0;
   }
@@ -1622,7 +1621,7 @@ static int tag_release(const CsemverConfig *config, const char *tag,
   args[index++] = "-m";
   args[index++] = message;
   args[index] = NULL;
-  if (!run_git_execfile(config, args, NULL, &status)) {
+  if (!run_git_step(config, args, NULL, &status)) {
     errorf("git tag failed for %s", tag);
     return 0;
   }

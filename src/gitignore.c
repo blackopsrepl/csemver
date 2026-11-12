@@ -91,7 +91,7 @@ static int ignore_path_pattern_matches(const char *pattern,
 static int ignore_pattern_matches_core(const char *pattern,
                                        const char *filename, int rooted);
 
-/* Match minimatch @(a|b) alternatives directly, trying each alternative as its
+/* Match @(a|b) extglob alternatives directly, trying each alternative as its
    own pattern. This avoids lowering '|' to brace-comma syntax, which would
    confuse a literal comma inside an alternative with an alternative split. */
 static int ignore_extglob_alternative_matches(const char *pattern,
@@ -611,8 +611,8 @@ static int ignore_pattern_matches_core(const char *pattern,
   }
 }
 
-static size_t minimatch_whitespace_length(const unsigned char *text,
-                                          size_t length) {
+static size_t pattern_whitespace_length(const unsigned char *text,
+                                        size_t length) {
   if (length == 0)
     return 0;
   if (text[0] == 0x09 || text[0] == 0x0a ||
@@ -661,13 +661,13 @@ static int ignore_pattern_matches(const char *pattern, const char *filename,
   char *trimmed;
   int matches;
   while ((whitespace =
-              minimatch_whitespace_length(text + start, length - start)) != 0)
+              pattern_whitespace_length(text + start, length - start)) != 0)
     start += whitespace;
   if (start == length || text[start] == '#')
     return 0;
   offset = retained = start;
   while (offset < length) {
-    whitespace = minimatch_whitespace_length(text + offset, length - offset);
+    whitespace = pattern_whitespace_length(text + offset, length - offset);
     if (whitespace != 0) {
       offset += whitespace;
       continue;
