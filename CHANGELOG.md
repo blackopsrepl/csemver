@@ -1,6 +1,21 @@
 # Changelog
 
-All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
+All notable changes to this project will be documented in this file. See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
+
+## [0.4.0](https://github.com/blackopsrepl/csemver/compare/v0.3.4...v0.4.0) (2026-11-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** the build/commit-and-tag-version symlink is gone; invoke csemver as csemver. --version always prints the build version.
+
+### Features
+
+* **changelog:** point the default header at Conventional Commits ([0a79092](https://github.com/blackopsrepl/csemver/commit/0a79092553d8a024eabb5bb4a6a7df93b7ad9eaf))
+* **cli:** print csemver's own help text ([41220a1](https://github.com/blackopsrepl/csemver/commit/41220a1ca1436197f145eee5d48c847fa013d0bb))
+* **cli:** remove the commit-and-tag-version alias ([3ca5fb9](https://github.com/blackopsrepl/csemver/commit/3ca5fb9f1c8e33ebaeeddd3c234db34fe4622549))
+* **cli:** speak as csemver in deprecation and preset diagnostics ([3e70439](https://github.com/blackopsrepl/csemver/commit/3e704396dd00699f32c240a3279d136fd7040979))
+
 
 ## [0.3.4](https://github.com/blackopsrepl/csemver/compare/v0.3.3...v0.3.4) (2026-11-07)
 
